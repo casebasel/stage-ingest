@@ -574,16 +574,18 @@ async fn im_hintergrund<T: Send + 'static>(
     tauri::async_runtime::spawn_blocking(f).await.map_err(|e| e.to_string())?
 }
 
-/// Zugang prüfen und das Passwort im Schlüsselbund ablegen.
+/// Mit dem persönlichen Konto anmelden, Passwort im Schlüsselbund ablegen. Ohne Passwort: das gemerkte nehmen.
 #[tauri::command]
 async fn plate_anmelden(
     plate: State<'_, Arc<plate::Plate>>,
     zugang: plate::Zugang,
     passwort: String,
-) -> Result<(), String> {
+) -> Result<plate::Anmeldung, String> {
     let p = Arc::clone(&plate);
     im_hintergrund(move || {
-        plate::passwort_merken(&zugang.email, &passwort)?;
+        if !passwort.is_empty() {
+            plate::passwort_merken(&zugang.email, &passwort)?;
+        }
         p.anmelden_pruefen(&zugang)
     })
     .await

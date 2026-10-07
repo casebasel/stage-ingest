@@ -1,5 +1,6 @@
 // Plate Assistant: Projekt und Drehort aus der gemeinsamen Supabase wählen (Vertrag plate-assistant docs/ABGLEICH.md).
-// Adresse, Anon-Key und E-Mail bleiben auf diesem Rechner (localStorage), das Passwort im Schlüsselbund des Systems.
+// Anmeldung mit dem persönlichen Konto wie im iPhone. E-Mail bleibt auf diesem Rechner, das Passwort im Schlüsselbund.
+// Löschen (HDRI-Rohdaten) und Meldungen nur mit dem Kennzeichen „ingest“ am Konto (setzt Marlon).
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -44,6 +45,7 @@ export function PlateAssistant(p: {
   const [erweitert, setErweitert] = useState(!VORGABE_ADRESSE || !VORGABE_ANON);
   const [passwort, setPasswort] = useState("");
   const [zustand, setZustand] = useState<{ ok: boolean; text: string } | null>(null);
+  const [konto, setKonto] = useState<{ email: string; ingestRecht: boolean } | null>(null);
   const [projekte, setProjekte] = useState<Projekt[]>([]);
   const [drehs, setDrehs] = useState<DrehKurz[]>([]);
   const [neu, setNeu] = useState<{ name: string; kurzname: string; fehler: string | null } | null>(null);
@@ -65,13 +67,20 @@ export function PlateAssistant(p: {
   }
 
   useEffect(() => {
-    laden();
+    // Beim Start mit dem gemerkten Passwort aus dem Schlüsselbund anmelden (still, wenn keins da ist).
+    if (bereit)
+      invoke<{ email: string; ingestRecht: boolean }>("plate_anmelden", { zugang, passwort: "" })
+        .then((k) => {
+          setKonto(k);
+          laden();
+        })
+        .catch(() => {});
   }, []);
 
   async function anmelden() {
     merken("zugang", zugang);
     try {
-      await invoke("plate_anmelden", { zugang, passwort });
+      setKonto(await invoke("plate_anmelden", { zugang, passwort }));
       setPasswort("");
       await laden();
     } catch (e) {
@@ -157,6 +166,12 @@ export function PlateAssistant(p: {
             )}
           </div>
         </>
+      )}
+      {konto && (
+        <span className="k-leise k-klein">
+          Angemeldet als <span className="mono">{konto.email}</span>
+          {!konto.ingestRecht && " · Löschen nicht freigegeben (nur lesen und Projekte anlegen)"}
+        </span>
       )}
       {zustand && (
         <span className={`k-lampe ${zustand.ok ? "k-lampe-ok" : "k-lampe-warn"} k-klein`}>

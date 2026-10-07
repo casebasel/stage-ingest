@@ -68,3 +68,9 @@ Gewünscht: Karte freigegeben (wann), Speicherort, `aus_clip` je Take, HDRI-Zust
 - Storage: Bucket `hdri`, `<hdri_id>/<frame_id>.dng|.heic`, `vorschau.jpg`, `metadata.json` (`format_version: 1`). DNG unverändert mit Metadaten und OpcodeLists. TUS-Upload.
 - Löschen: Marlon hat entschieden (Systemkarte 3ee75ff), dass der Ingest die Rohdaten im Bucket `hdri` löscht, **erst nach geprüfter Ablage und Bericht ok**. Das Recht kommt als eigene Migration des Plate Assistant.
 - Löschregel (Migration 0014, angewendet 07.10.2026 zusammen mit 0012/0013; hdri, hdri_frame und Bucket hdri lesbar, Grenze 50 MB je Datei, Aufnahmen erst ab Build 6): nur der Benutzer `ingest`, nur Dateien unter `<hdri_id>/…`, deren `hdri`-Zeile `zustand = 'uploaded'` oder `geloescht = true` hat. Sonst löscht der Server still 0 Dateien: **Zahl der wirklich gelöschten Objekte prüfen.** Andere Buckets tabu, Zeilen `hdri`/`hdri_frame` bleiben. Weg: `DELETE /storage/v1/object/hdri` mit `{"prefixes": [...]}`.
+
+## Anmeldung (entschieden 07.10.2026, Systemkarte d16b393)
+
+- Stage Ingest meldet sich mit dem **persönlichen Konto** an wie das iPhone; der Technik-Benutzer `ingest` entfällt.
+- **HDRI löschen und `ingest_meldung` schreiben** darf nur ein Konto mit `app_metadata.ingest = true` (setzt Marlon pro Person, der Server prüft). Ohne das Kennzeichen: lesen und Projekte anlegen; die App zeigt „Löschen nicht freigegeben“.
+- Adresse und Anon-Key setzt der Release-Build aus den Repository-Variablen `SUPABASE_ADRESSE` und `SUPABASE_ANON_KEY` ein (`docs/RELEASING.md`).

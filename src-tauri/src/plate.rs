@@ -1,6 +1,7 @@
-//! Zugang zur gemeinsamen Supabase des Plate Assistant (Vertrag: plate-assistant `docs/ABGLEICH.md`,
-//! Systemkarte 3e1050f). Eigener Benutzer mit `app_metadata.app = "ingest"`: liest dreh, plate, take, projekt;
-//! schreibt nur `projekt`, und nur über `aenderungen_anwenden`.
+//! Zugang zur gemeinsamen Supabase (Vertrag: plate-assistant `docs/ABGLEICH.md`). Anmeldung mit dem
+//! persönlichen Konto wie im iPhone (Systemkarte d16b393). Der Ingest liest dreh, plate, take, foto, hdri, projekt
+//! und schreibt per Code nur `projekt` (über `aenderungen_anwenden`). HDRI löschen und `ingest_meldung` schreiben
+//! darf nur ein Konto mit `app_metadata.ingest = true`; das prüft der Server.
 //!
 //! Adresse, Anon-Key und E-Mail stehen in den lokalen Einstellungen der App, das Passwort im Schlüsselbund
 //! des Systems. Nichts davon kommt ins Repo.
@@ -26,6 +27,8 @@ pub struct Zugang {
 
 struct Sitzung {
     zugang_email: String,
+    /// `app_metadata.ingest`: darf HDRI-Rohdaten löschen und Meldungen schreiben.
+    ingest_recht: bool,
     access: String,
     refresh: String,
     bis: Instant,
@@ -34,6 +37,13 @@ struct Sitzung {
 #[derive(Default)]
 pub struct Plate {
     sitzung: Mutex<Option<Sitzung>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Anmeldung {
+    pub email: String,
+    pub ingest_recht: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -118,8 +128,11 @@ impl Plate {
         Err("Anmeldung beim Plate Assistant abgelehnt".into())
     }
 
-    pub fn anmelden_pruefen(&self, z: &Zugang) -> Result<(), String> {
-        self.token(z, true).map(|_| ())
+    /// Meldet an und sagt, ob das Konto im Ingest löschen und Meldungen schreiben darf.
+    pub fn anmelden_pruefen(&self, z: &Zugang) -> Result<Anmeldung, String> {
+        self.token(z, true)?;
+        let s = self.sitzung.lock().expect("Sitzung");
+        Ok(Anmeldung { email: z.email.clone(), ingest_recht: s.as_ref().is_some_and(|s| s.ingest_recht) })
     }
 
     /// Projekte (ohne gelöschte). Gibt es die Tabelle noch nicht (vor Migration 0009), ist die Liste leer.
@@ -249,11 +262,9 @@ fn anmelden(z: &Zugang, body: Value, art: &str) -> Result<Sitzung, String> {
         .map_err(fehler)?
         .into_json()
         .map_err(|e| e.to_string())?;
-    if v["user"]["app_metadata"]["app"] != "ingest" {
-        return Err("Dieser Benutzer ist nicht der Zugang „ingest“".into());
-    }
     Ok(Sitzung {
         zugang_email: z.email.clone(),
+        ingest_recht: v["user"]["app_metadata"]["ingest"] == true,
         access: v["access_token"].as_str().ok_or("Anmeldung ohne Token")?.to_owned(),
         refresh: v["refresh_token"].as_str().unwrap_or_default().to_owned(),
         bis: Instant::now() + Duration::from_secs(v["expires_in"].as_u64().unwrap_or(3600)),
