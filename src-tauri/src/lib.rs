@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use ingest_kern::ale::{self, ClipZeile};
 use ingest_kern::freigabe::{self, Freigabe};
 use ingest_kern::geraet::{self, Kennung};
 use ingest_kern::kopie::{self, Auftrag, Kopie, Meldung};
@@ -57,6 +58,10 @@ struct KartenErgebnis {
     kennungen: Vec<Kennung>,
     /// Pfad der neuen `.mhl` je Ziel, `None` bei einem fehlerhaften Ziel.
     mhl: Vec<Option<PathBuf>>,
+    /// Angaben der Clips (Timecode, fps, Bilder), gelesen aus einer geprüften Kopie.
+    clips: Vec<ClipZeile>,
+    /// ALE je Ziel: Pfad, `None` bei einem fehlerhaften Ziel oder ohne Clips mit Timecode.
+    ale: Vec<Option<PathBuf>>,
     /// Abgleich mit der Soll-Liste (`None` ohne Soll-Liste).
     abgleich: Option<Abgleich>,
     /// PDF-Bericht je Ziel: Pfad oder Fehlertext.
@@ -271,7 +276,22 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
             ingest_bericht::schreiben(&urteile[i].ordner, &pdf, &kopie.beginn).map_err(|e| e.to_string())
         })
         .collect();
-    let ergebnis = KartenErgebnis { kopie, urteile, kennungen, mhl, abgleich, berichte, freigabe };
+    // Clip-Angaben aus der ersten guten Kopie (geprüft, nicht von der Karte) und ein ALE auf jedes gute Ziel.
+    let clips = urteile.iter().find(|u| u.gut()).map(|u| ale::clips_lesen(&kopie, &u.ordner)).unwrap_or_default();
+    let ale_text =
+        clips.iter().any(|c| c.angaben.as_ref().is_some_and(|a| a.start_tc.is_some())).then(|| ale::ale(&clips));
+    let karte = geraet::kartenname(&auftrag.quelle);
+    let ale = urteile
+        .iter()
+        .map(|u| {
+            let text = ale_text.as_ref().filter(|_| u.gut())?;
+            let ordner = struktur::metadatenordner(&u.ordner);
+            std::fs::create_dir_all(&ordner).ok()?;
+            let pfad = ordner.join(format!("{}.ale", struktur::ordnername(&karte)));
+            ingest_kern::sicher_schreiben(&pfad, text.as_bytes()).ok().map(|_| pfad)
+        })
+        .collect();
+    let ergebnis = KartenErgebnis { kopie, urteile, kennungen, mhl, clips, ale, abgleich, berichte, freigabe };
     if let Err(e) = verlauf_anhaengen(app, &ergebnis) {
         eprintln!("Verlauf nicht geschrieben: {e}"); // die Karte ist trotzdem kopiert und belegt
     }

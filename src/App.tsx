@@ -644,6 +644,7 @@ function Ergebnis({ ergebnis }: { ergebnis: KartenErgebnis }) {
                 {kennungen[i]?.seriennummer && <span className="mono"> · SN {kennungen[i]?.seriennummer}</span>}
               </span>
               {ergebnis.mhl[i] && <span className="k-leise">ASC MHL: <span className="mono">{name(ergebnis.mhl[i]!)}</span></span>}
+              {ergebnis.ale[i] && <span className="k-leise">ALE: <span className="mono">{name(ergebnis.ale[i]!)}</span></span>}
               {"Ok" in ergebnis.berichte[i] ? (
                 <span className="k-leise">
                   Bericht: <span className="mono">{name((ergebnis.berichte[i] as { Ok: string }).Ok)}</span>

@@ -60,9 +60,18 @@ pub fn kartenziel(basis: &Path, dreh: &Dreh, karte: &str) -> PathBuf {
 
 /// Wohin der Bericht einer Karte gehört: in einer Drehstruktur nach `04_BERICHTE/`, sonst neben den Kartenordner.
 pub fn berichtordner(kartenziel: &Path) -> PathBuf {
+    neben(kartenziel, BERICHTE)
+}
+
+/// Wohin ALE und Bewegungsdaten einer Karte gehören: in einer Drehstruktur nach `05_METADATEN/`, sonst neben den Kartenordner.
+pub fn metadatenordner(kartenziel: &Path) -> PathBuf {
+    neben(kartenziel, METADATEN)
+}
+
+fn neben(kartenziel: &Path, ordner: &str) -> PathBuf {
     match kartenziel.parent() {
         Some(kamera) if kamera.file_name().is_some_and(|n| n == KAMERA) => {
-            kamera.parent().map(|d| d.join(BERICHTE)).unwrap_or_else(|| kamera.to_path_buf())
+            kamera.parent().map(|d| d.join(ordner)).unwrap_or_else(|| kamera.to_path_buf())
         }
         Some(eltern) => eltern.to_path_buf(),
         None => kartenziel.to_path_buf(),
@@ -99,6 +108,7 @@ mod tests {
         let z = kartenziel(Path::new("/nas/Footage"), &d, "A001R132");
         assert_eq!(z, Path::new("/nas/Footage/Happy End/2026-10-28_Rheinufer/01_KAMERA/A001R132"));
         assert_eq!(berichtordner(&z), Path::new("/nas/Footage/Happy End/2026-10-28_Rheinufer/04_BERICHTE"));
+        assert_eq!(metadatenordner(&z), Path::new("/nas/Footage/Happy End/2026-10-28_Rheinufer/05_METADATEN"));
         // Ohne Struktur bleibt der Bericht neben dem Kartenordner.
         assert_eq!(berichtordner(Path::new("/ssd/A001R132")), Path::new("/ssd"));
     }

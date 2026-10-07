@@ -10,6 +10,8 @@
 //!
 //! Der Kern hat keine Oberfläche und kein Netz; er ist auf Linux, macOS und Windows testbar.
 
+pub mod ale;
+pub mod clip;
 pub mod fehler;
 pub mod freigabe;
 pub mod geraet;

@@ -36,6 +36,8 @@ export type KartenErgebnis = {
   urteile: Urteil[];
   kennungen: Kennung[];
   mhl: (string | null)[];
+  clips: { pfad: string; angaben: { startTc: string | null; endTc: string | null; fps: number | null; bilder: number | null } | null; fehler: string | null }[];
+  ale: (string | null)[];
   abgleich: Abgleich | null;
   berichte: ({ Ok: string } | { Err: string })[];
   freigabe: Freigabe;
