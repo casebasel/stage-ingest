@@ -7,7 +7,7 @@ use serde::Serialize;
 use crate::geraet::{Art, Kennung};
 use crate::pruefen::Urteil;
 
-/// Standard, pro Produktion einstellbar (`docs/KONZEPT.md`, Kapitel 4).
+/// Standard, im Ingest einstellbar (nicht am Projekt, Marlon 07.10.2026) (`docs/KONZEPT.md`, Kapitel 4).
 pub const MINDEST_KOPIEN_STANDARD: usize = 2;
 
 #[derive(Debug, Clone, Serialize)]

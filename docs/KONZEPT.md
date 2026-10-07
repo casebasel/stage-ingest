@@ -27,7 +27,7 @@ Vorbilder zum Anschauen (nur lesen, nichts ungeprüft übernehmen): Sluice (MIT,
 
 ## 4. Freigabe und Entwerten
 
-- **„Sicher zum Formatieren“** erst, wenn die Karte an mindestens **N unabhängige Kopien** geprüft geschrieben ist. N ist pro Produktion einstellbar, Standard **2**.
+- **„Sicher zum Formatieren“** erst, wenn die Karte an mindestens **N unabhängige Kopien** geprüft geschrieben ist. N ist im Ingest einstellbar (nicht am Projekt), Standard **2**.
 - **Unabhängig** heisst: verschiedene physische Platten. Zwei Ziele auf derselben Platte (gleiche Seriennummer) zählen als eine Kopie.
 - **NAS** (SMB) zählt als eine unabhängige Kopie, mit Hinweis im Bericht: den Zwischenspeicher des NAS kann keine App umgehen (Marlon, 07.10.2026).
 - **Entwerten** (zweiter, bewusster Klick nach der Freigabe): nur den Kopf des Dateisystems löschen, damit Amira/ALEXA Mini beim Einlegen das Formatieren anbieten. Die Kamera braucht ihr eigenes ARRI-UDF; Stage Ingest formatiert nie selbst.
@@ -38,7 +38,7 @@ Vorbilder zum Anschauen (nur lesen, nichts ungeprüft übernehmen): Sluice (MIT,
 Kamera-Originale **1:1 wie auf der Karte**, mit ASC MHL. Plates verweisen auf Clips, Clips werden nie doppelt abgelegt.
 
 ```
-<Produktion>/<Datum>_<Dreh>/
+<Projekt>/<Datum>_<Dreh>/
   01_KAMERA/<Reel>/          Karte 1:1 + ascmhl/
   02_PLATES/P003_Name/       plate.json (Verweise auf Clips), Referenzfotos, HDRI
   03_TON/
@@ -46,7 +46,7 @@ Kamera-Originale **1:1 wie auf der Karte**, mit ASC MHL. Plates verweisen auf Cl
   05_METADATEN/              ALE pro Karte, Bewegungs-/Objektivdaten pro Clip (ART CMD)
 ```
 
-Die Struktur ist von Marlon bestätigt (07.10.2026) und gebaut (`kern/src/struktur.rs`); ohne Produktion und Dreh kommt die Karte direkt in den Zielordner. **NAS-Ziel:** ein eigenes Footage-Dataset auf den Festplatten, z. B. `Footage/<Kunde>/<Projekt>/<Datum>_<Dreh>/`, mit den Kunden- und Projektnamen der Stage-Konsole. Die Produktion eines Drehs ordnet der Ingest beim ersten Import einem Kunden/Projekt zu und merkt sich das. Der genaue Pool-Pfad steht in der lokalen Einstellung.
+Die Struktur ist von Marlon bestätigt (07.10.2026) und gebaut (`kern/src/struktur.rs`); ohne Projekt und Dreh kommt die Karte direkt in den Zielordner. **NAS-Ziel:** ein eigenes Footage-Dataset auf den Festplatten, z. B. `Footage/<Projekt>/<Datum>_<Dreh>/` (ohne Kunde). Projekte kommen aus der gemeinsamen Supabase und sind in allen drei Apps verwaltbar (Systemkarte 58963fa). Der genaue Pool-Pfad steht in der lokalen Einstellung.
 
 ## 6. Zuordnung Clip ↔ Take
 

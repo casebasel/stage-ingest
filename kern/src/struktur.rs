@@ -1,7 +1,8 @@
-//! Ordnerstruktur eines Drehs (`docs/KONZEPT.md`, Kapitel 5, von Marlon bestätigt am 07.10.2026):
+//! Ordnerstruktur eines Drehs (`docs/KONZEPT.md`, Kapitel 5, von Marlon bestätigt am 07.10.2026; Projekt =
+//! Filmprojekt aus der gemeinsamen Supabase, Systemkarte 58963fa):
 //!
 //! ```text
-//! <Produktion>/<Datum>_<Dreh>/
+//! <Projekt>/<Datum>_<Dreh>/
 //!   01_KAMERA/<Karte>/      Karte 1:1 + ascmhl/
 //!   02_PLATES/              Verweise auf Clips, Referenzfotos, HDRI (Phase 2)
 //!   03_TON/
@@ -22,7 +23,8 @@ pub const METADATEN: &str = "05_METADATEN";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Dreh {
-    pub produktion: String,
+    /// Filmprojekt (z. B. „Happy End“).
+    pub projekt: String,
     /// `JJJJ-MM-TT`
     pub datum: String,
     pub name: String,
@@ -46,9 +48,9 @@ pub fn ordnername(s: &str) -> String {
     }
 }
 
-/// Ordner des Drehs: `<basis>/<Produktion>/<Datum>_<Dreh>`.
+/// Ordner des Drehs: `<basis>/<Projekt>/<Datum>_<Dreh>`.
 pub fn drehordner(basis: &Path, dreh: &Dreh) -> PathBuf {
-    basis.join(ordnername(&dreh.produktion)).join(format!("{}_{}", ordnername(&dreh.datum), ordnername(&dreh.name)))
+    basis.join(ordnername(&dreh.projekt)).join(format!("{}_{}", ordnername(&dreh.datum), ordnername(&dreh.name)))
 }
 
 /// Zielordner einer Karte im Dreh: `<Dreh>/01_KAMERA/<Karte>`.
@@ -93,10 +95,10 @@ mod tests {
 
     #[test]
     fn struktur_und_bericht() {
-        let d = Dreh { produktion: "Tatort Basel".into(), datum: "2026-10-28".into(), name: "Rheinufer".into() };
+        let d = Dreh { projekt: "Happy End".into(), datum: "2026-10-28".into(), name: "Rheinufer".into() };
         let z = kartenziel(Path::new("/nas/Footage"), &d, "A001R132");
-        assert_eq!(z, Path::new("/nas/Footage/Tatort Basel/2026-10-28_Rheinufer/01_KAMERA/A001R132"));
-        assert_eq!(berichtordner(&z), Path::new("/nas/Footage/Tatort Basel/2026-10-28_Rheinufer/04_BERICHTE"));
+        assert_eq!(z, Path::new("/nas/Footage/Happy End/2026-10-28_Rheinufer/01_KAMERA/A001R132"));
+        assert_eq!(berichtordner(&z), Path::new("/nas/Footage/Happy End/2026-10-28_Rheinufer/04_BERICHTE"));
         // Ohne Struktur bleibt der Bericht neben dem Kartenordner.
         assert_eq!(berichtordner(Path::new("/ssd/A001R132")), Path::new("/ssd"));
     }

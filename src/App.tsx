@@ -125,16 +125,16 @@ export function App() {
   }, []);
 
   const laeuft = phase === "kopieren" || phase === "pruefen" || phase === "nachlesen" || phase === "nachpruefen";
-  // Drehstruktur: mit Produktion und Dreh kommt jede Karte nach <Ziel>/<Produktion>/<Datum>_<Dreh>/01_KAMERA/<Karte>.
-  // Produktion ist vorerst Text; sie wird zur gemeinsamen Liste aus der Supabase, sobald die Systemkarte das festlegt.
-  const [produktion, setProduktion] = useState<string>(() => gemerkt("produktion", ""));
+  // Drehstruktur: mit Projekt und Dreh kommt jede Karte nach <Ziel>/<Projekt>/<Datum>_<Dreh>/01_KAMERA/<Karte>.
+  // Projekt ist vorerst Text; es wird zur Auswahl aus der gemeinsamen Supabase (Paket casebasel/stage-projekt).
+  const [projekt, setProjekt] = useState<string>(() => gemerkt("projekt", ""));
   const [drehName, setDrehName] = useState<string>(() => gemerkt("drehName", ""));
   const [drehDatum, setDrehDatum] = useState<string>(() => new Date().toLocaleDateString("sv-SE"));
-  useEffect(() => merken("produktion", produktion), [produktion]);
+  useEffect(() => merken("projekt", projekt), [projekt]);
   useEffect(() => merken("drehName", drehName), [drehName]);
   const dreh: Dreh | null =
-    produktion.trim() && drehName.trim() ? { produktion: produktion.trim(), datum: drehDatum, name: drehName.trim() } : null;
-  const drehSchluessel = dreh ? `${dreh.produktion}|${dreh.datum}|${dreh.name}` : "";
+    projekt.trim() && drehName.trim() ? { projekt: projekt.trim(), datum: drehDatum, name: drehName.trim() } : null;
+  const drehSchluessel = dreh ? `${dreh.projekt}|${dreh.datum}|${dreh.name}` : "";
 
   // Die Kartenziele berechnet der Kern (Kartenname bei Laufwerkswurzel, taugliche Ordnernamen).
   const [ziele, setZiele] = useState<string[]>([]);
@@ -265,10 +265,10 @@ export function App() {
             <h2>Dreh</h2>
             <input
               className="i-eingabe"
-              placeholder="Produktion"
-              value={produktion}
+              placeholder="Projekt"
+              value={projekt}
               disabled={laeuft}
-              onChange={(e) => setProduktion(e.target.value)}
+              onChange={(e) => setProjekt(e.target.value)}
             />
             <div className="i-zweier">
               <input
@@ -289,10 +289,10 @@ export function App() {
             <span className="k-leise k-klein">
               {dreh ? (
                 <span className="mono">
-                  {dreh.produktion}/{dreh.datum}_{dreh.name}/01_KAMERA/…
+                  {dreh.projekt}/{dreh.datum}_{dreh.name}/01_KAMERA/…
                 </span>
               ) : (
-                "Ohne Produktion und Dreh kommt die Karte direkt in den Zielordner."
+                "Ohne Projekt und Dreh kommt die Karte direkt in den Zielordner."
               )}
             </span>
           </section>

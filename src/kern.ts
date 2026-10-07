@@ -97,6 +97,6 @@ export const verlauf = () => invoke<VerlaufEintrag[]>("verlauf");
 export type Nachpruefung = { ordner: string; generation: string; geprueft: number; abweichungen: Abweichung[] };
 export const zielNachpruefen = (ordner: string) => invoke<Nachpruefung>("ziel_nachpruefen", { ordner });
 
-export type Dreh = { produktion: string; datum: string; name: string };
+export type Dreh = { projekt: string; datum: string; name: string };
 export const kartenziele = (quelle: string, basis: string[], dreh: Dreh | null) =>
   invoke<string[]>("kartenziele", { quelle, basis, dreh });
