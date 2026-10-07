@@ -310,6 +310,22 @@ impl Plate {
         if felder.is_empty() {
             return Ok(());
         }
+        // Feldgrenzen der Datenbank (Migration 0016, Systemkarte ee5bc62), damit der Server nicht ablehnt.
+        for (f, w) in felder {
+            match (f.as_str(), w) {
+                ("name", Value::String(t)) if t.trim().is_empty() => {
+                    return Err("Der Name darf nicht leer sein.".into())
+                }
+                ("fps" | "sensor_fps", Value::Null) => {}
+                ("fps" | "sensor_fps", Value::Number(n)) if n.as_f64().is_some_and(|x| x > 0.0) => {}
+                ("fps" | "sensor_fps", _) => return Err(format!("{f}: eine Zahl grösser als 0 oder leer")),
+                ("aufloesung_px", Value::String(t)) if !pixel_gueltig(t) => {
+                    return Err("Auflösung in Pixeln als Breite x Höhe, z. B. 3840x2160".into())
+                }
+                (_, Value::String(t)) if t.chars().count() > 200 => return Err(format!("{f}: höchstens 200 Zeichen")),
+                _ => {}
+            }
+        }
         let jetzt = chrono::Utc::now().timestamp_micros();
         let aenderungen: Vec<Value> = felder
             .iter()
@@ -406,6 +422,12 @@ fn anmelden(z: &Zugang, body: Value, art: &str) -> Result<Sitzung, String> {
 
 fn text(v: &Value) -> String {
     v.as_str().unwrap_or_default().trim().to_owned()
+}
+
+/// `^[1-9][0-9]{0,5}x[1-9][0-9]{0,5}$`
+fn pixel_gueltig(t: &str) -> bool {
+    let zahl = |s: &str| (1..=6).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_digit()) && !s.starts_with('0');
+    t.split_once('x').is_some_and(|(b, h)| zahl(b) && zahl(h))
 }
 
 fn text_oder_nichts(v: &Value) -> Option<String> {
@@ -639,6 +661,15 @@ mod tests {
         {
             assert!(!datei.contains(&format!("{}{}", "aenderungen", "_anwenden\"")), "Schreiben nur über plate.rs");
         }
+    }
+
+    #[test]
+    fn pixel_wie_die_datenbank() {
+        assert!(pixel_gueltig("3840x2160"));
+        assert!(!pixel_gueltig("03840x2160"));
+        assert!(!pixel_gueltig("3840 x 2160"));
+        assert!(!pixel_gueltig("1234567x10"));
+        assert!(!pixel_gueltig("x2160"));
     }
 
     #[test]

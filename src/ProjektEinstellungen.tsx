@@ -10,6 +10,9 @@ type Werte = Record<
   string
 >;
 
+/** „3840 × 2160“ → „3840x2160“ (Schreibweise der Datenbank). */
+const pixel = (t: string) => t.trim().toLowerCase().replace(/[×*]/g, "x").replace(/\s+/g, "");
+
 const zahlText = (n: number | null | undefined) => (n == null ? "" : String(n).replace(".", ","));
 
 function ausProjekt(p: Projekt): Werte {
@@ -41,8 +44,11 @@ export function ProjektEinstellungen({ projekt, schliessen }: { projekt: Projekt
       const t = w[k].trim();
       if (t && !(Number(t.replace(",", ".")) > 0)) return `${k === "fps" ? "Framerate" : "Sensor-Framerate"}: eine Zahl wie 25 oder 23,976.`;
     }
-    const px = w.aufloesung_px.trim();
-    if (px && !/^\d{2,5}\s*[x×]\s*\d{2,5}$/i.test(px)) return "Auflösung in Pixeln als Breite x Höhe, z. B. 3840x2160.";
+    // Feldgrenzen der Datenbank (Migration 0016, Systemkarte ee5bc62): Texte höchstens 200 Zeichen.
+    const lang = (Object.keys(w) as (keyof Werte)[]).find((k) => w[k].trim().length > 200);
+    if (lang) return "Höchstens 200 Zeichen pro Feld.";
+    const px = pixel(w.aufloesung_px);
+    if (px && !/^[1-9][0-9]{0,5}x[1-9][0-9]{0,5}$/.test(px)) return "Auflösung in Pixeln als Breite x Höhe, z. B. 3840x2160.";
     return null;
   }
 
@@ -53,7 +59,7 @@ export function ProjektEinstellungen({ projekt, schliessen }: { projekt: Projekt
     for (const k of geaendert) {
       const t = w[k].trim();
       if (k === "fps" || k === "sensor_fps") felder[k] = t ? Number(t.replace(",", ".")) : null;
-      else if (k === "aufloesung_px") felder[k] = t ? t.toLowerCase().replace(/\s|×/g, (z) => (z === "×" ? "x" : "")) : null;
+      else if (k === "aufloesung_px") felder[k] = pixel(t) || null;
       else felder[k] = t || null;
     }
     setStand({ ton: "laeuft", text: "Speichert …" });
