@@ -124,3 +124,23 @@ Wege und Formate stehen in der Systemkarte (`SCHNITTSTELLEN.md`); was dort „of
 - Empfang von Clips/ALE auf dem Stage-Server (mit Stage).
 - Ordnerstruktur bestätigen (Phase 2).
 - Laufzeit und VRAM von DiffHDR auf Ada (Phase 0).
+
+## 14. Stand (07.10.2026)
+
+Phase 1 gebaut und automatisch getestet (Linux, macOS, Windows in der CI):
+
+| Teil | Stand |
+| --- | --- |
+| Karte einmal lesen, an alle Ziele gleichzeitig schreiben, XXH3-128 (+ MD5) | gebaut, getestet |
+| Jedes Ziel ohne Cache zurücklesen (macOS `F_NOCACHE` beim Schreiben und Lesen, Windows `NO_BUFFERING`, Linux `fadvise`) | gebaut, getestet; macOS-Cache per `mincore` belegt |
+| Geräteerkennung: physische Platte (macOS `diskutil`, Windows Plattennummer + Seriennummer), NAS = Server; Unbewiesenes zählt zusammen als eine Kopie | gebaut, an echten Geräten zu prüfen |
+| Freigabe ab N unabhängigen Kopien, Hinweise (NAS-Cache, unbestimmte Platte) | gebaut, getestet |
+| Vorab-Prüfung: Ziel auf der Karte, Platz, Gross/Klein-Namen, Ziele auf derselben Platte | gebaut, getestet |
+| ASC MHL v2 mit Kette, Ordner- und Wurzel-Hashes; mitgebrachte Historie wird fortgesetzt | gebaut, gegen `ascmhl-debug verify` und das XSD geprüft |
+| PDF-Bericht (Typst, Geist) auf jedes Ziel, neben dem Kartenordner | gebaut |
+| Verlauf in der App, Ziele/Einstellungen pro Rechner gemerkt | gebaut |
+| Abbruch nur auf zweiten Klick; Fenster schliesst nicht während des Kopierens; halbe Ziele werden weggeräumt | gebaut |
+| Updater mit Banner und Pflicht-Update (`MINDESTVERSION`) | gebaut; erstes Release braucht die Secrets (`docs/RELEASING.md`) |
+| Entwerten | bewusst nicht gebaut (erst nach Test an der Amira) |
+
+Noch zu tun vor dem Plate-Dreh: Test mit echten Karten und Platten an Mac und Windows, erstes Release.
