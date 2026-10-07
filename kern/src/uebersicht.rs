@@ -41,6 +41,9 @@ pub struct ClipEintrag {
     pub take_id: Option<String>,
     /// Wie zugeordnet: `clipname`, `timecode`, `zeitfenster`, sonst leer.
     pub zuordnung: String,
+    /// Abweichungen von den Kameraeinstellungen des Projekts (nur Warnung), z. B. „25 fps statt 24 fps“.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub abweichungen: Vec<String>,
 }
 
 /// Eine gefundene Karte mit Ort.
@@ -123,6 +126,7 @@ mod tests {
                 end_tc: Some("10:46:00:00".into()),
                 take_id: Some("01T1".into()),
                 zuordnung: "zeitfenster".into(),
+                abweichungen: vec![],
             }],
         };
         let bericht = t.path().join("HAPPY_END/2026-10-28_Rheinufer").join(BERICHTE);

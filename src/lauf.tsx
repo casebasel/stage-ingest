@@ -225,6 +225,10 @@ function useLaufHalten() {
         stageAdresse: e.stageAdresse.trim() || null,
         plateZugang: paDreh ? konto.zugang : null,
         plateDreh: paDreh?.id ?? null,
+        kamera:
+          paProjekt && (paProjekt.fps || paProjekt.codec || paProjekt.aufloesungPx)
+            ? { fps: paProjekt.fps ?? null, codec: paProjekt.codec ?? null, aufloesungPx: paProjekt.aufloesungPx ?? null }
+            : null,
       });
       setErgebnis(r);
       setLetzteQuelle(quelle);

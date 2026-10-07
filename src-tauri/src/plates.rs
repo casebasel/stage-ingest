@@ -181,6 +181,7 @@ mod tests {
                     end_tc: None,
                     take_id: Some("T1".into()),
                     zuordnung: "zeitfenster".into(),
+                    abweichungen: vec![],
                 },
                 ClipEintrag {
                     name: "A001C004_261028_R1AB".into(),
@@ -189,6 +190,7 @@ mod tests {
                     end_tc: None,
                     take_id: None,
                     zuordnung: String::new(),
+                    abweichungen: vec![],
                 },
             ],
         };

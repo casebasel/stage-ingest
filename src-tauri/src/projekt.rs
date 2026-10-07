@@ -213,6 +213,7 @@ mod tests {
                         end_tc: None,
                         take_id: None,
                         zuordnung: String::new(),
+                        abweichungen: vec![],
                     },
                     ClipEintrag {
                         name: "A001C004_261028_R1AB".into(),
@@ -221,6 +222,7 @@ mod tests {
                         end_tc: None,
                         take_id: Some("T2".into()),
                         zuordnung: "zeitfenster".into(),
+                        abweichungen: vec![],
                     },
                     ClipEintrag {
                         name: "A001C005_261028_R1AB".into(),
@@ -229,6 +231,7 @@ mod tests {
                         end_tc: None,
                         take_id: None,
                         zuordnung: String::new(),
+                        abweichungen: vec![],
                     },
                 ],
             },
@@ -238,6 +241,9 @@ mod tests {
             name: "Happy End".into(),
             kurzname: "HAPPY_END".into(),
             aktiv: true,
+            fps: None,
+            codec: None,
+            aufloesung_px: None,
         };
         let u = zusammenfuehren(p, &drehs, vec![karte], vec![]);
         let plate = &u.drehs[0].plates[0];

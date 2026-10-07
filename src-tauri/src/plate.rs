@@ -69,6 +69,13 @@ pub struct Projekt {
     pub name: String,
     pub kurzname: String,
     pub aktiv: bool,
+    /// Standard-Kameraeinstellungen (Migration 0016, alle freiwillig); fehlen vor 0016.
+    #[serde(default)]
+    pub fps: Option<f64>,
+    #[serde(default)]
+    pub codec: Option<String>,
+    #[serde(default)]
+    pub aufloesung_px: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -158,7 +165,10 @@ impl Plate {
 
     /// Projekte (ohne gelöschte). Gibt es die Tabelle noch nicht (vor Migration 0009), ist die Liste leer.
     pub fn projekte(&self, z: &Zugang) -> Result<Vec<Projekt>, String> {
-        match self.lesen(z, "projekt?select=id,name,kurzname,aktiv&geloescht=eq.false&order=name.asc") {
+        // Mit den Kameraeinstellungen (ab Migration 0016); vorher ohne diese Spalten.
+        let mit = "projekt?select=id,name,kurzname,aktiv,fps,codec,aufloesung_px&geloescht=eq.false&order=name.asc";
+        let ohne = "projekt?select=id,name,kurzname,aktiv&geloescht=eq.false&order=name.asc";
+        match self.lesen(z, mit).or_else(|_| self.lesen(z, ohne)) {
             Ok(v) => Ok(projekte_aus(&v)),
             Err(e) if e.contains(" 404") || e.contains("PGRST205") || e.contains("does not exist") => Ok(vec![]),
             Err(e) => Err(e),
@@ -330,6 +340,10 @@ fn projekte_aus(v: &Value) -> Vec<Projekt> {
             name: text(&p["name"]),
             kurzname: text(&p["kurzname"]),
             aktiv: p["aktiv"].as_bool().unwrap_or(true),
+            // numeric kommt von PostgREST als Zahl oder Text
+            fps: p["fps"].as_f64().or_else(|| p["fps"].as_str().and_then(|t| t.parse().ok())),
+            codec: p["codec"].as_str().map(str::to_owned).filter(|t| !t.trim().is_empty()),
+            aufloesung_px: p["aufloesung_px"].as_str().map(str::to_owned).filter(|t| !t.trim().is_empty()),
         })
         .collect()
 }

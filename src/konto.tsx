@@ -6,7 +6,16 @@ import { invoke } from "@tauri-apps/api/core";
 import type { SollClip } from "./kern";
 
 export type Zugang = { adresse: string; anonKey: string; email: string };
-export type Projekt = { id: string; name: string; kurzname: string; aktiv: boolean };
+export type Projekt = {
+  id: string;
+  name: string;
+  kurzname: string;
+  aktiv: boolean;
+  /** Standard-Kameraeinstellungen (freiwillig): Abweichungen der Clips nur als Warnung. */
+  fps?: number | null;
+  codec?: string | null;
+  aufloesungPx?: string | null;
+};
 export type DrehKurz = { id: string; name: string; datum: string; projektId: string | null; produktion: string };
 
 export const KURZNAME = /^[A-Z0-9]+(_[A-Z0-9]+)*$/;

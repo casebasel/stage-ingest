@@ -56,6 +56,9 @@ struct KartenAuftrag {
     /// Pfad zu ARRI ART CMD (lokale Einstellung). Leer = keine Bewegungsdaten.
     #[serde(default)]
     art_cmd: Option<PathBuf>,
+    /// Standard-Kameraeinstellungen des Projekts: Abweichungen der Clips nur als Warnung, nie als Sperre.
+    #[serde(default)]
+    kamera: Option<ingest_kern::clip::Kameraeinstellung>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -364,6 +367,30 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
         let liste = a.fehlt.iter().map(|s| format!("{} ({} Take {})", s.clip, s.szene, s.take)).collect::<Vec<_>>();
         freigabe.hinweise.push(format!("Gedreht, aber nicht auf der Karte: {}", liste.join(", ")));
     }
+    // Kameraeinstellungen des Projekts (Systemkarte): nur Warnung in Urteil, Bericht und Zusammenfassung.
+    let abweichend: std::collections::HashMap<String, Vec<String>> = auftrag
+        .kamera
+        .as_ref()
+        .map(|k| {
+            clips
+                .iter()
+                .filter_map(|c| {
+                    let a = ingest_kern::clip::abweichungen(c.angaben.as_ref()?, k);
+                    (!a.is_empty()).then(|| (soll::ohne_endung(&c.pfad).to_owned(), a))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if !abweichend.is_empty() {
+        let mut namen = abweichend.iter().map(|(n, a)| format!("{n} ({})", a.join(", "))).collect::<Vec<_>>();
+        namen.sort();
+        freigabe.hinweise.push(format!(
+            "Weicht von den Kameraeinstellungen des Projekts ab ({} von {} Clips): {}",
+            abweichend.len(),
+            clips.len(),
+            namen.join("; ")
+        ));
+    }
     if auftrag.mindest_kopien < 2 {
         freigabe
             .hinweise
@@ -463,6 +490,7 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
                         take_id: Some(take).filter(|t| !t.is_empty()),
                         zuordnung: art.to_string(),
                         pfad: c.pfad.clone(),
+                        abweichungen: abweichend.get(&name).cloned().unwrap_or_default(),
                         name,
                     }
                 })
@@ -818,6 +846,7 @@ mod gemeinsamer_test {
             plate_zugang: None,
             plate_dreh: None,
             art_cmd: None,
+            kamera: None,
         };
         let k = Auftrag { quelle: karte, ziele: auftrag.ziele.clone(), mit_md5: false };
         let kopie = kopie::kopieren(&k, &AtomicBool::new(false), |_| {}).unwrap();

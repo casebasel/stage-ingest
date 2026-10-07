@@ -70,6 +70,7 @@ export type KartenAuftrag = {
   stageAdresse?: string | null;
   plateZugang?: { adresse: string; anonKey: string; email: string } | null;
   plateDreh?: string | null;
+  kamera?: { fps: number | null; codec: string | null; aufloesungPx: string | null } | null;
 };
 
 export type SollClip = {

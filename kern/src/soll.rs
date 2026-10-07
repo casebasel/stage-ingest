@@ -331,6 +331,9 @@ mod timecode_tests {
                 end_tc: Some(bis.into()),
                 fps: Some(25.0),
                 bilder: None,
+                bildrate: None,
+                codec: None,
+                aufloesung_px: None,
             }),
             fehler: None,
         }

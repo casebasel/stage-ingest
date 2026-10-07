@@ -265,6 +265,10 @@ function Auftrag({ pflicht, zurEinrichtung, laufwerke }: { pflicht: boolean; zur
   }
 
   const bereit = !!q && lauf.ziele.length > 0 && !pflicht && !lauf.sperrt;
+  const pp = lauf.paProjekt;
+  const kamera = pp
+    ? [pp.fps ? `${zahl(pp.fps, 3).replace(/,?0+$/, "")} fps` : "", pp.codec ?? "", pp.aufloesungPx ?? ""].filter(Boolean).join(" · ")
+    : "";
   const gesperrtWeil = !q
     ? "Zuerst links eine Karte wählen."
     : e.ziele.length === 0
@@ -394,6 +398,11 @@ function Auftrag({ pflicht, zurEinrichtung, laufwerke }: { pflicht: boolean; zur
           {lauf.paDreh && <Status ton="ok">Soll-Liste aus dem Plate Assistant</Status>}
           {lauf.soll && !lauf.soll.fehler && <Status ton="ok">{lauf.soll.liste.length} Takes von der Stage</Status>}
           {lauf.soll?.fehler && <Status ton="warn">Soll-Liste nicht geladen</Status>}
+          {kamera && (
+            <span className="leise" title="Abweichende Clips erscheinen nur als Hinweis; die Freigabe hängt nie daran.">
+              Kamera laut Projekt: <span className="zahl">{kamera}</span>
+            </span>
+          )}
         </div>
         <DrehZeile />
         <p className="ablage">

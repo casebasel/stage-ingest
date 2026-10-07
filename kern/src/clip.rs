@@ -20,6 +20,15 @@ pub struct ClipAngaben {
     /// Bilder pro Sekunde laut Timecode-Spur (ganzzahlig, z. B. 25, 50) bzw. Videospur.
     pub fps: Option<f64>,
     pub bilder: Option<u64>,
+    /// Genaue Bildrate der Videospur (z. B. 23,976), für den Vergleich mit `projekt.fps`.
+    #[serde(default)]
+    pub bildrate: Option<f64>,
+    /// Codec mit dem Namen, den ARRI verwendet (z. B. „ProRes 422 HQ“); unbekannt = Kennung der Datei.
+    #[serde(default)]
+    pub codec: Option<String>,
+    /// Bildgrösse in Pixeln „BxH“ (z. B. `3840x2160`), wie `projekt.aufloesung_px`.
+    #[serde(default)]
+    pub aufloesung_px: Option<String>,
 }
 
 struct Atom {
@@ -111,6 +120,8 @@ pub fn lesen(pfad: &Path) -> io::Result<ClipAngaben> {
     let mut drop_frame = false;
     let mut bilder: Option<u64> = None;
     let mut video_fps: Option<f64> = None;
+    let mut codec: Option<String> = None;
+    let mut aufloesung_px: Option<String> = None;
 
     for trak in wurzel.iter().filter(|a| &a.art == b"trak") {
         let t = kinder(&moov, trak);
@@ -138,6 +149,20 @@ pub fn lesen(pfad: &Path) -> io::Result<ClipAngaben> {
             b"vide" => {
                 // stsz: version/flags(4), sample_size(4), sample_count(4)
                 let anzahl = finde(&moov, &stbl, b"stsz").and_then(|s| be32(&moov, s.beginn + 8)).map(u64::from);
+                // stsd: version/flags(4), entry_count(4), dann Eintrag: size(4) format(4) reserved(6) dref(2)
+                // version(2) revision(2) vendor(4) temporal(4) spatial(4) width(2) height(2)
+                if let Some(stsd) = finde(&moov, &stbl, b"stsd") {
+                    let e = stsd.beginn + 8;
+                    if let Some(format) = moov.get(e + 4..e + 8) {
+                        codec = Some(codec_name(format));
+                    }
+                    let mass = |i: usize| moov.get(i..i + 2).map(|b| u16::from_be_bytes([b[0], b[1]]));
+                    if let (Some(b), Some(h)) = (mass(e + 32), mass(e + 34)) {
+                        if b > 0 && h > 0 {
+                            aufloesung_px = Some(format!("{b}x{h}"));
+                        }
+                    }
+                }
                 bilder = anzahl.or(bilder);
                 if let (Some(n), Some((skala, dauer))) = (anzahl, mdhd) {
                     if dauer > 0 && skala > 0 {
@@ -182,7 +207,68 @@ pub fn lesen(pfad: &Path) -> io::Result<ClipAngaben> {
         },
         fps,
         bilder,
+        bildrate: video_fps,
+        codec,
+        aufloesung_px,
     })
+}
+
+/// Codec-Kennung der QuickTime-Datei → Name wie bei ARRI (CAP-Liste Codec, Kameramenü).
+fn codec_name(format: &[u8]) -> String {
+    match format {
+        b"apco" => "ProRes 422 Proxy".into(),
+        b"apcs" => "ProRes 422 LT".into(),
+        b"apcn" => "ProRes 422".into(),
+        b"apch" => "ProRes 422 HQ".into(),
+        b"ap4h" => "ProRes 4444".into(),
+        b"ap4x" => "ProRes 4444 XQ".into(),
+        andere => String::from_utf8_lossy(andere).trim().to_owned(),
+    }
+}
+
+/// Standard-Kameraeinstellungen des Projekts (Systemkarte, `SCHNITTSTELLEN.md`). Leere Felder werden nicht geprüft.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Kameraeinstellung {
+    #[serde(default)]
+    pub fps: Option<f64>,
+    #[serde(default)]
+    pub codec: Option<String>,
+    #[serde(default)]
+    pub aufloesung_px: Option<String>,
+}
+
+/// Was an einem Clip vom Projekt abweicht, in Klartext. Nur Warnungen: die Freigabe hängt nie daran.
+/// Was im Clip nicht lesbar ist, gilt nicht als Abweichung.
+pub fn abweichungen(clip: &ClipAngaben, soll: &Kameraeinstellung) -> Vec<String> {
+    let mut aus = Vec::new();
+    let zahl = |f: f64| {
+        let t = format!("{f:.3}");
+        t.trim_end_matches('0').trim_end_matches('.').replace('.', ",")
+    };
+    if let (Some(s), Some(ist)) = (soll.fps, clip.bildrate.or(clip.fps)) {
+        if (s - ist).abs() > 0.01 {
+            aus.push(format!("{} fps statt {} fps", zahl(ist), zahl(s)));
+        }
+    }
+    let gleich = |a: &str, b: &str| {
+        let n = |t: &str| t.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
+        n(a) == n(b)
+    };
+    if let (Some(s), Some(ist)) = (soll.codec.as_deref().filter(|t| !t.trim().is_empty()), clip.codec.as_deref()) {
+        if !gleich(s, ist) {
+            aus.push(format!("{ist} statt {}", s.trim()));
+        }
+    }
+    let px = |t: &str| t.to_lowercase().replace(['×', '*'], "x").replace(' ', "");
+    if let (Some(s), Some(ist)) =
+        (soll.aufloesung_px.as_deref().filter(|t| !t.trim().is_empty()), clip.aufloesung_px.as_deref())
+    {
+        if px(s) != px(ist) {
+            aus.push(format!("{ist} statt {}", px(s)));
+        }
+    }
+    aus
 }
 
 /// Bildnummer → Timecode, umlaufend über 24 h. Drop-Frame nur für 30/60 (29,97/59,94) relevant.
@@ -228,6 +314,32 @@ mod tests {
         assert_eq!(c.bilder, Some(50));
         assert_eq!(c.end_tc.as_deref(), Some("10:00:02:12"));
         assert_eq!(c.fps, Some(25.0));
+        assert_eq!(c.bildrate, Some(25.0));
+        assert_eq!(c.codec.as_deref(), Some("ProRes 422 Proxy"));
+        assert_eq!(c.aufloesung_px.as_deref(), Some("64x36"));
+    }
+
+    #[test]
+    fn abweichungen_nur_bei_gesetzten_feldern() {
+        let c = ClipAngaben {
+            start_tc: None,
+            end_tc: None,
+            fps: Some(24.0),
+            bilder: None,
+            bildrate: Some(23.976),
+            codec: Some("ProRes 422 HQ".into()),
+            aufloesung_px: Some("3840x2160".into()),
+        };
+        assert!(abweichungen(&c, &Kameraeinstellung::default()).is_empty());
+        let gleich = Kameraeinstellung {
+            fps: Some(23.976),
+            codec: Some(" prores 422  hq".into()),
+            aufloesung_px: Some("3840 × 2160".into()),
+        };
+        assert!(abweichungen(&c, &gleich).is_empty());
+        let anders =
+            Kameraeinstellung { fps: Some(25.0), codec: Some("ProRes 4444".into()), aufloesung_px: Some("".into()) };
+        assert_eq!(abweichungen(&c, &anders), vec!["23,976 fps statt 25 fps", "ProRes 422 HQ statt ProRes 4444"]);
     }
 
     #[test]
