@@ -109,3 +109,43 @@ button:disabled {
     animation-duration: 0.01ms !important;
   }
 }
+
+/* --- Tag: für Tageslicht und helle Umgebung -------------------------------------------------
+   Gleiche Rollen wie Nacht, aber auf Sonne optimiert: fast schwarzer Text, kräftige Linien,
+   dunklere Bedeutungsfarben (Grün und Gold auf Weiss mindestens 4.5:1). Flächen, die man anfasst,
+   bleiben eingelassen (rinne dunkler als grund), Chrom liegt heller darüber. */
+:root[data-thema="tag"] {
+  color-scheme: light;
+
+  --grund: oklch(0.965 0.004 255);
+  --rinne: oklch(0.915 0.006 255);
+  --flaeche: oklch(0.99 0.002 255);
+  --erhaben: oklch(1 0 0);
+  --linie: oklch(0.83 0.008 255);
+  --linie-stark: oklch(0.62 0.012 255);
+
+  --text: oklch(0.17 0.012 255);
+  --text-2: oklch(0.30 0.012 255);
+  --text-3: oklch(0.42 0.012 255);
+  --text-aus: oklch(0.62 0.010 255);
+
+  --amber: oklch(0.70 0.155 55);
+  --amber-hell: oklch(0.76 0.150 55);
+  --amber-matt: oklch(0.55 0.120 52);
+  --amber-kontrast: oklch(0.17 0.020 52);
+
+  --ok: oklch(0.50 0.140 145);
+  --warnung: oklch(0.52 0.120 65);
+  --gefahr: oklch(0.52 0.190 25);
+  --gefahr-kontrast: oklch(0.99 0.005 25);
+}
+
+/* Bei Sonne wird dünne Schrift zuerst unlesbar: Text eine Stufe kräftiger. */
+:root[data-thema="tag"] body {
+  font-weight: 450;
+  -webkit-font-smoothing: auto;
+}
+
+:root[data-thema="tag"] ::selection {
+  background: oklch(0.85 0.08 55);
+}

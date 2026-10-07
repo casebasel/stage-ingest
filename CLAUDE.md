@@ -9,7 +9,7 @@ Sprache: Deutsch. Stil: direkt, klare Empfehlungen, keine Floskeln.
 | `kern/` | Rust-Bibliothek ohne Oberfläche: Kopieren, Prüfsummen, Zurücklesen, Geräteerkennung, Freigabe, Vorab-Prüfung, ASC MHL (Tests: `cargo test -p ingest-kern`; MHL gegen die Referenz mit `ASCMHL_DEBUG=<pfad zu ascmhl-debug>`) |
 | `bericht/` | PDF-Bericht (Typst-Vorlage `vorlage.typ`, Geist eingebettet) |
 | `src-tauri/` | App-Hülle, Befehle und Fortschritts-Ereignisse |
-| `src/` | Oberfläche; Design aus der Stage Companion App (deren `DESIGN.md`, Konsole) |
+| `src/` | Oberfläche; Design aus der Stage Companion App (deren `DESIGN.md`, Konsole). **Nacht** = Stage-Werte unverändert, **Tag** = eigener Satz für Tageslicht in `src/stil/stil.css` (Text ≥ 7:1, Signalfarben ≥ 5:1 auf dem Grund); Schalter oben rechts, Standard folgt dem System |
 | `docs/` | Konzept, HDRI-Briefing, Lesesicht Plate Assistant, Quellen aus der Stage, Recherche Kopieren/MHL |
 
 ## 🔴 Öffentliches Repo

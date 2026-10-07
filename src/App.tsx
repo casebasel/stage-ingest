@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { FolderInput, HardDrive, Plus, X } from "lucide-react";
+import { FolderInput, HardDrive, Moon, Plus, Sun, X } from "lucide-react";
+import { gemerktesThema, themaSetzen, type Thema } from "./thema";
 import {
   abbrechen,
   aufFortschritt,
@@ -163,7 +164,10 @@ export function App() {
         <div className="i-marke">
           Stage Ingest <span className="mono">{version}</span>
         </div>
-        <Kopflampe phase={phase} ergebnis={ergebnis} />
+        <div className="i-kopf-rechts">
+          <Kopflampe phase={phase} ergebnis={ergebnis} />
+          <ThemaSchalter />
+        </div>
       </header>
 
       <div className="i-rumpf">
@@ -258,6 +262,21 @@ export function App() {
         </main>
       </div>
     </div>
+  );
+}
+
+function ThemaSchalter() {
+  const [thema, setThema] = useState<Thema>(gemerktesThema);
+  const wechseln = () => {
+    const neu = thema === "tag" ? "nacht" : "tag";
+    themaSetzen(neu);
+    setThema(neu);
+  };
+  return (
+    <button className="k-taste k-taste-klein k-taste-leise" onClick={wechseln} title="Zwischen Tag und Nacht wechseln">
+      {thema === "tag" ? <Sun size={16} strokeWidth={1.75} /> : <Moon size={16} strokeWidth={1.75} />}
+      {thema === "tag" ? "Tag" : "Nacht"}
+    </button>
   );
 }
 
