@@ -28,7 +28,14 @@ jobs:
           pip install ascmhl
           echo "ASCMHL_DEBUG=$(python -c 'import shutil; print(shutil.which("ascmhl-debug"))')" >> "$GITHUB_ENV"
       - name: Kern testen (mit Prüfung gegen die ASC-MHL-Referenz)
-        run: cargo test -p ingest-kern
+        shell: bash
+        # Fehlerzeilen zusätzlich als Annotation, damit sie ohne Anmeldung lesbar sind (Repo ist öffentlich, Logs nicht).
+        run: |
+          set -o pipefail
+          cargo test -p ingest-kern -p ingest-bericht 2>&1 | tee test.log || {
+            grep -E "panicked|FAILED|failures:|assert|Error|error" test.log | head -40 | while IFS= read -r z; do echo "::error::$z"; done
+            exit 1
+          }
       - name: Clippy
         run: cargo clippy -p ingest-kern --all-targets -- -D warnings
 

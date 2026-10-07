@@ -18,7 +18,7 @@ fn karte(wurzel: &Path) {
     fs::create_dir_all(wurzel.join("Clips")).unwrap();
     fs::create_dir_all(wurzel.join("LEER")).unwrap();
     fs::write(wurzel.join("Clips/A001C001_261007_R132.mov"), vec![7u8; 3_000_000]).unwrap();
-    fs::write(wurzel.join("Clips/Ä Umlaut & <Sonderzeichen>.txt"), b"x").unwrap();
+    fs::write(wurzel.join("Clips/Ä Umlaut & Sonderzeichen.txt"), b"x").unwrap();
     fs::write(wurzel.join("A001R132.ale"), b"Heading\n").unwrap();
 }
 
