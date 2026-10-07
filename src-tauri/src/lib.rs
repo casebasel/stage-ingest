@@ -9,6 +9,7 @@ use ingest_kern::geraet::{self, Kennung};
 use ingest_kern::kopie::{self, Auftrag, Kopie, Meldung};
 use ingest_kern::mhl;
 use ingest_kern::pruefen::{self, Urteil};
+use ingest_kern::vorpruefen::{self, Befund, Stufe};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 
@@ -50,6 +51,20 @@ struct KartenErgebnis {
 
 const FORTSCHRITT: &str = "ingest://fortschritt";
 
+fn befunde(auftrag: &KartenAuftrag) -> Vec<Befund> {
+    let k = Auftrag { quelle: auftrag.quelle.clone(), ziele: auftrag.ziele.clone(), mit_md5: auftrag.mit_md5 };
+    match kopie::groesse(&auftrag.quelle) {
+        Ok(bytes) => vorpruefen::vorpruefen(&k, bytes),
+        Err(e) => vec![Befund { stufe: Stufe::Fehler, text: e.to_string() }],
+    }
+}
+
+/// Vorab-Prüfung für die Oberfläche (läuft auf einem eigenen Faden, die Karte wird dabei durchgezählt).
+#[tauri::command]
+async fn vorab_pruefen(auftrag: KartenAuftrag) -> Result<Vec<Befund>, String> {
+    tauri::async_runtime::spawn_blocking(move || befunde(&auftrag)).await.map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn karte_einlesen(
     app: AppHandle,
@@ -71,6 +86,10 @@ async fn karte_einlesen(
 }
 
 fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> Result<KartenErgebnis, String> {
+    // Auch hier prüfen: die Oberfläche ist nicht die einzige Sperre.
+    if let Some(f) = befunde(auftrag).into_iter().find(|b| b.stufe == Stufe::Fehler) {
+        return Err(f.text);
+    }
     // Kennungen vor dem Kopieren: die Platte muss eingehängt sein, sonst gar nicht erst anfangen.
     let kennungen = auftrag
         .ziele
@@ -149,7 +168,7 @@ pub fn run() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![karte_einlesen, abbrechen, laeuft])
+        .invoke_handler(tauri::generate_handler![vorab_pruefen, karte_einlesen, abbrechen, laeuft])
         .run(tauri::generate_context!())
         .expect("Stage Ingest konnte nicht starten");
 }

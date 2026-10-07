@@ -52,6 +52,8 @@ export type Fortschritt =
 
 export type KartenAuftrag = { quelle: string; ziele: string[]; mitMd5: boolean; mindestKopien: number };
 
+export type Befund = { stufe: "fehler" | "warnung"; text: string };
+export const vorabPruefen = (auftrag: KartenAuftrag) => invoke<Befund[]>("vorab_pruefen", { auftrag });
 export const karteEinlesen = (auftrag: KartenAuftrag) => invoke<KartenErgebnis>("karte_einlesen", { auftrag });
 export const abbrechen = () => invoke<void>("abbrechen");
 export const aufFortschritt = (f: (p: Fortschritt) => void): Promise<UnlistenFn> =>

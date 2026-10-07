@@ -6,6 +6,8 @@ import {
   aufFortschritt,
   bytesText,
   karteEinlesen,
+  vorabPruefen,
+  type Befund,
   type Fortschritt,
   type KartenErgebnis,
   type Abweichung,
@@ -42,6 +44,7 @@ export function App() {
   const [abbruchFragen, setAbbruchFragen] = useState(false);
   const abbruchZeit = useRef(0);
   const { update, pflicht, version } = useAktualisierung();
+  const [befunde, setBefunde] = useState<Befund[]>([]);
 
   useEffect(() => {
     const weg = aufFortschritt((f: Fortschritt) =>
@@ -71,6 +74,23 @@ export function App() {
   const laeuft = phase === "kopieren" || phase === "pruefen";
   // Jede Karte kommt in einen eigenen Ordner mit ihrem Namen (z. B. A001R132) unter dem gewählten Ziel.
   const ziele = quelle ? zielOrdner.map((z) => z.replace(/[\\/]+$/, "") + trenner(z) + name(quelle)) : [];
+
+  // Vorab-Prüfung bei jeder Änderung von Karte, Zielen oder Einstellungen.
+  const zieleSchluessel = ziele.join("|");
+  useEffect(() => {
+    if (!quelle || ziele.length === 0 || laeuft) {
+      setBefunde([]);
+      return;
+    }
+    let aktuell = true;
+    vorabPruefen({ quelle, ziele, mitMd5, mindestKopien })
+      .then((b) => aktuell && setBefunde(b))
+      .catch((e) => aktuell && setBefunde([{ stufe: "fehler", text: String(e) }]));
+    return () => {
+      aktuell = false;
+    };
+  }, [quelle, zieleSchluessel, mitMd5, mindestKopien, laeuft]);
+  const sperrt = befunde.some((b) => b.stufe === "fehler");
 
   async function karteWaehlen() {
     const pfad = await open({ directory: true, title: "Karte oder Reel-Ordner wählen" });
@@ -205,7 +225,8 @@ export function App() {
               ergebnis={ergebnis}
               fehler={fehler}
               ziele={ziele}
-              bereit={!!quelle && ziele.length > 0 && !pflicht}
+              bereit={!!quelle && ziele.length > 0 && !pflicht && !sperrt}
+              befunde={befunde}
               einlesen={einlesen}
               abbrechen={abbrechenKlick}
               abbruchFragen={abbruchFragen}
@@ -234,6 +255,7 @@ function Zustand(p: {
   fehler: string | null;
   ziele: string[];
   bereit: boolean;
+  befunde: Befund[];
   einlesen: () => void;
   abbrechen: () => void;
   abbruchFragen: boolean;
@@ -314,6 +336,11 @@ function Zustand(p: {
           vollständig zurückgelesen.
         </span>
       )}
+      {p.befunde.map((b) => (
+        <span key={b.text} className={`k-lampe ${b.stufe === "fehler" ? "k-lampe-kritisch" : "k-lampe-warn"}`}>
+          <i /> {b.text}
+        </span>
+      ))}
       <div>
         <button className={`k-taste ${p.bereit ? "k-taste-amber" : ""}`} disabled={!p.bereit} onClick={p.einlesen}>
           <HardDrive size={16} strokeWidth={1.75} /> {ergebnis || phase === "fehler" ? "Neue Karte einlesen" : "Einlesen"}

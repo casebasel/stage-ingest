@@ -18,6 +18,7 @@ pub mod mhl;
 mod ohne_cache;
 pub mod pruefen;
 pub mod pruefsumme;
+pub mod vorpruefen;
 
 pub use fehler::{Ergebnis, Fehler};
 

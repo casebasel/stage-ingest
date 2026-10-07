@@ -204,6 +204,11 @@ pub fn kopieren(auftrag: &Auftrag, abbruch: &AtomicBool, mut melden: impl FnMut(
     Ok(Kopie { quelle: auftrag.quelle.clone(), dateien, ordner, ziele, beginn, ende: Utc::now() })
 }
 
+/// Grösse aller Dateien der Quelle, die kopiert würden (für die Vorab-Prüfung).
+pub fn groesse(quelle: &Path) -> Ergebnis<u64> {
+    Ok(inhalt(quelle)?.1.iter().map(|(_, g)| g).sum())
+}
+
 /// Legt den Zielordner an. Ein bestehender, nicht leerer Ordner wird nie überschrieben.
 fn ziel_vorbereiten(ziel: &Path) -> Ergebnis<()> {
     if ziel.exists() {
