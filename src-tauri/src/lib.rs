@@ -1,6 +1,7 @@
 //! Tauri-Hülle um den Kern: Befehle für die Oberfläche, Fortschritt als Ereignisse.
 
 mod plate;
+mod projekt;
 mod stage;
 
 use std::path::{Path, PathBuf};
@@ -415,6 +416,51 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
             ingest_bericht::schreiben(&urteile[i].ordner, &pdf, &kopie.beginn).map_err(|e| e.to_string())
         })
         .collect();
+    // Zusammenfassung der Karte neben den Bericht, auf jedes gute Ziel (für die Projektübersicht).
+    {
+        use ingest_kern::uebersicht::{self, ClipEintrag, KartenZusammenfassung};
+        let mut take_von: std::collections::HashMap<String, (String, &str)> = std::collections::HashMap::new();
+        if let Some(a) = &abgleich {
+            for (s, p) in &a.gefunden {
+                take_von.insert(soll::ohne_endung(p).to_owned(), (s.take_id.clone(), "clipname"));
+            }
+            for (s, p) in &a.ueber_timecode {
+                take_von.insert(soll::ohne_endung(p).to_owned(), (s.take_id.clone(), "timecode"));
+            }
+            for (s, p) in &a.ueber_zeitfenster {
+                take_von.insert(soll::ohne_endung(p).to_owned(), (s.take_id.clone(), "zeitfenster"));
+            }
+        }
+        let z = KartenZusammenfassung {
+            format: uebersicht::FORMAT,
+            karte: geraet::kartenname(&auftrag.quelle),
+            beginn: kopie.beginn.to_rfc3339(),
+            version: app.package_info().version.to_string(),
+            freigegeben: freigabe.sicher,
+            unabhaengige_kopien: freigabe.unabhaengige_kopien,
+            grund: freigabe.grund.clone(),
+            clips: clips
+                .iter()
+                .map(|c| {
+                    let name = soll::ohne_endung(&c.pfad).to_owned();
+                    let (take, art) = take_von.get(&name).cloned().unwrap_or_default();
+                    ClipEintrag {
+                        start_tc: c.angaben.as_ref().and_then(|a| a.start_tc.clone()),
+                        end_tc: c.angaben.as_ref().and_then(|a| a.end_tc.clone()),
+                        take_id: Some(take).filter(|t| !t.is_empty()),
+                        zuordnung: art.to_string(),
+                        name,
+                    }
+                })
+                .collect(),
+        };
+        for u in urteile.iter().filter(|u| u.gut()) {
+            if let Err(e) = uebersicht::schreiben(&struktur::berichtordner(&u.ordner), &z) {
+                freigabe.hinweise.push(format!("Zusammenfassung nicht geschrieben ({}): {e}", u.ordner.display()));
+            }
+        }
+    }
+
     // Karte an die Stage melden (nach Bericht, damit sein Pfad mitgeht). Ein Fehler sperrt nichts.
     let stage = auftrag.stage_adresse.as_deref().filter(|a| !a.trim().is_empty()).map(|adresse| {
         let version = app.package_info().version.to_string();
@@ -542,6 +588,18 @@ async fn plate_projekt_anlegen(
     im_hintergrund(move || p.projekt_anlegen(&zugang, &name, &kurzname)).await
 }
 
+/// Projektübersicht: Plan aus dem Plate Assistant und eingelesene Karten auf den Zielordnern.
+#[tauri::command]
+async fn projekt_uebersicht(
+    plate: State<'_, Arc<plate::Plate>>,
+    zugang: Option<plate::Zugang>,
+    projekt: plate::Projekt,
+    basis: Vec<PathBuf>,
+) -> Result<projekt::Uebersicht, String> {
+    let p = Arc::clone(&plate);
+    im_hintergrund(move || Ok(projekt::laden(&p, zugang.as_ref(), projekt, &basis))).await
+}
+
 /// Aktives Filmprojekt der Stage (für den Vorschlag im Studio), `None` ohne.
 #[tauri::command]
 async fn stage_projekt(adresse: String) -> Result<Option<serde_json::Value>, String> {
@@ -609,6 +667,7 @@ pub fn run() {
             plate_projekt_anlegen,
             kurzname_vorschlag,
             stage_projekt,
+            projekt_uebersicht,
             abbrechen,
             laeuft,
             verlauf

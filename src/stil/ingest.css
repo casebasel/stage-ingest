@@ -274,3 +274,10 @@ body {
 .k-gruppe .k-klein {
   margin-top: 6px;
 }
+
+.i-reiter {
+  display: flex;
+  gap: 6px;
+  margin-right: auto;
+  margin-left: 24px;
+}

@@ -35,7 +35,7 @@ pub struct Plate {
     sitzung: Mutex<Option<Sitzung>>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Projekt {
     pub id: String,
@@ -154,6 +154,21 @@ impl Plate {
             ),
         )?;
         Ok(soll_aus(&v, dreh_id))
+    }
+
+    /// Alle Drehorte eines Projekts mit Plates, Takes, Fotos und HDRI. Drehorte von vor Migration 0009 haben nur
+    /// den Projektnamen als Text: sie zählen nur bei exakter Gleichheit (und nur ohne `projekt_id`).
+    pub fn projekt_drehs(&self, z: &Zugang, projekt: &Projekt) -> Result<Value, String> {
+        let auswahl = "select=id,name,datum,geloescht,hdri(id,plate_id,zustand,geloescht),\
+                       plate(id,nummer,name,szene,buchstabe,geloescht,foto(id,geloescht),\
+                       take(id,nummer,art,clip,clip_name,bewertung,geloescht))";
+        let neu = self.lesen(z, &format!("dreh?projekt_id=eq.{}&{auswahl}", url_teil(&projekt.id)))?;
+        let alt = self
+            .lesen(z, &format!("dreh?projekt_id=is.null&produktion=eq.{}&{auswahl}", url_teil(&projekt.name)))
+            .unwrap_or(Value::Array(vec![]));
+        let mut alle = neu.as_array().cloned().unwrap_or_default();
+        alle.extend(alt.as_array().cloned().unwrap_or_default());
+        Ok(Value::Array(alle))
     }
 
     /// Legt ein Projekt an (oder führt es zusammen, wenn es das schon gibt). Gibt die ID zurück.

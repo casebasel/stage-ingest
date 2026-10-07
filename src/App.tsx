@@ -22,6 +22,7 @@ import {
 } from "./kern";
 import { Aktualisierung, useAktualisierung } from "./Aktualisierung";
 import { Verlauf } from "./Verlauf";
+import { Projektseite } from "./Projektseite";
 import { PlateAssistant, gemerkterZugang, plateSoll, type DrehKurz, type Projekt } from "./PlateAssistant";
 
 type Phase = "bereit" | "kopieren" | "pruefen" | "nachlesen" | "nachpruefen" | "fertig" | "fehler";
@@ -124,6 +125,7 @@ export function App() {
   const [abbruchFragen, setAbbruchFragen] = useState(false);
   const abbruchZeit = useRef(0);
   const { update, pflicht, version } = useAktualisierung();
+  const [seite, setSeite] = useState<"einlesen" | "projekt">("einlesen");
   const [befunde, setBefunde] = useState<Befund[]>([]);
 
   useEffect(() => {
@@ -293,12 +295,25 @@ export function App() {
         <div className="i-marke">
           Stage Ingest <span className="mono">{version}</span>
         </div>
+        <nav className="i-reiter">
+          <button className={`k-chip ${seite === "einlesen" ? "k-chip-aktiv" : ""}`} onClick={() => setSeite("einlesen")}>
+            Einlesen
+          </button>
+          <button className={`k-chip ${seite === "projekt" ? "k-chip-aktiv" : ""}`} onClick={() => setSeite("projekt")}>
+            Projekt
+          </button>
+        </nav>
         <div className="i-kopf-rechts">
           <Kopflampe phase={phase} ergebnis={ergebnis} />
           <ThemaSchalter />
         </div>
       </header>
 
+      {seite === "projekt" ? (
+        <main className="i-flaeche">
+          <Projektseite basis={zielOrdner} />
+        </main>
+      ) : (
       <div className="i-rumpf">
         <aside className="k-spalte">
           <section className="k-gruppe">
@@ -513,6 +528,7 @@ export function App() {
           </div>
         </main>
       </div>
+      )}
     </div>
   );
 }
