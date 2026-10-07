@@ -76,14 +76,14 @@ export function Aktualisierung({ update, pflicht, laeuft }: { update: Update | n
   }
 
   return (
-    <div className="i-hinweis i-update">
+    <div className={`aktualisierung ${pflicht ? "aktualisierung-pflicht" : ""}`} role="status">
       <span>
-        {pflicht ? "Pflicht-Update" : "Update verfügbar"}: <span className="mono">{update.version}</span>
+        <strong>{pflicht ? "Pflicht-Update" : "Update verfügbar"}</strong> <span className="zahl">{update.version}</span>
         {pflicht && " · Bericht, Ordnerstruktur oder Schnittstelle haben sich geändert. Neue Karten erst nach dem Update."}
         {laeuft && " · Installieren nach dem Kopieren."}
-        {fehler && <span className="k-warn"> · {fehler}</span>}
+        {fehler && <span className="text-fehler"> · {fehler}</span>}
       </span>
-      <button className="k-taste k-taste-klein" disabled={laeuft || installiert} onClick={installieren}>
+      <button className={`knopf knopf-klein ${pflicht ? "knopf-haupt" : ""}`} disabled={laeuft || installiert} onClick={installieren}>
         {installiert ? "Wird installiert …" : "Installieren und neu starten"}
       </button>
     </div>

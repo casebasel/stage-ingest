@@ -12,3 +12,6 @@ src-tauri/icons/ios/
 # Lokale Einstellungen pro Rechner (Ziele, Server, Pfade)
 einstellungen.lokal.json
 .claude/settings.local.json
+
+# Bildschirmfotos der Gestaltungsprüfung (lokal)
+.impeccable/review/

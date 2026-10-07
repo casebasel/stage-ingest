@@ -1,0 +1,315 @@
+// Der Auftrag (Karte, Dreh) und der laufende Vorgang. Liegt über den Seiten, damit ein Seitenwechsel nichts verliert
+// und der Kopf überall zeigt, was gerade läuft.
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import {
+  abbrechen as kernAbbrechen,
+  aufFortschritt,
+  karteEinlesen,
+  kartenziele,
+  sollVonStage,
+  vorabPruefen,
+  zielNachpruefen,
+  type Befund,
+  type Dreh,
+  type Fortschritt,
+  type KartenErgebnis,
+  type Nachpruefung,
+  type SollClip,
+} from "./kern";
+import { gemerkt, merken, useEinstellungen } from "./einstellungen";
+import { plateSoll, useKonto, type DrehKurz, type Projekt } from "./konto";
+
+export type Phase = "bereit" | "kopieren" | "pruefen" | "nachlesen" | "nachpruefen" | "fertig" | "fehler";
+
+export type Stand = {
+  dateien: number;
+  bytes: number;
+  gelesen: number;
+  datei: string;
+  dateiNummer: number;
+  pruefZiel: number;
+  pruefPfad: string;
+  pruefNummer: number;
+  beginn: number;
+  ausfaelle: { ordner: string; fehler: string }[];
+  /** Zahl der Ziele beim Start (die Auswahl kann sich danach ändern). */
+  zielZahl: number;
+};
+
+const LEER: Stand = {
+  dateien: 0,
+  bytes: 0,
+  gelesen: 0,
+  datei: "",
+  dateiNummer: 0,
+  pruefZiel: 0,
+  pruefPfad: "",
+  pruefNummer: 0,
+  beginn: 0,
+  ausfaelle: [],
+  zielZahl: 0,
+};
+
+/** Quelle: Pfad, und wenn aus der Liste der eingesteckten Laufwerke gewählt, dessen Angaben (für Auswerfen). */
+export type Quelle = { pfad: string; name: string; laufwerk: boolean; kamera?: string; clips?: number; bytes?: number };
+
+export const LAUFEND: Phase[] = ["kopieren", "pruefen", "nachlesen", "nachpruefen"];
+
+function useLaufHalten() {
+  const e = useEinstellungen();
+  const konto = useKonto();
+
+  const [quelle, setQuelleRoh] = useState<Quelle | null>(null);
+  const [phase, setPhase] = useState<Phase>("bereit");
+  const [stand, setStand] = useState<Stand>(LEER);
+  const [ergebnis, setErgebnis] = useState<KartenErgebnis | null>(null);
+  /** Karte des letzten Ergebnisses: zum Auswerfen nach „Sicher zum Formatieren“. */
+  const [letzteQuelle, setLetzteQuelle] = useState<Quelle | null>(null);
+  const [fehler, setFehler] = useState<string | null>(null);
+  const [nachpruefung, setNachpruefung] = useState<Nachpruefung | null>(null);
+  const [nachpruefFehler, setNachpruefFehler] = useState<{ ordner: string; text: string } | null>(null);
+  const laeuft = LAUFEND.includes(phase);
+
+  // Dreh: Projekt (aus dem Plate Assistant gewählt oder getippt), Datum, Drehort.
+  const heute = new Date().toLocaleDateString("sv-SE");
+  const [projektText, setProjektText] = useState<string>(() => gemerkt("projekt", ""));
+  const [paProjekt, setPaProjekt] = useState<Projekt | null>(null);
+  const [paDreh, setPaDreh] = useState<DrehKurz | null>(null);
+  // Der Drehort wird nur am selben Tag übernommen: sonst landet die Karte von heute still im Ordner von gestern.
+  const [drehName, setDrehName] = useState<string>(() => (gemerkt("drehTag", "") === heute ? gemerkt("drehName", "") : ""));
+  const [drehDatum, setDrehDatum] = useState(heute);
+  useEffect(() => merken("projekt", projektText), [projektText]);
+  useEffect(() => {
+    merken("drehName", drehName);
+    merken("drehTag", heute);
+  }, [drehName, heute]);
+
+  const dreh: Dreh | null =
+    projektText.trim() && drehName.trim()
+      ? { projekt: projektText.trim(), kurzname: paProjekt?.kurzname ?? null, datum: drehDatum, name: drehName.trim() }
+      : null;
+  const drehSchluessel = dreh ? `${dreh.projekt}|${dreh.kurzname}|${dreh.datum}|${dreh.name}` : "";
+
+  // Soll-Liste der Stage (im Studio).
+  const [soll, setSoll] = useState<{ liste: SollClip[]; fehler: string | null; zeit: number } | null>(null);
+  async function sollLaden(): Promise<SollClip[]> {
+    const adresse = e.stageAdresse.trim();
+    if (!adresse) {
+      setSoll(null);
+      return [];
+    }
+    try {
+      const liste = await sollVonStage(adresse);
+      setSoll({ liste, fehler: null, zeit: Date.now() });
+      // Im Studio: aktives Filmprojekt der Stage übernehmen, wenn noch keines eingetragen ist.
+      if (!projektText.trim()) {
+        const p = await invoke<{ id: string; name: string; kurzname: string } | null>("stage_projekt", { adresse }).catch(
+          () => null,
+        );
+        if (p) {
+          setProjektText(p.name);
+          setPaProjekt({ id: p.id, name: p.name, kurzname: p.kurzname, aktiv: true });
+        }
+      }
+      return liste;
+    } catch (err) {
+      setSoll({ liste: [], fehler: String(err), zeit: Date.now() });
+      return [];
+    }
+  }
+
+  // Kartenziele berechnet der Kern (Kartenname bei Laufwerkswurzel, taugliche Ordnernamen).
+  const [ziele, setZiele] = useState<string[]>([]);
+  const basisSchluessel = e.ziele.join("|");
+  useEffect(() => {
+    if (!quelle || e.ziele.length === 0) {
+      setZiele([]);
+      return;
+    }
+    let aktuell = true;
+    kartenziele(quelle.pfad, e.ziele, dreh)
+      .then((z) => aktuell && setZiele(z))
+      .catch(() => aktuell && setZiele(e.ziele.map((z) => z.replace(/[\\/]+$/, "") + (z.includes("\\") ? "\\" : "/") + quelle.name)));
+    return () => {
+      aktuell = false;
+    };
+  }, [quelle?.pfad, basisSchluessel, drehSchluessel]);
+
+  // Vorab-Prüfung bei jeder Änderung von Karte, Zielen oder Einstellungen.
+  const [befunde, setBefunde] = useState<Befund[]>([]);
+  const zieleSchluessel = ziele.join("|");
+  useEffect(() => {
+    if (!quelle || ziele.length === 0 || laeuft) {
+      setBefunde([]);
+      return;
+    }
+    let aktuell = true;
+    vorabPruefen({ quelle: quelle.pfad, ziele, mitMd5: e.mitMd5, mindestKopien: e.mindestKopien, dreh })
+      .then((b) => aktuell && setBefunde(b))
+      .catch((err) => aktuell && setBefunde([{ stufe: "fehler", text: String(err) }]));
+    return () => {
+      aktuell = false;
+    };
+  }, [quelle?.pfad, zieleSchluessel, e.mitMd5, e.mindestKopien, laeuft]);
+
+  useEffect(() => {
+    // Phase ausserhalb des Zustands-Updaters setzen: React darf Updater mehrfach und spät ausführen, ein setPhase
+    // darin könnte „prüft“ nach dem fertigen Ergebnis wieder setzen.
+    const weg = aufFortschritt((f: Fortschritt) => {
+      if (f.phase !== "kopieren") setPhase(f.phase);
+      setStand((s) => {
+        if (f.phase === "pruefen")
+          return {
+            ...s,
+            pruefNummer: f.ziel === s.pruefZiel ? s.pruefNummer + 1 : 1,
+            pruefZiel: f.ziel,
+            pruefPfad: f.pfad,
+          };
+        if (f.phase === "nachlesen" || f.phase === "nachpruefen") return { ...s, pruefPfad: f.pfad, pruefNummer: s.pruefNummer + 1 };
+        const m = f.meldung;
+        switch (m.art) {
+          case "begonnen":
+            return { ...s, dateien: m.dateien, bytes: m.bytes };
+          case "datei":
+            return { ...s, datei: m.pfad, dateiNummer: m.nummer };
+          case "bytes":
+            return { ...s, gelesen: m.gelesen };
+          case "zielAusgefallen":
+            return { ...s, ausfaelle: [...s.ausfaelle, { ordner: m.ordner, fehler: m.fehler }] };
+        }
+      });
+    });
+    return () => {
+      weg.then((f) => f());
+    };
+  }, []);
+
+  function quelleWaehlen(q: Quelle | null) {
+    setQuelleRoh(q);
+    if (q) {
+      setErgebnis(null);
+      setFehler(null);
+      setPhase("bereit");
+    }
+  }
+
+  async function einlesen() {
+    if (!quelle || ziele.length === 0) return;
+    setFehler(null);
+    setErgebnis(null);
+    setNachpruefung(null);
+    setStand({ ...LEER, beginn: Date.now(), zielZahl: ziele.length });
+    setPhase("kopieren");
+    try {
+      // Soll-Liste frisch holen; ist die Stage nicht erreichbar, wird trotzdem kopiert.
+      const sollStage = await sollLaden();
+      // Draussen: Takes des gewählten Drehorts aus dem Plate Assistant (fehlt der Zugang, nur ein Hinweis).
+      let sollPlate: SollClip[] = [];
+      if (paDreh) {
+        try {
+          sollPlate = await plateSoll(konto.zugang, paDreh.id);
+        } catch (err) {
+          setSoll({ liste: sollStage, fehler: `Plate Assistant: ${err}`, zeit: Date.now() });
+        }
+      }
+      const r = await karteEinlesen({
+        quelle: quelle.pfad,
+        ziele,
+        mitMd5: e.mitMd5,
+        mindestKopien: e.mindestKopien,
+        zweimalLesen: e.zweimalLesen,
+        soll: [...sollStage, ...sollPlate],
+        dreh,
+        artCmd: e.artCmd.trim() || null,
+        stageAdresse: e.stageAdresse.trim() || null,
+        plateZugang: paDreh ? konto.zugang : null,
+        plateDreh: paDreh?.id ?? null,
+      });
+      setErgebnis(r);
+      setLetzteQuelle(quelle);
+      setQuelleRoh(null); // nächste Karte: nie aus Versehen dieselbe nochmals
+      setPhase("fertig");
+    } catch (err) {
+      setFehler(String(err));
+      setPhase("fehler");
+    }
+  }
+
+  async function nachpruefen(ordner: string) {
+    // Eine Karte, die schon gewählt oder fertig ist, bleibt dabei unberührt: nur Phase und Stand werden geliehen.
+    const vorher = phase;
+    setNachpruefFehler(null);
+    setNachpruefung(null);
+    setStand({ ...LEER, beginn: Date.now() });
+    setPhase("nachpruefen");
+    try {
+      setNachpruefung(await zielNachpruefen(ordner));
+    } catch (err) {
+      setNachpruefFehler({ ordner, text: String(err) });
+    }
+    setPhase(vorher === "fertig" || vorher === "fehler" ? vorher : "bereit");
+  }
+
+  // Abbrechen braucht einen zweiten Klick nach frühestens 0,5 s und innerhalb von 4 s (wie Überschreiben in der Stage).
+  const [abbruchFragen, setAbbruchFragen] = useState(false);
+  const abbruchZeit = useRef(0);
+  function abbrechen() {
+    const jetzt = Date.now();
+    if (abbruchFragen && jetzt - abbruchZeit.current >= 500 && jetzt - abbruchZeit.current <= 4000) {
+      kernAbbrechen();
+      setAbbruchFragen(false);
+      return;
+    }
+    abbruchZeit.current = jetzt;
+    setAbbruchFragen(true);
+    setTimeout(() => setAbbruchFragen(false), 4000);
+  }
+
+  return {
+    quelle,
+    quelleWaehlen,
+    letzteQuelle,
+    phase,
+    stand,
+    ergebnis,
+    fehler,
+    nachpruefung,
+    nachpruefFehler,
+    laeuft,
+    ziele,
+    befunde,
+    sperrt: befunde.some((b) => b.stufe === "fehler"),
+    dreh,
+    projektText,
+    setProjektText,
+    paProjekt,
+    setPaProjekt,
+    paDreh,
+    setPaDreh,
+    drehName,
+    setDrehName,
+    drehDatum,
+    setDrehDatum,
+    soll,
+    sollLaden,
+    einlesen,
+    nachpruefen,
+    abbrechen,
+    abbruchFragen,
+  };
+}
+
+export type Lauf = ReturnType<typeof useLaufHalten>;
+const Kontext = createContext<Lauf | null>(null);
+
+export function LaufGeben({ children }: { children: ReactNode }) {
+  const l = useLaufHalten();
+  return <Kontext.Provider value={l}>{children}</Kontext.Provider>;
+}
+
+export function useLauf() {
+  const l = useContext(Kontext);
+  if (!l) throw new Error("Lauf fehlt");
+  return l;
+}

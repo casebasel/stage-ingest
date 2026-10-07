@@ -64,9 +64,15 @@ pub fn beurteilen(urteile: &[Urteil], kennungen: &[Kennung], mindest_kopien: usi
             "nur {unabhaengige_kopien} von {mindest_kopien} unabhängigen Kopien: mehrere Ziele liegen auf derselben Platte"
         )
     } else if unbewiesene > 0 {
-        format!("nur {unabhaengige_kopien} von {mindest_kopien} Kopien bewiesen: bei {unbewiesene} Ziel(en) ist die Platte nicht bestimmbar")
+        format!(
+            "nur {unabhaengige_kopien} von {mindest_kopien} Kopien bewiesen: bei {} ist die Platte nicht bestimmbar",
+            ziele(unbewiesene, "Ziel", "Zielen")
+        )
     } else if schlechte > 0 {
-        format!("nur {unabhaengige_kopien} von {mindest_kopien} Kopien geprüft, {schlechte} Ziel(e) fehlerhaft")
+        format!(
+            "nur {unabhaengige_kopien} von {mindest_kopien} Kopien geprüft, {} fehlerhaft",
+            ziele(schlechte, "Ziel", "Ziele")
+        )
     } else {
         format!("nur {unabhaengige_kopien} von {mindest_kopien} Kopien")
     };
@@ -82,6 +88,11 @@ pub fn beurteilen(urteile: &[Urteil], kennungen: &[Kennung], mindest_kopien: usi
         );
     }
     Freigabe { sicher, unabhaengige_kopien, mindest_kopien, kennung_unsicher, grund, hinweise }
+}
+
+/// „1 Ziel“, „2 Ziele“.
+fn ziele(n: usize, eins: &str, mehr: &str) -> String {
+    format!("{n} {}", if n == 1 { eins } else { mehr })
 }
 
 #[cfg(test)]

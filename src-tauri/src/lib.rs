@@ -365,10 +365,9 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
         freigabe.hinweise.push(format!("Gedreht, aber nicht auf der Karte: {}", liste.join(", ")));
     }
     if auftrag.mindest_kopien < 2 {
-        freigabe.hinweise.push(format!(
-            "Schwelle auf {} Kopie gesenkt (Studio-Standard 2): nur für Tests.",
-            auftrag.mindest_kopien
-        ));
+        freigabe
+            .hinweise
+            .push(format!("Schwelle auf {} Kopie gesenkt (Studio-Standard 2): nur für Tests.", auftrag.mindest_kopien));
     }
     if !kopie.ausgelassen.is_empty() {
         freigabe
@@ -685,6 +684,63 @@ fn laeuft(laufend: State<'_, Laufend>) -> bool {
     laufend.aktiv.load(Ordering::SeqCst)
 }
 
+/// Was hinter einem Zielordner steckt: Gerät (für „unabhängige Kopie?“) und Platz. Für die Anzeige vor dem Start;
+/// entschieden wird erst nach der Kopie, mit denselben Kennungen.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ZielGeraet {
+    pfad: PathBuf,
+    kennung: Option<Kennung>,
+    gesamt: Option<u64>,
+    frei: Option<u64>,
+    fehler: Option<String>,
+}
+
+#[tauri::command]
+async fn ziel_geraete(basis: Vec<PathBuf>) -> Vec<ZielGeraet> {
+    tauri::async_runtime::spawn_blocking(move || {
+        basis
+            .into_iter()
+            .map(|pfad| {
+                if !pfad.exists() {
+                    return ZielGeraet {
+                        pfad,
+                        kennung: None,
+                        gesamt: None,
+                        frei: None,
+                        fehler: Some("nicht eingesteckt".into()),
+                    };
+                }
+                let (gesamt, frei) =
+                    ingest_kern::laufwerke::platz(&pfad).map_or((None, None), |(g, f)| (Some(g), Some(f)));
+                match geraet::kennung(&pfad) {
+                    Ok(k) => ZielGeraet { pfad, kennung: Some(k), gesamt, frei, fehler: None },
+                    Err(e) => ZielGeraet { pfad, kennung: None, gesamt, frei, fehler: Some(e.to_string()) },
+                }
+            })
+            .collect()
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// Eingesteckte Laufwerke mit erkannten Karten. Die Oberfläche fragt alle paar Sekunden; Erkennen heisst nur anbieten.
+#[tauri::command]
+async fn laufwerke() -> Vec<ingest_kern::laufwerke::Laufwerk> {
+    tauri::async_runtime::spawn_blocking(ingest_kern::laufwerke::auflisten).await.unwrap_or_default()
+}
+
+/// Karte auswerfen. Nie während eines Kopiervorgangs: dann könnte es die Karte oder ein Ziel treffen.
+#[tauri::command]
+async fn auswerfen(pfad: PathBuf, laufend: State<'_, Laufend>) -> Result<(), String> {
+    if laufend.aktiv.load(Ordering::SeqCst) {
+        return Err("Während des Kopierens wird nichts ausgeworfen.".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || ingest_kern::laufwerke::auswerfen(&pfad))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -718,7 +774,10 @@ pub fn run() {
             projekt_uebersicht,
             abbrechen,
             laeuft,
-            verlauf
+            verlauf,
+            laufwerke,
+            auswerfen,
+            ziel_geraete
         ])
         .build(tauri::generate_context!())
         .expect("Stage Ingest konnte nicht starten")

@@ -1,0 +1,597 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-07T18:33:47+00:00",
+  "title": "Design System: Stage Ingest",
+  "extensions": {
+    "colorMeta": {
+      "fenster": {
+        "role": "neutral",
+        "displayName": "Fenster",
+        "canonical": "oklch(0.150 0.004 255)",
+        "tag": "oklch(0.880 0.004 255)",
+        "tonalRamp": [
+          "oklch(0.150 0.004 255)",
+          "oklch(0.260 0.004 255)",
+          "oklch(0.370 0.004 255)",
+          "oklch(0.480 0.004 255)",
+          "oklch(0.600 0.004 255)",
+          "oklch(0.720 0.004 255)",
+          "oklch(0.840 0.004 255)",
+          "oklch(0.950 0.004 255)"
+        ]
+      },
+      "panel": {
+        "role": "neutral",
+        "displayName": "Panel",
+        "canonical": "oklch(0.190 0.004 255)",
+        "tag": "oklch(0.975 0.002 255)",
+        "tonalRamp": [
+          "oklch(0.150 0.004 255)",
+          "oklch(0.260 0.004 255)",
+          "oklch(0.370 0.004 255)",
+          "oklch(0.480 0.004 255)",
+          "oklch(0.600 0.004 255)",
+          "oklch(0.720 0.004 255)",
+          "oklch(0.840 0.004 255)",
+          "oklch(0.950 0.004 255)"
+        ]
+      },
+      "panel-2": {
+        "role": "neutral",
+        "displayName": "Panel 2",
+        "canonical": "oklch(0.215 0.005 255)",
+        "tag": "oklch(0.935 0.004 255)",
+        "tonalRamp": [
+          "oklch(0.150 0.005 255)",
+          "oklch(0.260 0.005 255)",
+          "oklch(0.370 0.005 255)",
+          "oklch(0.480 0.005 255)",
+          "oklch(0.600 0.005 255)",
+          "oklch(0.720 0.005 255)",
+          "oklch(0.840 0.005 255)",
+          "oklch(0.950 0.005 255)"
+        ]
+      },
+      "feld": {
+        "role": "neutral",
+        "displayName": "Feld",
+        "canonical": "oklch(0.140 0.004 255)",
+        "tag": "oklch(1 0 0)",
+        "tonalRamp": [
+          "oklch(0.150 0.004 255)",
+          "oklch(0.260 0.004 255)",
+          "oklch(0.370 0.004 255)",
+          "oklch(0.480 0.004 255)",
+          "oklch(0.600 0.004 255)",
+          "oklch(0.720 0.004 255)",
+          "oklch(0.840 0.004 255)",
+          "oklch(0.950 0.004 255)"
+        ]
+      },
+      "hover": {
+        "role": "neutral",
+        "displayName": "Hover",
+        "canonical": "oklch(0.240 0.006 255)",
+        "tag": "oklch(0.915 0.006 255)",
+        "tonalRamp": [
+          "oklch(0.150 0.006 255)",
+          "oklch(0.260 0.006 255)",
+          "oklch(0.370 0.006 255)",
+          "oklch(0.480 0.006 255)",
+          "oklch(0.600 0.006 255)",
+          "oklch(0.720 0.006 255)",
+          "oklch(0.840 0.006 255)",
+          "oklch(0.950 0.006 255)"
+        ]
+      },
+      "linie": {
+        "role": "neutral",
+        "displayName": "Linie",
+        "canonical": "oklch(0.290 0.006 255)",
+        "tag": "oklch(0.820 0.006 255)",
+        "tonalRamp": [
+          "oklch(0.150 0.006 255)",
+          "oklch(0.260 0.006 255)",
+          "oklch(0.370 0.006 255)",
+          "oklch(0.480 0.006 255)",
+          "oklch(0.600 0.006 255)",
+          "oklch(0.720 0.006 255)",
+          "oklch(0.840 0.006 255)",
+          "oklch(0.950 0.006 255)"
+        ]
+      },
+      "linie-stark": {
+        "role": "neutral",
+        "displayName": "Linie stark",
+        "canonical": "oklch(0.420 0.008 255)",
+        "tag": "oklch(0.600 0.010 255)",
+        "tonalRamp": [
+          "oklch(0.150 0.008 255)",
+          "oklch(0.260 0.008 255)",
+          "oklch(0.370 0.008 255)",
+          "oklch(0.480 0.008 255)",
+          "oklch(0.600 0.008 255)",
+          "oklch(0.720 0.008 255)",
+          "oklch(0.840 0.008 255)",
+          "oklch(0.950 0.008 255)"
+        ]
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Text",
+        "canonical": "oklch(0.940 0.003 255)",
+        "tag": "oklch(0.190 0.010 255)",
+        "tonalRamp": [
+          "oklch(0.150 0.003 255)",
+          "oklch(0.260 0.003 255)",
+          "oklch(0.370 0.003 255)",
+          "oklch(0.480 0.003 255)",
+          "oklch(0.600 0.003 255)",
+          "oklch(0.720 0.003 255)",
+          "oklch(0.840 0.003 255)",
+          "oklch(0.950 0.003 255)"
+        ]
+      },
+      "text-2": {
+        "role": "neutral",
+        "displayName": "Text 2",
+        "canonical": "oklch(0.820 0.006 255)",
+        "tag": "oklch(0.320 0.010 255)",
+        "tonalRamp": [
+          "oklch(0.150 0.006 255)",
+          "oklch(0.260 0.006 255)",
+          "oklch(0.370 0.006 255)",
+          "oklch(0.480 0.006 255)",
+          "oklch(0.600 0.006 255)",
+          "oklch(0.720 0.006 255)",
+          "oklch(0.840 0.006 255)",
+          "oklch(0.950 0.006 255)"
+        ]
+      },
+      "text-3": {
+        "role": "neutral",
+        "displayName": "Text 3",
+        "canonical": "oklch(0.745 0.008 255)",
+        "tag": "oklch(0.420 0.010 255)",
+        "tonalRamp": [
+          "oklch(0.150 0.008 255)",
+          "oklch(0.260 0.008 255)",
+          "oklch(0.370 0.008 255)",
+          "oklch(0.480 0.008 255)",
+          "oklch(0.600 0.008 255)",
+          "oklch(0.720 0.008 255)",
+          "oklch(0.840 0.008 255)",
+          "oklch(0.950 0.008 255)"
+        ]
+      },
+      "akzent": {
+        "role": "primary",
+        "displayName": "Arbeitsblau",
+        "canonical": "oklch(0.470 0.150 252)",
+        "tag": "oklch(0.500 0.160 255)",
+        "tonalRamp": [
+          "oklch(0.150 0.150 252)",
+          "oklch(0.260 0.150 252)",
+          "oklch(0.370 0.150 252)",
+          "oklch(0.480 0.150 252)",
+          "oklch(0.600 0.150 252)",
+          "oklch(0.720 0.150 252)",
+          "oklch(0.840 0.150 252)",
+          "oklch(0.950 0.150 252)"
+        ]
+      },
+      "akzent-hover": {
+        "role": "primary",
+        "displayName": "Arbeitsblau Hover",
+        "canonical": "oklch(0.520 0.150 252)",
+        "tag": "oklch(0.450 0.160 255)",
+        "tonalRamp": [
+          "oklch(0.150 0.150 252)",
+          "oklch(0.260 0.150 252)",
+          "oklch(0.370 0.150 252)",
+          "oklch(0.480 0.150 252)",
+          "oklch(0.600 0.150 252)",
+          "oklch(0.720 0.150 252)",
+          "oklch(0.840 0.150 252)",
+          "oklch(0.950 0.150 252)"
+        ]
+      },
+      "akzent-text": {
+        "role": "primary",
+        "displayName": "Blauer Text",
+        "canonical": "oklch(0.760 0.120 250)",
+        "tag": "oklch(0.450 0.160 255)",
+        "tonalRamp": [
+          "oklch(0.150 0.120 250)",
+          "oklch(0.260 0.120 250)",
+          "oklch(0.370 0.120 250)",
+          "oklch(0.480 0.120 250)",
+          "oklch(0.600 0.120 250)",
+          "oklch(0.720 0.120 250)",
+          "oklch(0.840 0.120 250)",
+          "oklch(0.950 0.120 250)"
+        ]
+      },
+      "auf-akzent": {
+        "role": "primary",
+        "displayName": "Auf Akzent",
+        "canonical": "oklch(0.990 0 0)",
+        "tag": "oklch(1 0 0)",
+        "tonalRamp": [
+          "oklch(0.150 0 0)",
+          "oklch(0.260 0 0)",
+          "oklch(0.370 0 0)",
+          "oklch(0.480 0 0)",
+          "oklch(0.600 0 0)",
+          "oklch(0.720 0 0)",
+          "oklch(0.840 0 0)",
+          "oklch(0.950 0 0)"
+        ]
+      },
+      "auswahl": {
+        "role": "primary",
+        "displayName": "Auswahl",
+        "canonical": "oklch(0.340 0.085 252)",
+        "tag": "oklch(0.870 0.055 252)",
+        "tonalRamp": [
+          "oklch(0.150 0.085 252)",
+          "oklch(0.260 0.085 252)",
+          "oklch(0.370 0.085 252)",
+          "oklch(0.480 0.085 252)",
+          "oklch(0.600 0.085 252)",
+          "oklch(0.720 0.085 252)",
+          "oklch(0.840 0.085 252)",
+          "oklch(0.950 0.085 252)"
+        ]
+      },
+      "auswahl-leise": {
+        "role": "primary",
+        "displayName": "Leise Auswahl",
+        "canonical": "oklch(0.260 0.050 252)",
+        "tag": "oklch(0.925 0.030 252)",
+        "tonalRamp": [
+          "oklch(0.150 0.050 252)",
+          "oklch(0.260 0.050 252)",
+          "oklch(0.370 0.050 252)",
+          "oklch(0.480 0.050 252)",
+          "oklch(0.600 0.050 252)",
+          "oklch(0.720 0.050 252)",
+          "oklch(0.840 0.050 252)",
+          "oklch(0.950 0.050 252)"
+        ]
+      },
+      "ok": {
+        "role": "secondary",
+        "displayName": "Sicher-Grün",
+        "canonical": "oklch(0.760 0.150 150)",
+        "tag": "oklch(0.470 0.130 150)",
+        "tonalRamp": [
+          "oklch(0.150 0.150 150)",
+          "oklch(0.260 0.150 150)",
+          "oklch(0.370 0.150 150)",
+          "oklch(0.480 0.150 150)",
+          "oklch(0.600 0.150 150)",
+          "oklch(0.720 0.150 150)",
+          "oklch(0.840 0.150 150)",
+          "oklch(0.950 0.150 150)"
+        ]
+      },
+      "warn": {
+        "role": "secondary",
+        "displayName": "Achtung-Gold",
+        "canonical": "oklch(0.820 0.140 80)",
+        "tag": "oklch(0.490 0.115 70)",
+        "tonalRamp": [
+          "oklch(0.150 0.140 80)",
+          "oklch(0.260 0.140 80)",
+          "oklch(0.370 0.140 80)",
+          "oklch(0.480 0.140 80)",
+          "oklch(0.600 0.140 80)",
+          "oklch(0.720 0.140 80)",
+          "oklch(0.840 0.140 80)",
+          "oklch(0.950 0.140 80)"
+        ]
+      },
+      "fehler": {
+        "role": "secondary",
+        "displayName": "Fehler-Rot",
+        "canonical": "oklch(0.710 0.170 25)",
+        "tag": "oklch(0.480 0.180 25)",
+        "tonalRamp": [
+          "oklch(0.150 0.170 25)",
+          "oklch(0.260 0.170 25)",
+          "oklch(0.370 0.170 25)",
+          "oklch(0.480 0.170 25)",
+          "oklch(0.600 0.170 25)",
+          "oklch(0.720 0.170 25)",
+          "oklch(0.840 0.170 25)",
+          "oklch(0.950 0.170 25)"
+        ]
+      },
+      "ok-grund": {
+        "role": "secondary",
+        "displayName": "Sicher-Grund",
+        "canonical": "oklch(0.285 0.065 150)",
+        "tag": "oklch(0.920 0.055 150)",
+        "tonalRamp": [
+          "oklch(0.150 0.065 150)",
+          "oklch(0.260 0.065 150)",
+          "oklch(0.370 0.065 150)",
+          "oklch(0.480 0.065 150)",
+          "oklch(0.600 0.065 150)",
+          "oklch(0.720 0.065 150)",
+          "oklch(0.840 0.065 150)",
+          "oklch(0.950 0.065 150)"
+        ]
+      },
+      "warn-grund": {
+        "role": "secondary",
+        "displayName": "Achtung-Grund",
+        "canonical": "oklch(0.300 0.060 80)",
+        "tag": "oklch(0.935 0.065 88)",
+        "tonalRamp": [
+          "oklch(0.150 0.060 80)",
+          "oklch(0.260 0.060 80)",
+          "oklch(0.370 0.060 80)",
+          "oklch(0.480 0.060 80)",
+          "oklch(0.600 0.060 80)",
+          "oklch(0.720 0.060 80)",
+          "oklch(0.840 0.060 80)",
+          "oklch(0.950 0.060 80)"
+        ]
+      },
+      "fehler-grund": {
+        "role": "secondary",
+        "displayName": "Fehler-Grund",
+        "canonical": "oklch(0.290 0.075 25)",
+        "tag": "oklch(0.925 0.045 25)",
+        "tonalRamp": [
+          "oklch(0.150 0.075 25)",
+          "oklch(0.260 0.075 25)",
+          "oklch(0.370 0.075 25)",
+          "oklch(0.480 0.075 25)",
+          "oklch(0.600 0.075 25)",
+          "oklch(0.720 0.075 25)",
+          "oklch(0.840 0.075 25)",
+          "oklch(0.950 0.075 25)"
+        ]
+      },
+      "gefahr": {
+        "role": "secondary",
+        "displayName": "Gefahr",
+        "canonical": "oklch(0.480 0.190 25)",
+        "tag": "oklch(0.500 0.190 25)",
+        "tonalRamp": [
+          "oklch(0.150 0.190 25)",
+          "oklch(0.260 0.190 25)",
+          "oklch(0.370 0.190 25)",
+          "oklch(0.480 0.190 25)",
+          "oklch(0.600 0.190 25)",
+          "oklch(0.720 0.190 25)",
+          "oklch(0.840 0.190 25)",
+          "oklch(0.950 0.190 25)"
+        ]
+      }
+    },
+    "themes": {
+      "default": "nacht",
+      "nacht": ":root",
+      "tag": ":root[data-thema=\"tag\"]",
+      "note": "Darstellung folgt dem System oder der Wahl im Kopf (data-thema auf <html>). Tag: Grundschrift 450, Schatten 0 1px 2px oklch(0 0 0 / 0.12)."
+    },
+    "typographyMeta": {
+      "urteil": {
+        "displayName": "Urteil",
+        "purpose": "Nur der Titel im Urteilsband."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Kopf der Laufansicht."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Kartenname im Block Karte."
+      },
+      "block-titel": {
+        "displayName": "Blocktitel",
+        "purpose": "Titel in Blockköpfen."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Grundschrift überall; tags Gewicht 450."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Spaltenköpfe, Feldbeschriftungen, Hilfetexte; Satzschreibung."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Pfade, Seriennummern, Prüfsummen, Zahlen mit Tabellenziffern."
+      }
+    },
+    "shadows": [
+      {
+        "name": "knopf-kontakt",
+        "value": "0 1px 2px oklch(0 0 0 / 0.35)",
+        "tag": "0 1px 2px oklch(0 0 0 / 0.12)",
+        "purpose": "Nur unter normalen Knöpfen; deaktiviert ohne."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease",
+        "value": "cubic-bezier(0.25, 1, 0.5, 1)",
+        "purpose": "Zustandswechsel: Knopf-Hover 120 ms, Schalter und Aufklappen 150 ms."
+      },
+      {
+        "name": "fortschritt",
+        "value": "transform 300ms linear",
+        "purpose": "Fortschrittsbalken per scaleX."
+      },
+      {
+        "name": "drehen",
+        "value": "rotate 360deg, 1s linear infinite",
+        "purpose": "Laufzeichen im Status."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "0.01ms",
+        "purpose": "prefers-reduced-motion schaltet alle Übergänge ab."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "projekt-schmal",
+        "value": "1240px",
+        "purpose": "Inspektor 300 → 260 px, Kennzahlen enger."
+      }
+    ],
+    "icons": {
+      "library": "lucide-react",
+      "stroke": {
+        "navigation": 1.75,
+        "status": 2
+      },
+      "sizes": {
+        "status": 14,
+        "navigation": 16,
+        "quelle": 18,
+        "urteil": 44
+      }
+    }
+  },
+  "components": [
+    {
+      "name": "Knopf",
+      "kind": "button",
+      "refersTo": "knopf",
+      "description": "Normaler Knopf für alle Nebenaktionen.",
+      "html": "<button class=\"ds-knopf\">Andere Karte</button>",
+      "css": ".ds-knopf { font-family: var(--schrift); font-size: 13px; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border: 1px solid var(--linie-stark); border-radius: var(--rund-klein); background: var(--panel-2); color: var(--text); font-weight: 500; box-shadow: var(--schatten); cursor: pointer; transition: background 120ms var(--ease); } .ds-knopf:hover { background: var(--hover); } .ds-knopf:active { background: var(--linie); } .ds-knopf:focus-visible { outline: 2px solid var(--akzent-text); outline-offset: 1px; }"
+    },
+    {
+      "name": "Hauptknopf gross",
+      "kind": "button",
+      "refersTo": "knopf-haupt-gross",
+      "description": "Die eine Hauptaktion: Einlesen in der Startleiste, Karte auswerfen im Urteil.",
+      "html": "<button class=\"ds-knopf-haupt\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M12 2v8\"/><path d=\"m16 6-4 4-4-4\"/><rect width=\"20\" height=\"8\" x=\"2\" y=\"14\" rx=\"2\"/><path d=\"M6 18h.01\"/><path d=\"M10 18h.01\"/></svg>Einlesen</button>",
+      "css": ".ds-knopf-haupt { font-family: var(--schrift); font-size: 13px; display: inline-flex; align-items: center; gap: 6px; height: 38px; padding: 0 20px; font-size: 14px; border: 1px solid var(--akzent); border-radius: var(--rund); background: var(--akzent); color: var(--auf-akzent); font-weight: 600; box-shadow: var(--schatten); cursor: pointer; transition: background 120ms var(--ease); } .ds-knopf-haupt:hover { background: var(--akzent-hover); border-color: var(--akzent-hover); } .ds-knopf-haupt:focus-visible { outline: 2px solid var(--akzent-text); outline-offset: 1px; }"
+    },
+    {
+      "name": "Gefahrknopf",
+      "kind": "button",
+      "refersTo": "knopf-gefahr",
+      "description": "Nur der zweite Schritt einer riskanten Bestätigung.",
+      "html": "<button class=\"ds-knopf-gefahr\">Ja, auf 1 Kopie senken</button>",
+      "css": ".ds-knopf-gefahr { font-family: var(--schrift); font-size: 13px; display: inline-flex; align-items: center; height: 28px; padding: 0 12px; border: 1px solid var(--gefahr); border-radius: var(--rund-klein); background: var(--gefahr); color: oklch(0.99 0 0); font-weight: 600; cursor: pointer; } .ds-knopf-gefahr:hover { filter: brightness(1.08); } .ds-knopf-gefahr:focus-visible { outline: 2px solid var(--akzent-text); outline-offset: 1px; }"
+    },
+    {
+      "name": "Eingabe mit Beschriftung",
+      "kind": "input",
+      "refersTo": "eingabe",
+      "description": "Feld mit sichtbarer Beschriftung darüber.",
+      "html": "<label class=\"ds-gruppe\"><span>Drehort</span><input class=\"ds-eingabe\" placeholder=\"z. B. Rheinufer\"></label>",
+      "css": ".ds-gruppe { font-family: var(--schrift); font-size: 13px; display: grid; gap: 4px; max-width: 320px; } .ds-gruppe > span { color: var(--text-3); font-size: 12px; } .ds-eingabe { font: inherit; height: 28px; padding: 0 8px; border: 1px solid var(--linie-stark); border-radius: var(--rund-klein); background: var(--feld); color: var(--text); } .ds-eingabe::placeholder { color: var(--text-3); } .ds-eingabe:focus-visible { outline: 2px solid var(--akzent-text); outline-offset: -1px; border-color: transparent; }"
+    },
+    {
+      "name": "Seitenreiter",
+      "kind": "nav",
+      "refersTo": "kopfleiste",
+      "description": "Kopfleiste 44 px mit Resolve-artigen Seitenreitern.",
+      "html": "<nav class=\"ds-kopf\"><b class=\"ds-marke\">Stage Ingest</b><button class=\"ds-seite\" aria-current=\"page\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M12 2v8\"/><path d=\"m16 6-4 4-4-4\"/><rect width=\"20\" height=\"8\" x=\"2\" y=\"14\" rx=\"2\"/><path d=\"M6 18h.01\"/><path d=\"M10 18h.01\"/></svg>Einlesen</button><button class=\"ds-seite\">Projekt</button><button class=\"ds-seite\">Prüfen</button></nav>",
+      "css": ".ds-kopf { font-family: var(--schrift); font-size: 13px; display: flex; align-items: stretch; gap: 2px; height: 44px; padding: 0 12px 0 16px; background: var(--panel-2); border-bottom: 1px solid var(--linie); color: var(--text); } .ds-marke { align-self: center; margin-right: 18px; font-size: 14px; font-weight: 650; } .ds-seite { font: inherit; position: relative; display: inline-flex; align-items: center; gap: 7px; padding: 0 14px; border: 0; background: none; color: var(--text-2); font-weight: 500; cursor: pointer; } .ds-seite:hover { color: var(--text); background: var(--hover); } .ds-seite[aria-current=page] { color: var(--text); font-weight: 600; } .ds-seite[aria-current=page] svg { color: var(--akzent-text); } .ds-seite[aria-current=page]::after { content: ''; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2px; border-radius: 2px; background: var(--akzent); } .ds-seite:focus-visible { outline: 2px solid var(--akzent-text); outline-offset: -2px; }"
+    },
+    {
+      "name": "Status",
+      "kind": "chip",
+      "refersTo": null,
+      "description": "Zustand als Zeichen + Wort; nur das Zeichen trägt die Signalfarbe.",
+      "html": "<span class=\"ds-status ds-ok\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"m9 12 2 2 4-4\"/></svg><span>Eigene Kopie</span></span>",
+      "css": ".ds-status { font-family: var(--schrift); font-size: 13px; display: inline-flex; align-items: center; gap: 6px; color: var(--text); } .ds-ok svg { color: var(--ok); }"
+    },
+    {
+      "name": "Block mit Tabelle",
+      "kind": "card",
+      "refersTo": "block",
+      "description": "Block mit Kopfleiste und dichter Tabelle.",
+      "html": "<section class=\"ds-block\"><div class=\"ds-block-kopf\"><b>Ziele</b></div><table class=\"ds-tabelle\"><thead><tr><th>#</th><th>Zielordner</th><th class=\"r\">Frei</th></tr></thead><tbody><tr><td>1</td><td class=\"m\">/Volumes/SAMSUNG T7/Footage</td><td class=\"m r\">1,21 TB</td></tr><tr aria-selected=\"true\"><td>2</td><td class=\"m\">/Volumes/NAS/Footage</td><td class=\"m r\">21,70 TB</td></tr></tbody></table></section>",
+      "css": ".ds-block { font-family: var(--schrift); font-size: 13px; background: var(--panel); border: 1px solid var(--linie); border-radius: var(--rund); overflow: hidden; color: var(--text); } .ds-block-kopf { display: flex; align-items: center; min-height: 40px; padding: 6px 12px; background: var(--panel-2); border-bottom: 1px solid var(--linie); font-weight: 650; } .ds-tabelle { width: 100%; border-collapse: collapse; } .ds-tabelle th { padding: 6px 12px; border-bottom: 1px solid var(--linie-stark); color: var(--text-3); font-size: 12px; font-weight: 500; text-align: left; } .ds-tabelle td { padding: 6px 12px; border-bottom: 1px solid var(--linie); } .ds-tabelle tr:last-child td { border-bottom: 0; } .ds-tabelle tbody tr:hover { background: color-mix(in oklch, var(--hover) 60%, transparent); } .ds-tabelle tr[aria-selected=true] { background: var(--auswahl); } .ds-tabelle .m { font-family: var(--mono); font-size: 0.94em; font-variant-numeric: tabular-nums; } .ds-tabelle .r { text-align: right; }"
+    },
+    {
+      "name": "Urteilsband",
+      "kind": "custom",
+      "refersTo": "urteil-ok",
+      "description": "Signatur: das Urteil nach dem Lauf über die ganze Breite, mit Belegen und Auswerfen.",
+      "html": "<section class=\"ds-urteil\"><svg width=\"44\" height=\"44\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"m9 12 2 2 4-4\"/></svg><div class=\"ds-urteil-text\"><h1>Sicher zum Formatieren</h1><p>A001R132 · 2 unabhängige Kopien geprüft</p><p class=\"ds-kw\">15 Dateien · 27,40 GB · XXH3-128 · 3 min 34 s</p><span class=\"ds-status ds-ok\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"m9 12 2 2 4-4\"/></svg><span>Samsung PSSD T7 · 15 Dateien zurückgelesen</span></span></div><button class=\"ds-knopf-haupt\">Karte auswerfen</button></section>",
+      "css": ".ds-urteil { font-family: var(--schrift); font-size: 13px; display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: start; gap: 18px; padding: 20px 22px; border: 1px solid var(--ok); border-radius: 8px; background: var(--ok-grund); color: var(--text); } .ds-urteil > svg { color: var(--ok); } .ds-urteil-text { display: grid; gap: 6px; } .ds-urteil h1 { margin: 0; font-size: 26px; font-weight: 700; line-height: 1.15; letter-spacing: -0.015em; } .ds-urteil p { margin: 0; font-size: 14px; color: var(--text-2); } .ds-urteil .ds-kw { font-family: var(--mono); font-size: 13px; color: var(--text-3); font-variant-numeric: tabular-nums; } .ds-status { display: inline-flex; align-items: center; gap: 6px; } .ds-ok svg { color: var(--ok); } .ds-knopf-haupt { font: inherit; height: 38px; padding: 0 20px; font-size: 14px; border: 1px solid var(--akzent); border-radius: var(--rund); background: var(--akzent); color: var(--auf-akzent); font-weight: 600; cursor: pointer; } .ds-knopf-haupt:hover { background: var(--akzent-hover); } .ds-knopf-haupt:focus-visible { outline: 2px solid var(--akzent-text); outline-offset: 1px; }"
+    },
+    {
+      "name": "Segment",
+      "kind": "chip",
+      "refersTo": null,
+      "description": "Umschaltgruppe für Filter und Darstellung.",
+      "html": "<div class=\"ds-segment\"><button aria-pressed=\"true\">Alle</button><button>Fehlt</button><button>Da</button></div>",
+      "css": ".ds-segment { font-family: var(--schrift); font-size: 13px; display: inline-flex; border: 1px solid var(--linie-stark); border-radius: var(--rund-klein); overflow: hidden; background: var(--feld); } .ds-segment button { font: inherit; height: 26px; padding: 0 10px; border: 0; border-left: 1px solid var(--linie); background: none; color: var(--text-2); cursor: pointer; } .ds-segment button:first-child { border-left: 0; } .ds-segment button:hover { background: var(--hover); color: var(--text); } .ds-segment button[aria-pressed=true] { background: var(--auswahl); color: var(--text); font-weight: 600; } .ds-segment button:focus-visible { outline: 2px solid var(--akzent-text); outline-offset: -2px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "Das vertraute Offload-Pult",
+    "overview": "Stage Ingest sieht aus und bedient sich wie die etablierten Werkzeuge der Kategorie: Silverstack und ShotPut Pro für den Ablauf (Quellen links, Auftrag in der Mitte, Ziele als Tabelle), DaVinci Resolve für die Seitenreiter im Kopf und die neutralen Graphit-Flächen. Vertrautheit ist gewollt; wer diese Programme kennt, findet sich ohne Einweisung zurecht. Eigenheiten werden nicht erfunden, die Sorgfalt steckt in Dichte, Lesbarkeit und Zuständen.\n\nDie Oberfläche ist dicht und ruhig: 13-px-Grundschrift, Haarlinien statt Schatten, Blöcke mit Kopfleiste, Tabellen mit klebenden Kopfzeilen. Farbe ist Information. Ein einziges Blau trägt Hauptaktion, Auswahl und Fokus; Grün, Gold und Rot erscheinen nur als Zustand und immer zusammen mit einem Lucide-Zeichen und einem Wort. Die einzige grosse Geste ist das Urteilsband nach dem Lauf: über die ganze Breite, farbig hinterlegt, mit Belegen und der nächsten Handlung.\n\nZwei vollwertige Sätze: **Nacht** (Standard, `:root`) für das dunkle Studio und **Tag** (`:root[data-thema=\"tag\"]`) für Sonne draussen. Beide sind normativ; die Frontmatter führt Nacht, die Tag-Werte stehen unten und im Sidecar. Bewusst verworfen (Richtungswahl 07.10.2026): die frühere eigenwillige Konsole-Optik und Karten-Kacheln.",
+    "keyCharacteristics": [
+      "Neutrales Graphit (Hue 255, Chroma ≤ 0,01) in drei Flächenstufen plus Feld und Hover.",
+      "Ein Blau für Hauptaktion, Auswahl und Fokus; nichts sonst ist blau.",
+      "Zustände nie nur über Farbe: Zeichen + Wort, in Tabellen, im Kopf und im Urteil.",
+      "Geist für die Oberfläche, Geist Mono mit Tabellenziffern für Pfade, Prüfsummen, Zahlen.",
+      "Dichte Tabellen mit Haarlinien, Blöcke mit 40-px-Kopfleiste, flach bis auf einen 1-px-Knopfschatten.",
+      "Tag und Nacht als eigene Sätze mit Kontrastmindestwerten aus PRODUCT.md."
+    ],
+    "rules": [
+      {
+        "name": "The Ein-Blau Rule",
+        "body": "Blau bedeutet „hier handeln“ oder „das ist gewählt“. Keine blauen Dekorflächen, keine blauen Überschriften, keine zweite Akzentfarbe.",
+        "section": "colors"
+      },
+      {
+        "name": "The Zeichen-und-Wort Rule",
+        "body": "Grün, Gold und Rot erscheinen nie allein: jeder Zustand trägt ein Lucide-Zeichen (CircleCheck, CircleAlert, CircleX, CircleDashed, LoaderCircle) und ein Wort. Die Signalfarbe färbt das Zeichen, der Text bleibt in Textfarbe.",
+        "section": "colors"
+      },
+      {
+        "name": "The Kontrast-Boden Rule",
+        "body": "Text nachts ≥ 6,8:1, tags ≥ 5,4:1; Signalfarben ≥ 5:1 auf ihrem Grund; Ränder von Bedienelementen tags ≥ 3:1 auf dem Panel. Ein neuer Wert, der darunter liegt, gehört nicht ins System.",
+        "section": "colors"
+      },
+      {
+        "name": "The Tag-ist-kräftiger Rule",
+        "body": "Im Tag-Satz steht die Grundschrift auf 450 und ohne Antialiasing-Glättung, weil dünne Schrift in der Sonne zuerst verschwindet.",
+        "section": "typography"
+      },
+      {
+        "name": "The Zahlen-in-Mono Rule",
+        "body": "Jede Zahl, die man vergleicht oder abliest (Bytes, Prozent, Dauer, Seriennummer, Prüfsumme, Pfad), steht in Geist Mono mit Tabellenziffern. Dezimalkomma, Schweizer Format.",
+        "section": "typography"
+      },
+      {
+        "name": "The Linie-statt-Schatten Rule",
+        "body": "Blöcke, Tabellen, Inspektor und Leisten werden durch 1-px-Linien getrennt, nie durch Schatten oder schwebende Karten.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do Flächen nur aus den Tokens Fenster, Panel, Panel 2, Feld nehmen und mit 1-px-Linien trennen.",
+      "Do jeden Zustand mit Lucide-Zeichen und Wort zeigen; Signalfarbe nur auf Zeichen, Rand oder Grund.",
+      "Do Zahlen, Pfade, Seriennummern und Prüfsummen in Geist Mono mit Tabellenziffern setzen; Pfade vorne kürzen.",
+      "Do jeden neuen Wert in beiden Sätzen (Nacht und Tag) definieren und gegen die Kontrastböden prüfen.",
+      "Do Lucide-Zeichen mit Strich 1,75 (Navigation, grosse Zeichen) bzw. 2 (Status) verwenden.",
+      "Do eine Hauptaktion pro Bereich in Akzent; alles andere als normaler Knopf."
+    ],
+    "donts": [
+      "Don't Konsole-Optik oder Karten-Kacheln zurückbringen (Richtungswahl 07.10.2026).",
+      "Don't Blau für etwas anderes als Hauptaktion, Auswahl, Fokus und Laufanzeige verwenden.",
+      "Don't Zustand nur über Farbe ausdrücken, und keine farbigen Fliesstexte in Grün oder Gold.",
+      "Don't Schatten ausser dem Knopf-Kontaktschatten; keine schwebenden Karten, keine Verläufe.",
+      "Don't Versal-Überschriften oder Kicker über Blocktiteln; Gruppenbezeichnungen stehen in Satzschreibung.",
+      "Don't Unicode-Zeichen als Symbole (✓, ✗, →); Symbole kommen aus Lucide."
+    ]
+  }
+}

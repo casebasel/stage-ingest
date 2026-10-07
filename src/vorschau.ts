@@ -41,14 +41,14 @@ function ergebnis(ziele: string[]) {
       quelle: KARTE,
       dateien: [...clips, "A001R132.ale"].map((p, i) => ({
         pfad: p,
-        groesse: p.endsWith(".ale") ? 4812 : 1_840_000_000 + i * 37_000_000,
+        groesse: p.endsWith(".ale") ? 4812 : Math.round((27_400_000_000 - 4812) / 14),
         geaendert: jetzt,
         pruefsumme: { xxh128: (0x3c516b751c69e9c4n + BigInt(i)).toString(16).padStart(32, "0"), md5: null },
       })),
       ordner: [],
       ausgelassen: [],
       ziele: ziele.map((o) => ({ ordner: o, fehler: null })),
-      beginn: jetzt,
+      beginn: new Date(Date.now() - 214_000).toISOString(),
       ende: jetzt,
     },
     urteile: ziele.map((o, i) => ({
@@ -85,7 +85,7 @@ function ergebnis(ziele: string[]) {
       unabhaengige_kopien: sicher ? 2 : 1,
       mindest_kopien: 2,
       kennung_unsicher: false,
-      grund: sicher ? "2 unabhängige Kopien geprüft" : "nur 1 von 2 Kopien geprüft, 1 Ziel(e) fehlerhaft",
+      grund: sicher ? "2 unabhängige Kopien geprüft" : "nur 1 von 2 Kopien geprüft, 1 Ziel fehlerhaft",
       hinweise: ["Netzlaufwerk über das Netz zurückgelesen; den Zwischenspeicher des NAS kann keine App umgehen."],
     },
   };
@@ -105,6 +105,15 @@ async function kopierenNachspielen(ziele: string[]) {
       await emit("ingest://fortschritt", { phase: "pruefen", ziel: z, pfad: clips[i * 2] });
     }
 }
+
+let karteSteckt = true;
+const laufwerke = () => [
+  ...(karteSteckt
+    ? [{ pfad: KARTE, name: "A001R132", gesamt: 256_000_000_000, frei: 228_600_000_000, netz: false, karte: { kamera: "ARRI", clips: 14, bytes: 27_400_000_000 } }]
+    : []),
+  { pfad: "/Volumes/SAMSUNG T7", name: "SAMSUNG T7", gesamt: 2_000_000_000_000, frei: zustand === "sperre" ? 12_400_000_000 : 1_214_000_000_000, netz: false, karte: null },
+  { pfad: "/Volumes/NAS", name: "NAS", gesamt: 48_000_000_000_000, frei: 21_700_000_000_000, netz: true, karte: null },
+];
 
 const projekt = { id: "projekt-happy_end", name: "Happy End", kurzname: "HAPPY_END", aktiv: true };
 
@@ -141,6 +150,18 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
     return ergebnis(ziele);
   },
   abbrechen: () => null,
+  laufwerke,
+  auswerfen: async () => {
+    await warte(600);
+    karteSteckt = false;
+    return null;
+  },
+  ziel_geraete: (a) =>
+    (a.basis as string[]).map((pfad) =>
+      pfad.includes("NAS")
+        ? { pfad, kennung: { wert: "netz:10.0.0.5", sicher: true, art: "netz", seriennummer: null, beschreibung: "Netzlaufwerk //nas/Footage" }, gesamt: 48e12, frei: 21.7e12, fehler: null }
+        : { pfad, kennung: { wert: "platte:disk4", sicher: true, art: "platte", seriennummer: "S6XNNF0W123456", beschreibung: "Samsung PSSD T7" }, gesamt: 2e12, frei: zustand === "sperre" ? 12.4e9 : 1.214e12, fehler: null },
+    ),
   laeuft: () => false,
   verlauf: () => [
     { beginn: "2026-10-28T09:45:00Z", ende: "", karte: "A001R131", quelle: "", dateien: 22, bytes: 41_200_000_000, sicher: true, grund: "2 unabhängige Kopien geprüft", ziele: [{ ordner: "", gut: true, bericht: "/x.pdf" }] },
@@ -148,7 +169,7 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
   ],
   soll_von_stage: () => [],
   stage_projekt: () => null,
-  plate_anmelden: () => ({ email: "marlon@ca-se.ch", ingestRecht: false }),
+  plate_anmelden: () => ({ email: "team@beispiel.invalid", ingestRecht: false }),
   plate_projekte: () => [projekt, { id: "projekt-moevenpick", name: "Mövenpick Spot", kurzname: "MOEVENPICK", aktiv: false }],
   plate_drehs: () => [
     { id: "d1", name: "Rheinufer", datum: "2026-10-28", projektId: projekt.id, produktion: "" },
@@ -201,6 +222,11 @@ export function einrichten() {
   // Vorschau-Daten: zwei Ziele, Stage-Adresse leer; das Thema per ?thema=tag|nacht erzwingbar.
   try {
     if (!localStorage.getItem("ingest.ziele")) localStorage.setItem("ingest.ziele", JSON.stringify(ZIELE));
+    if (params.get("konto") !== "nein" && !localStorage.getItem("ingest.plate.zugang"))
+      localStorage.setItem(
+        "ingest.plate.zugang",
+        JSON.stringify({ adresse: "https://beispiel.invalid", anonKey: "beispiel", email: "team@beispiel.invalid" }),
+      );
     const t = params.get("thema");
     if (t === "tag" || t === "nacht") localStorage.setItem("ingest.thema", t);
   } catch {

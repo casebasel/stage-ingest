@@ -106,7 +106,8 @@ export const bytesText = (n: number) => {
   if (n < 1e3) return `${n} B`;
   if (n < 1e6) return `${(n / 1e3).toFixed(1).replace(".", ",")} kB`;
   if (n < 1e9) return `${(n / 1e6).toFixed(1).replace(".", ",")} MB`;
-  return `${(n / 1e9).toFixed(2).replace(".", ",")} GB`;
+  if (n < 1e12) return `${(n / 1e9).toFixed(n < 1e11 ? 2 : 1).replace(".", ",")} GB`;
+  return `${(n / 1e12).toFixed(2).replace(".", ",")} TB`;
 };
 
 export type VerlaufEintrag = {
@@ -131,3 +132,23 @@ export const kartenziele = (quelle: string, basis: string[], dreh: Dreh | null) 
 
 export type Werte = { mittel: number; min: number; max: number };
 export type Bewegung = { bilder: number; tilt: Werte | null; roll: Werte | null; brennweiteMm: number | null };
+
+export type Laufwerk = {
+  pfad: string;
+  name: string;
+  gesamt: number | null;
+  frei: number | null;
+  netz: boolean;
+  karte: { kamera: string; clips: number; bytes: number } | null;
+};
+export const laufwerke = () => invoke<Laufwerk[]>("laufwerke");
+export const auswerfen = (pfad: string) => invoke<void>("auswerfen", { pfad });
+
+export type ZielGeraet = {
+  pfad: string;
+  kennung: Kennung | null;
+  gesamt: number | null;
+  frei: number | null;
+  fehler: string | null;
+};
+export const zielGeraete = (basis: string[]) => invoke<ZielGeraet[]>("ziel_geraete", { basis });
