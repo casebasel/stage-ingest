@@ -140,16 +140,20 @@ impl Plate {
         Ok(drehs_aus(&v))
     }
 
-    /// Takes eines Drehorts als Soll-Liste (mit Plates; Gelöschtes auf allen Ebenen ausgefiltert).
+    /// Takes eines Drehorts als Soll-Liste (Gelöschtes auf allen Ebenen ausgefiltert). Gelesen werden alle
+    /// Drehorte desselben Tages: das Zeitfenster eines Takes reicht bis zur nächsten Klappe des Tages, auch an
+    /// einem anderen Drehort (die Kamera zählt den ganzen Tag).
     pub fn soll(&self, z: &Zugang, dreh_id: &str) -> Result<Vec<SollClip>, String> {
+        let kopf = self.lesen(z, &format!("dreh?id=eq.{}&select=datum", url_teil(dreh_id)))?;
+        let datum = kopf[0]["datum"].as_str().ok_or("Drehort nicht gefunden")?.to_owned();
         let v = self.lesen(
             z,
             &format!(
-                "dreh?id=eq.{}&select=id,geloescht,plate(id,nummer,name,szene,buchstabe,geloescht,take(*))",
-                url_teil(dreh_id)
+                "dreh?datum=eq.{}&select=id,datum,geloescht,plate(id,nummer,name,szene,buchstabe,geloescht,take(*))",
+                url_teil(&datum)
             ),
         )?;
-        Ok(soll_aus(&v))
+        Ok(soll_aus(&v, dreh_id))
     }
 
     /// Legt ein Projekt an (oder führt es zusammen, wenn es das schon gibt). Gibt die ID zurück.
@@ -244,11 +248,31 @@ fn drehs_aus(v: &Value) -> Vec<DrehKurz> {
         .collect()
 }
 
-/// Takes → Soll-Liste. Ein Take zählt nur, wenn Take, Plate und Drehort nicht gelöscht sind.
-/// Clipname: von der Kamera (`clip.name`), sonst von Hand (`clip_name`); ohne Endung, gross.
-fn soll_aus(v: &Value) -> Vec<SollClip> {
+/// Takes → Soll-Liste (nur des Drehorts `dreh_id`). Ein Take zählt nur, wenn Take, Plate und Drehort nicht
+/// gelöscht sind. Clipname: von der Kamera (`clip.name`), sonst von Hand (`clip_name`); ohne Endung, gross.
+/// `v` enthält alle Drehorte des Tages, für das Zeitfenster bis zur nächsten Klappe.
+fn soll_aus(v: &Value, dreh_id: &str) -> Vec<SollClip> {
+    let gilt = |x: &Value| x["geloescht"] != true;
+    let mut klappen: Vec<chrono::DateTime<chrono::Utc>> = v
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|d| gilt(d))
+        .flat_map(|d| d["plate"].as_array().into_iter().flatten().filter(|p| gilt(p)))
+        .flat_map(|p| p["take"].as_array().into_iter().flatten().filter(|t| gilt(t)))
+        .filter_map(|t| chrono::DateTime::parse_from_rfc3339(t["start_zeit"].as_str()?).ok().map(|z| z.to_utc()))
+        .collect();
+    klappen.sort();
+    let naechste = |von: &str| -> String {
+        chrono::DateTime::parse_from_rfc3339(von)
+            .ok()
+            .and_then(|v| klappen.iter().find(|k| **k > v.to_utc()))
+            .map(|k| k.to_rfc3339())
+            .unwrap_or_default()
+    };
     let mut aus = Vec::new();
-    for dreh in v.as_array().into_iter().flatten().filter(|d| d["geloescht"] != true) {
+    for dreh in v.as_array().into_iter().flatten().filter(|d| gilt(d) && d["id"] == dreh_id) {
+        let drehtag = text(&dreh["datum"]);
         for plate in dreh["plate"].as_array().into_iter().flatten().filter(|p| p["geloescht"] != true) {
             let slate = format!("{}{}", text(&plate["szene"]), text(&plate["buchstabe"]));
             let szene = if !slate.is_empty() {
@@ -286,6 +310,9 @@ fn soll_aus(v: &Value) -> Vec<SollClip> {
                     bewertung: bewertung.into(),
                     quelle: "plate".into(),
                     take_id: text(&take["id"]),
+                    start_zeit: text(&take["start_zeit"]),
+                    fenster_bis: naechste(&text(&take["start_zeit"])),
+                    drehtag: drehtag.clone(),
                 });
             }
         }
@@ -341,27 +368,34 @@ mod tests {
     // Form wie PostgREST mit Embedding (Vertrag plate-assistant docs/ABGLEICH.md), Werte erfunden.
     fn dreh() -> Value {
         json!([{
-            "id": "01DREH", "geloescht": false,
+            "id": "01DREH", "datum": "2026-10-28", "geloescht": false,
             "plate": [
                 { "id": "01P1", "nummer": 3, "name": "Rheinufer", "szene": "42", "buchstabe": "A", "geloescht": false,
                   "take": [
                     { "id": "01T1", "nummer": 1, "art": "take", "clip": null, "clip_name": "a001c003_261028_r1ab.mov",
+                      "start_zeit": "2026-10-28T09:44:55.5+00:00",
                       "start_tc": null, "end_tc": null, "bewertung": "circle", "geloescht": false },
                     { "id": "01T2", "nummer": 2, "art": "graukugel", "clip": {"name": "A001C004_261028_R1AB", "startTc": "10:45:10:12"},
                       "clip_name": null, "start_tc": null, "end_tc": null, "bewertung": null, "geloescht": false },
                     { "id": "01T3", "nummer": 3, "art": "take", "clip": null, "clip_name": null,
+                      "start_zeit": "2026-10-28T09:46:00+00:00",
                       "start_tc": "10:46:00:00", "end_tc": "10:46:20:00", "bewertung": "gut", "geloescht": false },
                     { "id": "01T4", "nummer": 4, "art": "take", "clip_name": "A001C009_261028_R1AB", "geloescht": true }
                   ]},
                 { "id": "01P2", "nummer": 4, "name": "", "szene": "", "buchstabe": "", "geloescht": true,
                   "take": [{ "id": "01T9", "nummer": 1, "clip_name": "A001C010_261028_R1AB", "geloescht": false }] }
             ]
+        }, {
+            // anderer Drehort am selben Tag: seine Klappe beendet das Fenster von Take 3
+            "id": "01ANDERS", "datum": "2026-10-28", "geloescht": false,
+            "plate": [{ "id": "01PX", "nummer": 1, "geloescht": false,
+                "take": [{ "id": "01TX", "nummer": 1, "start_zeit": "2026-10-28T10:30:00+00:00", "geloescht": false }] }]
         }])
     }
 
     #[test]
     fn takes_werden_soll_liste() {
-        let s = soll_aus(&dreh());
+        let s = soll_aus(&dreh(), "01DREH");
         assert_eq!(s.len(), 3, "gelöschter Take und Take einer gelöschten Plate fallen weg: {s:?}");
         assert_eq!(s[0].clip, "A001C003_261028_R1AB");
         assert_eq!((s[0].szene.as_str(), s[0].take.as_str(), s[0].bewertung.as_str()), ("42A", "1", "Favorit"));
@@ -369,6 +403,9 @@ mod tests {
         assert_eq!(s[1].start_tc, "10:45:10:12");
         assert!(s[2].clip.is_empty() && s[2].end_tc == "10:46:20:00", "ohne Clipnamen: Zuordnung über den Timecode");
         assert_eq!(s[2].take_id, "01T3");
+        assert_eq!(s[0].fenster_bis, "2026-10-28T09:46:00+00:00", "nächste Klappe desselben Tages");
+        assert_eq!(s[2].fenster_bis, "2026-10-28T10:30:00+00:00", "auch an einem anderen Drehort");
+        assert_eq!(s[0].drehtag, "2026-10-28");
     }
 
     #[test]

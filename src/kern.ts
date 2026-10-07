@@ -78,11 +78,15 @@ export type SollClip = {
   bewertung: string;
   quelle: string;
   takeId?: string;
+  startZeit?: string;
+  fensterBis?: string;
+  drehtag?: string;
 };
 export type Abgleich = {
   gefunden: [SollClip, string][];
   fehlt: SollClip[];
   ueberTimecode: [SollClip, string][];
+  ueberZeitfenster: [SollClip, string][];
   mehrdeutig: [SollClip, string[]][];
   unerwartet: string[];
 };

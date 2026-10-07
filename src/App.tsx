@@ -708,9 +708,9 @@ function AbgleichAnzeige({ a }: { a: NonNullable<KartenErgebnis["abgleich"]> }) 
   return (
     <section className="i-abschnitt">
       <h2>
-        Abgleich mit der Stage{" "}
+        Abgleich mit der Soll-Liste{" "}
         <span className="k-leise mono">
-          · {a.gefunden.length + a.ueberTimecode.length} gefunden · {a.fehlt.length} fehlen ·{" "}
+          · {a.gefunden.length + a.ueberTimecode.length + a.ueberZeitfenster.length} gefunden · {a.fehlt.length} fehlen ·{" "}
           {a.unerwartet.length + a.mehrdeutig.length} zu klären
         </span>
       </h2>
@@ -723,6 +723,11 @@ function AbgleichAnzeige({ a }: { a: NonNullable<KartenErgebnis["abgleich"]> }) 
       {a.ueberTimecode.map(([s, p]) => (
         <span key={`tc-${p}`} className="k-lampe k-lampe-leise">
           <i /> Über Timecode: {s.szene} Take {s.take} → <span className="mono">{name(p)}</span>
+        </span>
+      ))}
+      {a.ueberZeitfenster.map(([s, p]) => (
+        <span key={`zf-${p}`} className="k-lampe k-lampe-leise">
+          <i /> Über die Klappenzeit: {s.szene} Take {s.take} → <span className="mono">{name(p)}</span>
         </span>
       ))}
       {a.mehrdeutig.map(([s, ps]) => (

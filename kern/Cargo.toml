@@ -20,6 +20,7 @@ quick-xml = "0.37"
 gethostname = "0.5"
 csv = "1"
 unicode-normalization = "0.1"
+chrono-tz = "0.10"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

@@ -51,7 +51,7 @@ Die Struktur ist von Marlon bestätigt (07.10.2026) und gebaut (`kern/src/strukt
 ## 6. Zuordnung Clip ↔ Take
 
 1. **Exakt über die Kamera:** Der Plate Assistant schreibt vor der Aufnahme Szene/Take per ARRI CAP in den Clip und speichert den Clipnamen per CAP am Take. Stage Ingest prüft beides gegeneinander.
-2. Rückfälle in dieser Reihenfolge: `clip_name` (von Hand) → Timecode-Überlappung → Zeitfenster der Plate.
+2. Rückfälle in dieser Reihenfolge: Clipname (`clip.name` von CAP, sonst `clip_name` von Hand) → Timecode-Überlappung → **Zeitfenster der Klappe** (Plate Assistant: Clipbeginn nach dem Tipp auf „Klappe“ und vor der nächsten Klappe desselben Tages, über alle Drehorte; Kamera-TC = Tageszeit Europe/Zurich, Spielraum 20 s). Gebaut in `kern/src/soll.rs`. Geplant als optionale erste Wahl: User Info 1 `PA:<take.id>` (erst nach dem CAP-Test an der Mini); widerspricht sie dem Clipnamen → Klärungsliste.
 3. Alles Unklare kommt in eine **Klärungsliste** in der App; nichts wird geraten.
 
 **Slate in der Kamera (entschieden 07.10.2026, Systemkarte `SCHNITTSTELLEN.md`):** Szene = Filmszene + Buchstabe der Plate (z. B. `42A`), Take = Take-Nummer, Info 1 = `PA:<take.id>` (erste Wahl der Zuordnung), Info 2 bleibt vorerst leer. Der Plate-Buchstabe ist ein eigenes Feld an der Plate (läuft je Filmszene über den ganzen Film) und wird nie aus der Plate-Nummer abgeleitet. CAP-Grenzen: Szene 16, Take 8, Info je 128 Zeichen, nur ASCII. Ob die Info-Felder im Clip ankommen, wird beim Mini-Test um den 20.10. geprüft.

@@ -28,7 +28,21 @@ pub struct SollClip {
     /// Take-ID der Quelle (Plate Assistant: ULID), für Rückmeldungen; leer bei der Stage-CSV.
     #[serde(default)]
     pub take_id: String,
+    /// Zeitfenster (Plate Assistant): Tipp auf „Klappe“ (ISO, UTC) bis zur nächsten Klappe desselben Tages
+    /// über alle Drehorte (leer = offen). Der Clip beginnt in diesem Fenster.
+    #[serde(default)]
+    pub start_zeit: String,
+    #[serde(default)]
+    pub fenster_bis: String,
+    /// Drehtag `JJJJ-MM-TT` (Ortszeit), um den Tageszeit-Timecode der Kamera in eine Uhrzeit umzurechnen.
+    #[serde(default)]
+    pub drehtag: String,
 }
+
+/// Spielraum zwischen iPhone-Uhr und Kamera-Timecode (laut Plate Assistant „um Sekunden“).
+const UHR_SPIEL_S: i64 = 20;
+/// Ohne nächste Klappe gilt das Fenster so lange.
+const FENSTER_OFFEN_S: i64 = 30 * 60;
 
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -39,6 +53,9 @@ pub struct Abgleich {
     pub fehlt: Vec<SollClip>,
     /// Takes ohne Clipnamen, über die grösste Timecode-Überlappung einem Clip zugeordnet.
     pub ueber_timecode: Vec<(SollClip, String)>,
+    /// Takes ohne Clipnamen und ohne Timecode, über das Zeitfenster ihrer Klappe zugeordnet.
+    #[serde(default)]
+    pub ueber_zeitfenster: Vec<(SollClip, String)>,
     /// Takes ohne Clipnamen, die mehrere Clips gleich gut überlappen (Klärungsliste).
     pub mehrdeutig: Vec<(SollClip, Vec<String>)>,
     /// Clips auf der Karte, zu denen kein Take bekannt ist (Klärungsliste).
@@ -144,8 +161,64 @@ pub fn abgleichen(kopie: &Kopie, soll: &[SollClip], clips: &[crate::ale::ClipZei
         }
     }
 
+    // Letzter Rückfall (Plate Assistant): Zeitfenster der Klappe. Der Timecode der Kamera ist Tageszeit in
+    // Ortszeit (Europe/Zurich), die Klappenzeit UTC vom iPhone.
+    let zugeordnet: BTreeSet<String> = a
+        .ueber_timecode
+        .iter()
+        .map(|(s, _)| s.take_id.clone())
+        .chain(a.mehrdeutig.iter().map(|(s, _)| s.take_id.clone()))
+        .collect();
+    for s in soll.iter().filter(|s| s.clip.trim().is_empty() && !s.start_zeit.is_empty()) {
+        if !s.take_id.is_empty() && zugeordnet.contains(&s.take_id) {
+            continue;
+        }
+        let Some((von, bis)) = fenster(s) else { continue };
+        let treffer: Vec<&String> = clips
+            .iter()
+            .filter(|c| !bekannt.contains(ohne_endung(&c.pfad)))
+            .filter(|c| {
+                c.angaben
+                    .as_ref()
+                    .and_then(|a| Some((a.start_tc.as_deref()?, a.fps?)))
+                    .and_then(|(tc, fps)| tc_als_zeit(&s.drehtag, tc, fps))
+                    .is_some_and(|t| t >= von && t < bis)
+            })
+            .map(|c| &c.pfad)
+            .collect();
+        match treffer[..] {
+            [] => {}
+            [einer] => {
+                bekannt.insert(ohne_endung(einer).to_owned());
+                a.ueber_zeitfenster.push((s.clone(), einer.clone()));
+            }
+            _ => a.mehrdeutig.push((s.clone(), treffer.into_iter().cloned().collect())),
+        }
+    }
+
     a.unerwartet = auf_karte.into_iter().filter(|(n, _)| !bekannt.contains(n)).map(|(_, p)| p).collect();
     a
+}
+
+/// Fenster eines Takes in UTC: Klappe minus Spielraum bis nächste Klappe (oder 30 min).
+fn fenster(s: &SollClip) -> Option<(chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>)> {
+    let von = chrono::DateTime::parse_from_rfc3339(&s.start_zeit).ok()?.to_utc();
+    let bis = chrono::DateTime::parse_from_rfc3339(&s.fenster_bis)
+        .map(|b| b.to_utc())
+        .unwrap_or(von + chrono::Duration::seconds(FENSTER_OFFEN_S));
+    Some((von - chrono::Duration::seconds(UHR_SPIEL_S), bis))
+}
+
+/// Tageszeit-Timecode der Kamera am Drehtag (Ortszeit Europe/Zurich) → UTC.
+pub fn tc_als_zeit(drehtag: &str, tc: &str, fps: f64) -> Option<chrono::DateTime<chrono::Utc>> {
+    use chrono::TimeZone;
+    let tag = chrono::NaiveDate::parse_from_str(drehtag, "%Y-%m-%d").ok()?;
+    let bilder = tc_bilder(tc, fps)?;
+    let f = fps.round() as i64;
+    let sekunden = bilder / f;
+    let nano = ((bilder % f) as f64 / fps * 1e9) as u32;
+    let zeit = chrono::NaiveTime::from_num_seconds_from_midnight_opt(sekunden as u32, nano)?;
+    chrono_tz::Europe::Zurich.from_local_datetime(&tag.and_time(zeit)).earliest().map(|t| t.to_utc())
 }
 
 /// Liest den CSV-Export der Stage (`/export/takes.csv`). Zeilen ohne Clipnamen werden übersprungen.
@@ -174,6 +247,9 @@ pub fn stage_csv(text: &str) -> Result<Vec<SollClip>, String> {
             bewertung: feld(&z, bew),
             quelle: "stage".into(),
             take_id: String::new(),
+            start_zeit: String::new(),
+            fenster_bis: String::new(),
+            drehtag: String::new(),
         });
     }
     Ok(aus)
@@ -270,6 +346,9 @@ mod timecode_tests {
             bewertung: String::new(),
             quelle: "plate".into(),
             take_id: String::new(),
+            start_zeit: String::new(),
+            fenster_bis: String::new(),
+            drehtag: String::new(),
         }
     }
 
@@ -317,6 +396,45 @@ mod timecode_tests {
         let a = abgleichen(&k, &[soll("00:00:01:00", "00:00:05:00")], &clips);
         assert!(a.ueber_timecode.is_empty());
         assert_eq!(a.mehrdeutig.len(), 1);
+    }
+
+    #[test]
+    fn take_ohne_clipnamen_und_tc_ueber_das_zeitfenster() {
+        // Drehtag 28.10.2026 (Winterzeit, UTC+1). Klappe Take 1 um 09:44:55 UTC, Take 2 um 09:50:00 UTC.
+        // Clip 1 beginnt 10:45:10 Ortszeit = 09:45:10 UTC → Take 1; Clip 2 um 10:50:30 Ortszeit → Take 2.
+        let k = kopie(&["A001C003_261028_R1AB.mov", "A001C004_261028_R1AB.mov"]);
+        let clips = [
+            zeile("A001C003_261028_R1AB.mov", "10:45:10:00", "10:46:00:00"),
+            zeile("A001C004_261028_R1AB.mov", "10:50:30:00", "10:51:00:00"),
+        ];
+        let take = |id: &str, von: &str, bis: &str| SollClip {
+            take_id: id.into(),
+            start_zeit: von.into(),
+            fenster_bis: bis.into(),
+            drehtag: "2026-10-28".into(),
+            start_tc: String::new(),
+            end_tc: String::new(),
+            ..soll("", "")
+        };
+        let a = abgleichen(
+            &k,
+            &[
+                take("T1", "2026-10-28T09:44:55+00:00", "2026-10-28T09:50:00+00:00"),
+                take("T2", "2026-10-28T09:50:00.5+00:00", ""),
+            ],
+            &clips,
+        );
+        let paare: Vec<(&str, &str)> =
+            a.ueber_zeitfenster.iter().map(|(s, p)| (s.take_id.as_str(), p.as_str())).collect();
+        assert_eq!(paare, [("T1", "A001C003_261028_R1AB.mov"), ("T2", "A001C004_261028_R1AB.mov")]);
+        assert!(a.unerwartet.is_empty() && a.mehrdeutig.is_empty());
+    }
+
+    #[test]
+    fn sommerzeit() {
+        // 20.10.2026 ist noch Sommerzeit (UTC+2).
+        let t = tc_als_zeit("2026-10-20", "14:00:00:00", 25.0).unwrap();
+        assert_eq!(t.to_rfc3339(), "2026-10-20T12:00:00+00:00");
     }
 
     #[test]
