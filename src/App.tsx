@@ -7,13 +7,14 @@ import {
   aufFortschritt,
   bytesText,
   karteEinlesen,
-  kartenname,
+  kartenziele,
   sollVonStage,
   vorabPruefen,
   zielNachpruefen,
   type Befund,
   type Nachpruefung,
   type SollClip,
+  type Dreh,
   type Fortschritt,
   type KartenErgebnis,
   type Abweichung,
@@ -124,13 +125,29 @@ export function App() {
   }, []);
 
   const laeuft = phase === "kopieren" || phase === "pruefen" || phase === "nachlesen" || phase === "nachpruefen";
-  // Jede Karte kommt in einen eigenen Ordner mit ihrem Namen (z. B. A001R132) unter dem gewählten Ziel.
-  // Den Namen bestimmt der Kern: bei einer Windows-Laufwerkswurzel ist es der Volume-Name, nicht „E:“.
-  const [karte, setKarte] = useState("");
+  // Drehstruktur: mit Produktion und Dreh kommt jede Karte nach <Ziel>/<Produktion>/<Datum>_<Dreh>/01_KAMERA/<Karte>.
+  // Produktion ist vorerst Text; sie wird zur gemeinsamen Liste aus der Supabase, sobald die Systemkarte das festlegt.
+  const [produktion, setProduktion] = useState<string>(() => gemerkt("produktion", ""));
+  const [drehName, setDrehName] = useState<string>(() => gemerkt("drehName", ""));
+  const [drehDatum, setDrehDatum] = useState<string>(() => new Date().toLocaleDateString("sv-SE"));
+  useEffect(() => merken("produktion", produktion), [produktion]);
+  useEffect(() => merken("drehName", drehName), [drehName]);
+  const dreh: Dreh | null =
+    produktion.trim() && drehName.trim() ? { produktion: produktion.trim(), datum: drehDatum, name: drehName.trim() } : null;
+  const drehSchluessel = dreh ? `${dreh.produktion}|${dreh.datum}|${dreh.name}` : "";
+
+  // Die Kartenziele berechnet der Kern (Kartenname bei Laufwerkswurzel, taugliche Ordnernamen).
+  const [ziele, setZiele] = useState<string[]>([]);
+  const basisSchluessel = zielOrdner.join("|");
   useEffect(() => {
-    if (quelle) kartenname(quelle).then(setKarte).catch(() => setKarte(name(quelle)));
-  }, [quelle]);
-  const ziele = quelle && karte ? zielOrdner.map((z) => z.replace(/[\\/]+$/, "") + trenner(z) + karte) : [];
+    if (!quelle || zielOrdner.length === 0) {
+      setZiele([]);
+      return;
+    }
+    kartenziele(quelle, zielOrdner, dreh)
+      .then(setZiele)
+      .catch(() => setZiele(zielOrdner.map((z) => z.replace(/[\\/]+$/, "") + trenner(z) + name(quelle))));
+  }, [quelle, basisSchluessel, drehSchluessel]);
 
   // Vorab-Prüfung bei jeder Änderung von Karte, Zielen oder Einstellungen.
   const zieleSchluessel = ziele.join("|");
@@ -140,7 +157,7 @@ export function App() {
       return;
     }
     let aktuell = true;
-    vorabPruefen({ quelle, ziele, mitMd5, mindestKopien })
+    vorabPruefen({ quelle, ziele, mitMd5, mindestKopien, dreh })
       .then((b) => aktuell && setBefunde(b))
       .catch((e) => aktuell && setBefunde([{ stufe: "fehler", text: String(e) }]));
     return () => {
@@ -173,7 +190,7 @@ export function App() {
       setNachpruefung(null);
       // Soll-Liste frisch holen; ist die Stage nicht erreichbar, wird trotzdem kopiert (Hinweis links).
       const sollListe = await sollLaden();
-      setErgebnis(await karteEinlesen({ quelle, ziele, mitMd5, mindestKopien, zweimalLesen, soll: sollListe }));
+      setErgebnis(await karteEinlesen({ quelle, ziele, mitMd5, mindestKopien, zweimalLesen, soll: sollListe, dreh }));
       setPhase("fertig");
     } catch (e) {
       setFehler(String(e));
@@ -242,6 +259,42 @@ export function App() {
                 <FolderInput size={16} strokeWidth={1.75} /> Karte wählen
               </button>
             </div>
+          </section>
+
+          <section className="k-gruppe">
+            <h2>Dreh</h2>
+            <input
+              className="i-eingabe"
+              placeholder="Produktion"
+              value={produktion}
+              disabled={laeuft}
+              onChange={(e) => setProduktion(e.target.value)}
+            />
+            <div className="i-zweier">
+              <input
+                className="i-eingabe mono"
+                type="date"
+                value={drehDatum}
+                disabled={laeuft}
+                onChange={(e) => setDrehDatum(e.target.value)}
+              />
+              <input
+                className="i-eingabe"
+                placeholder="Dreh (Ort)"
+                value={drehName}
+                disabled={laeuft}
+                onChange={(e) => setDrehName(e.target.value)}
+              />
+            </div>
+            <span className="k-leise k-klein">
+              {dreh ? (
+                <span className="mono">
+                  {dreh.produktion}/{dreh.datum}_{dreh.name}/01_KAMERA/…
+                </span>
+              ) : (
+                "Ohne Produktion und Dreh kommt die Karte direkt in den Zielordner."
+              )}
+            </span>
           </section>
 
           <section className="k-gruppe">

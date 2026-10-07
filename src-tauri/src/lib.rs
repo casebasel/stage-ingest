@@ -1,6 +1,6 @@
 //! Tauri-Hülle um den Kern: Befehle für die Oberfläche, Fortschritt als Ereignisse.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -10,6 +10,7 @@ use ingest_kern::kopie::{self, Auftrag, Kopie, Meldung};
 use ingest_kern::mhl;
 use ingest_kern::pruefen::{self, Urteil};
 use ingest_kern::soll::{self, Abgleich, SollClip};
+use ingest_kern::struktur::{self, Dreh};
 use ingest_kern::vorpruefen::{self, Befund, Stufe};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
@@ -34,6 +35,9 @@ struct KartenAuftrag {
     /// Soll-Liste (vor dem Start von der Stage geladen); leer, wenn keine Quelle eingestellt ist.
     #[serde(default)]
     soll: Vec<SollClip>,
+    /// Drehstruktur anlegen (`<Produktion>/<Datum>_<Dreh>/01_KAMERA/…`); die Ziele sind dann schon Kartenziele darin.
+    #[serde(default)]
+    dreh: Option<Dreh>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -169,8 +173,19 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
     let kennungen = auftrag
         .ziele
         .iter()
-        .map(|z| geraet::kennung(z.parent().unwrap_or(z)).map_err(|e| format!("{}: {e}", z.display())))
+        .map(|z| {
+            let ort = struktur::vorhandener_vorfahr(z).unwrap_or(z);
+            geraet::kennung(ort).map_err(|e| format!("{}: {e}", z.display()))
+        })
         .collect::<Result<Vec<_>, _>>()?;
+    if auftrag.dreh.is_some() {
+        for z in &auftrag.ziele {
+            // Kartenziel ist <Dreh>/01_KAMERA/<Karte>: den Drehordner mit allen Unterordnern anlegen.
+            if let Some(drehordner) = z.parent().and_then(Path::parent) {
+                struktur::anlegen(drehordner).map_err(|e| format!("{}: {e}", drehordner.display()))?;
+            }
+        }
+    }
     let k = Auftrag { quelle: auftrag.quelle.clone(), ziele: auftrag.ziele.clone(), mit_md5: auftrag.mit_md5 };
     let kopie = kopie::kopieren(&k, abbruch, |meldung| {
         let _ = app.emit(FORTSCHRITT, Fortschritt::Kopieren { meldung });
@@ -310,10 +325,18 @@ async fn soll_von_stage(adresse: String) -> Result<Vec<SollClip>, String> {
     .map_err(|e| e.to_string())?
 }
 
-/// Name des Kartenordners auf den Zielen (bei einer Windows-Laufwerkswurzel der Volume-Name).
+/// Kartenziele zu den gewählten Zielordnern: mit Drehstruktur `<Ziel>/<Produktion>/<Datum>_<Dreh>/01_KAMERA/<Karte>`,
+/// sonst `<Ziel>/<Karte>`. Der Kartenname ist bei einer Windows-Laufwerkswurzel der Volume-Name.
 #[tauri::command]
-fn kartenname(quelle: PathBuf) -> String {
-    geraet::kartenname(&quelle)
+fn kartenziele(quelle: PathBuf, basis: Vec<PathBuf>, dreh: Option<Dreh>) -> Vec<PathBuf> {
+    let karte = geraet::kartenname(&quelle);
+    basis
+        .iter()
+        .map(|b| match &dreh {
+            Some(d) => struktur::kartenziel(b, d, &karte),
+            None => b.join(struktur::ordnername(&karte)),
+        })
+        .collect()
 }
 
 /// Bricht auf ausdrücklichen Wunsch ab. Nie automatisch, auch nicht für ein Update.
@@ -347,7 +370,7 @@ pub fn run() {
             vorab_pruefen,
             karte_einlesen,
             ziel_nachpruefen,
-            kartenname,
+            kartenziele,
             soll_von_stage,
             abbrechen,
             laeuft,

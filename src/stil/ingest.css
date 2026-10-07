@@ -264,3 +264,13 @@ body {
 .i-knopfreihe .k-lampe {
   align-self: center;
 }
+
+.i-zweier {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr);
+  gap: 6px;
+}
+
+.k-gruppe .k-klein {
+  margin-top: 6px;
+}

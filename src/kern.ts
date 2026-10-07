@@ -60,6 +60,7 @@ export type KartenAuftrag = {
   mindestKopien: number;
   zweimalLesen?: boolean;
   soll?: SollClip[];
+  dreh?: Dreh | null;
 };
 
 export type SollClip = { clip: string; szene: string; take: string; startTc: string; bewertung: string; quelle: string };
@@ -96,4 +97,6 @@ export const verlauf = () => invoke<VerlaufEintrag[]>("verlauf");
 export type Nachpruefung = { ordner: string; generation: string; geprueft: number; abweichungen: Abweichung[] };
 export const zielNachpruefen = (ordner: string) => invoke<Nachpruefung>("ziel_nachpruefen", { ordner });
 
-export const kartenname = (quelle: string) => invoke<string>("kartenname", { quelle });
+export type Dreh = { produktion: string; datum: string; name: string };
+export const kartenziele = (quelle: string, basis: string[], dreh: Dreh | null) =>
+  invoke<string[]>("kartenziele", { quelle, basis, dreh });

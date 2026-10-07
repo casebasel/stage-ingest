@@ -125,11 +125,11 @@ pub fn pdf(
     typst_pdf::pdf(&dokument, &Default::default()).map_err(|e| Fehler::Setzen(format!("{e:?}")))
 }
 
-/// Schreibt den Bericht neben den Kartenordner: `<Ziel>/../<Karte>_Bericht_<Zeit>.pdf`.
-/// In Phase 2 wandert er nach `04_BERICHTE/`.
+/// Schreibt den Bericht: in einer Drehstruktur nach `04_BERICHTE/`, sonst neben den Kartenordner.
 pub fn schreiben(ziel_ordner: &Path, pdf: &[u8], beginn: &DateTime<Utc>) -> Result<std::path::PathBuf, Fehler> {
     let karte = ziel_ordner.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let ort = ziel_ordner.parent().unwrap_or(ziel_ordner);
+    let ort = ingest_kern::struktur::berichtordner(ziel_ordner);
+    std::fs::create_dir_all(&ort)?;
     let pfad = ort.join(format!("{karte}_Bericht_{}.pdf", beginn.format("%Y-%m-%d_%H%M%SZ")));
     ingest_kern::sicher_schreiben(&pfad, pdf)?;
     Ok(pfad)

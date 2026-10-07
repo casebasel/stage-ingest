@@ -63,13 +63,15 @@ pub fn vorpruefen(auftrag: &Auftrag, bytes: u64) -> Vec<Befund> {
     // Mehrere Ziele auf einem Volume brauchen zusammen Platz.
     let mut je_volume: HashMap<String, u64> = HashMap::new();
     for ziel in &auftrag.ziele {
-        if let Ok(v) = geraet::volume_kennung(ziel.parent().unwrap_or(ziel)) {
+        if let Some(Ok(v)) = crate::struktur::vorhandener_vorfahr(ziel).map(geraet::volume_kennung) {
             *je_volume.entry(v).or_default() += bytes;
         }
     }
     for ziel in &auftrag.ziele {
         // Der Kartenordner selbst entsteht erst beim Kopieren; geprüft wird der Ordner darüber.
-        let ort = ziel.parent().unwrap_or(ziel);
+        // Der Kartenordner (und in einer Drehstruktur die Ordner darüber) entsteht erst beim Kopieren;
+        // geprüft wird der nächste vorhandene Ordner.
+        let ort = crate::struktur::vorhandener_vorfahr(ziel.parent().unwrap_or(ziel)).unwrap_or(ziel);
         let Ok(ort_echt) = std::fs::canonicalize(ort) else {
             befunde.push(fehler(format!("Ziel nicht erreichbar: {}", ort.display())));
             continue;
@@ -77,7 +79,7 @@ pub fn vorpruefen(auftrag: &Auftrag, bytes: u64) -> Vec<Befund> {
         if ort_echt.starts_with(&quelle) {
             befunde.push(fehler(format!("Ziel liegt auf der Karte: {}", ziel.display())));
         }
-        if quelle.starts_with(ort_echt.join(ziel.file_name().unwrap_or_default())) {
+        if std::fs::canonicalize(ziel).is_ok_and(|z| quelle.starts_with(z)) {
             befunde.push(fehler(format!("Karte liegt im Ziel: {}", ziel.display())));
         }
         if ziel.exists() && std::fs::read_dir(ziel).map(|mut d| d.next().is_some()).unwrap_or(true) {

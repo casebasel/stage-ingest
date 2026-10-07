@@ -22,6 +22,7 @@ pub use ohne_cache::sicher_schreiben;
 pub mod pruefen;
 pub mod pruefsumme;
 pub mod soll;
+pub mod struktur;
 pub mod vorpruefen;
 
 pub use fehler::{Ergebnis, Fehler};
