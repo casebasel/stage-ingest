@@ -22,3 +22,12 @@ git push && git push --tags
 ## Pflicht-Update
 
 Nur wenn sich **Bericht, Ordnerstruktur oder eine Schnittstelle** ändern: in `MINDESTVERSION` die neue Version eintragen. Der Release-Workflow schreibt sie als `mindestVersion` in `latest.json`. Ältere Apps zeigen dann „Pflicht-Update“ und lassen keine neue Karte mehr beginnen. Ein laufender Kopiervorgang wird nie unterbrochen; installiert wird erst danach.
+
+## Vorbelegung der Anmeldung (Plate Assistant / gemeinsame Supabase)
+
+Damit man in der App nur E-Mail und Passwort eingibt, setzt der Release-Build Adresse und Anon-Key ein. Sie stehen **nicht** im Quelltext, sondern als Repository-Variablen (Repo → Settings → Secrets and variables → Actions → Variables):
+
+- `SUPABASE_ADRESSE`, z. B. `https://<supabase>`
+- `SUPABASE_ANON_KEY`, der öffentliche Anon-Key (wie in der iOS-App)
+
+Fehlen sie, fragt die App danach.

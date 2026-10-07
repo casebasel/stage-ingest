@@ -39,6 +39,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          # Vorbelegung der Anmeldung (Repo → Settings → Variables): nie im Quelltext, nur im gebauten Programm.
+          VITE_SUPABASE_ADRESSE: ${{ vars.SUPABASE_ADRESSE }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
           # Der Schlüssel hat kein Passwort. GitHub erlaubt keine leeren Secrets, darum hier fest leer.
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:

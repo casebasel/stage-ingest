@@ -25,6 +25,11 @@ function merken(k: string, w: unknown) {
   }
 }
 
+// Beim Bauen eingesetzt (GitHub-Variablen SUPABASE_ADRESSE, SUPABASE_ANON_KEY), nie im Repo. Fehlen sie,
+// fragt die App danach.
+const VORGABE_ADRESSE = (import.meta.env.VITE_SUPABASE_ADRESSE as string | undefined) ?? "";
+const VORGABE_ANON = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ?? "";
+
 export function PlateAssistant(p: {
   gesperrt: boolean;
   projekt: Projekt | null;
@@ -32,7 +37,11 @@ export function PlateAssistant(p: {
   onProjekt: (p: Projekt | null) => void;
   onDreh: (d: DrehKurz | null) => void;
 }) {
-  const [zugang, setZugang] = useState<Zugang>(() => gemerkt("zugang", { adresse: "", anonKey: "", email: "" }));
+  const [zugang, setZugang] = useState<Zugang>(() => {
+    const z = gemerkt("zugang", { adresse: "", anonKey: "", email: "" });
+    return { adresse: z.adresse || VORGABE_ADRESSE, anonKey: z.anonKey || VORGABE_ANON, email: z.email };
+  });
+  const [erweitert, setErweitert] = useState(!VORGABE_ADRESSE || !VORGABE_ANON);
   const [passwort, setPasswort] = useState("");
   const [zustand, setZustand] = useState<{ ok: boolean; text: string } | null>(null);
   const [projekte, setProjekte] = useState<Projekt[]>([]);
@@ -101,6 +110,8 @@ export function PlateAssistant(p: {
       <h2>Plate Assistant</h2>
       {!zustand?.ok && (
         <>
+          {erweitert && (
+            <>
           <input
             className="i-eingabe mono"
             placeholder="Supabase-Adresse"
@@ -117,9 +128,11 @@ export function PlateAssistant(p: {
             onChange={(e) => setZugang({ ...zugang, anonKey: e.target.value })}
             spellCheck={false}
           />
+            </>
+          )}
           <input
             className="i-eingabe"
-            placeholder="E-Mail des Zugangs „ingest“"
+            placeholder="E-Mail"
             value={zugang.email}
             disabled={p.gesperrt}
             onChange={(e) => setZugang({ ...zugang, email: e.target.value })}
@@ -128,7 +141,7 @@ export function PlateAssistant(p: {
           <input
             className="i-eingabe"
             type="password"
-            placeholder="Passwort (kommt in den Schlüsselbund)"
+            placeholder="Passwort"
             value={passwort}
             disabled={p.gesperrt}
             onChange={(e) => setPasswort(e.target.value)}
@@ -137,6 +150,11 @@ export function PlateAssistant(p: {
             <button className="k-taste k-taste-klein" disabled={p.gesperrt || !bereit || !passwort} onClick={anmelden}>
               Anmelden
             </button>
+            {!erweitert && (
+              <button className="k-taste k-taste-klein k-taste-leise" onClick={() => setErweitert(true)}>
+                Andere Adresse …
+              </button>
+            )}
           </div>
         </>
       )}
