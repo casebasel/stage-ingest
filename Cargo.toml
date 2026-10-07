@@ -1,0 +1,11 @@
+[workspace]
+resolver = "2"
+members = ["kern", "src-tauri"]
+default-members = ["kern"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Marlon Candeloro"]
+license = "MIT"
+repository = "https://github.com/casebasel/stage-ingest"

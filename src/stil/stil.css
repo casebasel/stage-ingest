@@ -1,0 +1,111 @@
+/* Stage Ingest – Grundwerte, unverändert aus der Stage Companion App übernommen (vp-companion-app: apps/web/src/stil.css, DESIGN.md).
+   Welt: „Das Instrument im Dunkeln“. Amber nur Hauptaktion und Fokus, Gold für Warnungen, Grün für bereit; Rot heisst Aufnahme und kommt hier nicht vor. */
+
+:root {
+  color-scheme: dark;
+
+  /* Töne (Schiefer, Hue 255) */
+  --grund: oklch(0.10 0.005 255);
+  --rinne: oklch(0.075 0.004 255);
+  --flaeche: oklch(0.13 0.006 255);
+  --erhaben: oklch(0.17 0.007 255);
+  --linie: oklch(0.22 0.008 255);
+  --linie-stark: oklch(0.32 0.010 255);
+
+  /* Text, vier Stufen */
+  --text: oklch(0.90 0.004 255);
+  --text-2: oklch(0.76 0.008 255);
+  --text-3: oklch(0.60 0.010 255);
+  --text-aus: oklch(0.42 0.010 255);
+
+  /* Amber: nur Speichern und der lebende Stick */
+  --amber: oklch(0.68 0.140 52);
+  --amber-hell: oklch(0.74 0.140 52);
+  --amber-matt: oklch(0.42 0.080 52);
+  --amber-kontrast: oklch(0.15 0.010 52);
+
+  /* Bedeutung */
+  --ok: oklch(0.68 0.135 145);
+  --warnung: oklch(0.74 0.140 75);
+  --gefahr: oklch(0.64 0.180 22);
+  --gefahr-kontrast: oklch(0.98 0.010 22);
+  --pill: 999px;
+
+  --schrift: "Geist Variable", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --mono: "Geist Mono Variable", ui-monospace, "SF Mono", monospace;
+
+  --ease: cubic-bezier(0.25, 1, 0.5, 1); /* ease-out-quart */
+  --rund: 10px;
+  --rund-klein: 6px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+html {
+  background: var(--grund);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  font-family: var(--schrift);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--grund);
+  overscroll-behavior: none;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+::selection {
+  background: var(--amber-matt);
+  color: var(--text);
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+button:disabled {
+  cursor: default;
+}
+
+:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+
+.mono {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
