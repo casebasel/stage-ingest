@@ -109,13 +109,20 @@ fn stage_daten(
         kopie.dateien.iter().map(|d| (d.pfad.as_str(), d.pruefsumme.xxh128_hex())).collect();
     let karte = geraet::kartenname(&auftrag.quelle);
     json!({
-        "karte": karte,
-        "projekt": auftrag.dreh.as_ref().map(|d| struktur::kurzname(&d.projekt)),
+        "karte": karte.chars().take(40).collect::<String>(),
+        // Schema der Stage: Kurzname höchstens 24 Zeichen.
+        "projekt": auftrag.dreh.as_ref().map(|d| struktur::kurzname(&d.projekt).chars().take(24).collect::<String>()),
         "freigegeben": freigabe.sicher,
         "version": app.package_info().version.to_string(),
         "beginn": kopie.beginn.to_rfc3339(),
-        "kopien": gut.iter().map(|&i| json!({
+        "kopien": gut.iter().enumerate().map(|(n, &i)| json!({
             "art": art(&kennungen[i]),
+            // Anzeigename für die Konsole, z. B. „NAS“, „Samsung PSSD T7“, „Ziel 2“.
+            "ziel": match kennungen[i].art {
+                geraet::Art::Netz => "NAS".to_string(),
+                _ if !kennungen[i].beschreibung.is_empty() => kennungen[i].beschreibung.chars().take(40).collect(),
+                _ => format!("Ziel {}", n + 1),
+            },
             "geraet": kennungen[i].beschreibung,
             "seriennummer": kennungen[i].seriennummer,
             "pfad": urteile[i].ordner,
@@ -393,6 +400,10 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
     // Karte an die Stage melden (nach Bericht, damit sein Pfad mitgeht). Ein Fehler sperrt nichts.
     let stage = auftrag.stage_adresse.as_deref().filter(|a| !a.trim().is_empty()).map(|adresse| {
         let daten = stage_daten(app, auftrag, &kopie, &urteile, &kennungen, &clips, &ale, &berichte, &freigabe);
+        // Die Stage verlangt mindestens einen Clip (Karte ohne lesbare .mov/.mxf: nichts zu melden).
+        if daten["clips"].as_array().is_none_or(|c| c.is_empty()) {
+            return Err("keine Clips mit Timecode auf der Karte, nichts gemeldet".to_string());
+        }
         stage::karte_melden(adresse, daten)
     });
     let ergebnis =
