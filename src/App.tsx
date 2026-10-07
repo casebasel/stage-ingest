@@ -648,7 +648,8 @@ function AbgleichAnzeige({ a }: { a: NonNullable<KartenErgebnis["abgleich"]> }) 
       <h2>
         Abgleich mit der Stage{" "}
         <span className="k-leise mono">
-          · {a.gefunden.length} gefunden · {a.fehlt.length} fehlen · {a.unerwartet.length} ohne Take
+          · {a.gefunden.length + a.ueberTimecode.length} gefunden · {a.fehlt.length} fehlen ·{" "}
+          {a.unerwartet.length + a.mehrdeutig.length} zu klären
         </span>
       </h2>
       {a.fehlt.map((s) => (
@@ -657,12 +658,22 @@ function AbgleichAnzeige({ a }: { a: NonNullable<KartenErgebnis["abgleich"]> }) 
           {s.bewertung && ` · ${s.bewertung}`}
         </span>
       ))}
+      {a.ueberTimecode.map(([s, p]) => (
+        <span key={`tc-${p}`} className="k-lampe k-lampe-leise">
+          <i /> Über Timecode: {s.szene} Take {s.take} → <span className="mono">{name(p)}</span>
+        </span>
+      ))}
+      {a.mehrdeutig.map(([s, ps]) => (
+        <span key={`mehr-${s.szene}-${s.take}`} className="k-lampe k-lampe-warn">
+          <i /> Mehrdeutig (Klärungsliste): {s.szene} Take {s.take} passt zu {ps.map(name).join(", ")}
+        </span>
+      ))}
       {a.unerwartet.map((p) => (
         <span key={p} className="k-lampe k-lampe-leise">
           <i /> Ohne Take (Klärungsliste): <span className="mono">{p}</span>
         </span>
       ))}
-      {a.fehlt.length === 0 && a.unerwartet.length === 0 && (
+      {a.fehlt.length === 0 && a.unerwartet.length === 0 && a.mehrdeutig.length === 0 && (
         <span className="k-lampe k-lampe-ok">
           <i /> Alle gedrehten Takes dieser Karte sind da
         </span>

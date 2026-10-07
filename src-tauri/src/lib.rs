@@ -260,7 +260,9 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
         historie_abweichungen,
     };
     let mut freigabe = freigabe::beurteilen(&urteile, &kennungen, auftrag.mindest_kopien, umfang);
-    let abgleich = (!auftrag.soll.is_empty()).then(|| soll::abgleichen(&kopie, &auftrag.soll));
+    // Clip-Angaben aus der ersten guten Kopie (geprüft, nicht von der Karte): für ALE und Timecode-Zuordnung.
+    let clips = urteile.iter().find(|u| u.gut()).map(|u| ale::clips_lesen(&kopie, &u.ordner)).unwrap_or_default();
+    let abgleich = (!auftrag.soll.is_empty()).then(|| soll::abgleichen(&kopie, &auftrag.soll, &clips));
     if let Some(a) = abgleich.as_ref().filter(|a| !a.fehlt.is_empty()) {
         // Zusätzliche Warnung; die Freigabe hängt weiter an den geprüften Kopien (Konzept 6a).
         let liste = a.fehlt.iter().map(|s| format!("{} ({} Take {})", s.clip, s.szene, s.take)).collect::<Vec<_>>();
@@ -272,8 +274,7 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
             .push(format!("Nicht kopiert (Verknüpfung oder Sonderdatei): {}", kopie.ausgelassen.join(", ")));
     }
 
-    // Clip-Angaben aus der ersten guten Kopie (geprüft, nicht von der Karte) und ein ALE auf jedes gute Ziel.
-    let clips = urteile.iter().find(|u| u.gut()).map(|u| ale::clips_lesen(&kopie, &u.ordner)).unwrap_or_default();
+    // ALE auf jedes gute Ziel (Clip-Angaben oben gelesen).
     let ale_text =
         clips.iter().any(|c| c.angaben.as_ref().is_some_and(|a| a.start_tc.is_some())).then(|| ale::ale(&clips));
     let karte = geraet::kartenname(&auftrag.quelle);

@@ -67,8 +67,22 @@ export type KartenAuftrag = {
   artCmd?: string | null;
 };
 
-export type SollClip = { clip: string; szene: string; take: string; startTc: string; bewertung: string; quelle: string };
-export type Abgleich = { gefunden: [SollClip, string][]; fehlt: SollClip[]; unerwartet: string[] };
+export type SollClip = {
+  clip: string;
+  szene: string;
+  take: string;
+  startTc: string;
+  endTc: string;
+  bewertung: string;
+  quelle: string;
+};
+export type Abgleich = {
+  gefunden: [SollClip, string][];
+  fehlt: SollClip[];
+  ueberTimecode: [SollClip, string][];
+  mehrdeutig: [SollClip, string[]][];
+  unerwartet: string[];
+};
 export const sollVonStage = (adresse: string) => invoke<SollClip[]>("soll_von_stage", { adresse });
 
 export type Befund = { stufe: "fehler" | "warnung"; text: string };
