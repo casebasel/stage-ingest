@@ -32,6 +32,59 @@ fn kein_cache(datei: &File) -> io::Result<()> {
     }
 }
 
+/// Öffnet eine Quelldatei zum ersten Lesen. macOS: ohne Cache, damit ein späteres zweites Lesen wirklich von
+/// der Karte kommt und nicht aus dem RAM. Linux: vorhandene Seiten verwerfen. Windows: normal (das zweite Lesen
+/// läuft dort ohnehin mit `NO_BUFFERING`).
+pub(crate) fn zum_lesen(pfad: &Path) -> io::Result<File> {
+    let datei = File::open(pfad)?;
+    #[cfg(target_os = "macos")]
+    kein_cache(&datei)?;
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        use std::os::fd::AsRawFd;
+        // SAFETY: gültiger Deskriptor; 0/0 = ganze Datei.
+        unsafe { libc::posix_fadvise(datei.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED) };
+    }
+    Ok(datei)
+}
+
+/// Bringt die Verzeichniseinträge eines Ordners auf die Platte (Umbenennen, neue Dateien).
+/// `sync_all` auf einer Datei sichert nur ihren Inhalt. macOS: `sync_all` ist dort `F_FULLFSYNC`.
+pub(crate) fn ordner_sichern(ordner: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    let ergebnis = File::open(ordner)?.sync_all();
+    #[cfg(windows)]
+    let ergebnis = {
+        use std::os::windows::fs::OpenOptionsExt;
+        // Ordner lassen sich unter Windows nur mit FILE_FLAG_BACKUP_SEMANTICS öffnen.
+        std::fs::OpenOptions::new().write(true).custom_flags(0x0200_0000).open(ordner)?.sync_all()
+    };
+    match ergebnis {
+        // Manche Dateisysteme (SMB, exFAT-Treiber) kennen kein Sichern von Ordnern; der Inhalt ist dann schon gesichert.
+        Err(e)
+            if matches!(
+                e.kind(),
+                io::ErrorKind::InvalidInput | io::ErrorKind::Unsupported | io::ErrorKind::PermissionDenied
+            ) =>
+        {
+            Ok(())
+        }
+        r => r,
+    }
+}
+
+/// Schreibt eine Datei vollständig und bringt Inhalt und Ordnereintrag auf die Platte.
+pub fn sicher_schreiben(pfad: &Path, inhalt: &[u8]) -> io::Result<()> {
+    use std::io::Write;
+    let mut f = File::create(pfad)?;
+    f.write_all(inhalt)?;
+    f.sync_all()?;
+    if let Some(o) = pfad.parent() {
+        ordner_sichern(o)?;
+    }
+    Ok(())
+}
+
 /// Liest eine Datei vollständig ohne Cache und gibt Prüfsumme und Länge zurück.
 pub(crate) fn pruefsumme(pfad: &Path, mit_md5: bool) -> io::Result<(Pruefsumme, u64)> {
     let mut rechner = Rechner::neu(mit_md5);

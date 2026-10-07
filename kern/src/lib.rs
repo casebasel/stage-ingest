@@ -16,6 +16,9 @@ pub mod geraet;
 pub mod kopie;
 pub mod mhl;
 mod ohne_cache;
+
+/// Für den Bericht: Datei schreiben und samt Ordnereintrag auf die Platte bringen.
+pub use ohne_cache::sicher_schreiben;
 pub mod pruefen;
 pub mod pruefsumme;
 pub mod vorpruefen;

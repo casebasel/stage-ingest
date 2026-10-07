@@ -90,11 +90,12 @@ pub fn schreiben(ziel: &Path, kopie: &Kopie, angaben: &Angaben) -> io::Result<Pa
     if pfad.exists() {
         return Err(io::Error::new(io::ErrorKind::AlreadyExists, pfad.display().to_string()));
     }
-    std::fs::write(&pfad, xml.as_bytes())?;
+    crate::ohne_cache::sicher_schreiben(&pfad, xml.as_bytes())?;
 
     let mut kette = historie.kette;
     kette.push((nummer, dateiname, c4(xml.as_bytes())));
-    std::fs::write(ordner.join(KETTE), kette_xml(&kette))?;
+    crate::ohne_cache::sicher_schreiben(&ordner.join(KETTE), kette_xml(&kette).as_bytes())?;
+    crate::ohne_cache::ordner_sichern(ziel)?;
     Ok(pfad)
 }
 
