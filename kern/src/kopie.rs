@@ -193,6 +193,13 @@ pub fn kopieren(auftrag: &Auftrag, abbruch: &AtomicBool, mut melden: impl FnMut(
         let _ = f.join();
     }
     ausfaelle_melden(&mut melden);
+    if ergebnis.is_err() {
+        // Halbe Kopie ist wertlos und würde den nächsten Versuch blockieren. Die Zielordner waren vor
+        // diesem Lauf leer oder neu (ziel_vorbereiten), enthalten also nur, was dieser Lauf geschrieben hat.
+        for ziel in &auftrag.ziele {
+            let _ = std::fs::remove_dir_all(ziel);
+        }
+    }
     ergebnis?;
 
     let ziele = auftrag

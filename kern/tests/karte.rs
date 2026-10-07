@@ -135,3 +135,24 @@ extern "C" {
     #[link_name = "geteuid"]
     fn libc_geteuid() -> u32;
 }
+
+#[test]
+fn abbruch_raeumt_die_eigenen_ziele_weg() {
+    let t = tempfile::tempdir().unwrap();
+    karte(&t.path().join("karte"));
+    let auftrag = Auftrag {
+        quelle: t.path().join("karte"),
+        ziele: vec![t.path().join("a/A001R132"), t.path().join("b/A001R132")],
+        mit_md5: false,
+    };
+    let abbruch = AtomicBool::new(false);
+    let r = kopieren(&auftrag, &abbruch, |m| {
+        if matches!(m, Meldung::Bytes { .. }) {
+            abbruch.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    });
+    assert!(matches!(r, Err(Fehler::Abgebrochen)));
+    assert!(!t.path().join("a/A001R132").exists() && !t.path().join("b/A001R132").exists());
+    // Der nächste Versuch geht ohne Aufräumen von Hand.
+    assert!(kopieren(&auftrag, &AtomicBool::new(false), |_| {}).is_ok());
+}
