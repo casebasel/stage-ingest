@@ -33,8 +33,8 @@ Gebaut ist der Kern (siehe KONZEPT Kapitel 14). Offen, in dieser Reihenfolge:
 - Plate Assistant lesen (Dreh, Plate, Take, Fotos); Rückmeldung über eigene Tabellen (`ingest_meldung`, Rolle `ingest_writer`, legt Marlon an)
 - Clip ↔ Take: Info 1 → `clip_name` → Timecode → Zeitfenster; Klärungsliste
 - ~~Soll-Liste Studio~~ gebaut (07.10.2026): Stage-CSV-Export, Abgleich nach Kamera+Reel, fehlende Clips als Hinweis vor der Freigabe; offen: Plate-Takes vom Plate Assistant als zweite Quelle
-- ART CMD: Neigung, Rollen, Objektiv pro Bild nach `05_METADATEN`, `aus_clip` an den Plate Assistant
-- ALE pro Karte (von der Karte oder erzeugt) an den Stage-Server
+- ~~ART CMD: Neigung, Rollen, Objektiv pro Bild nach `05_METADATEN`, Mittel/Bereich~~ gebaut (optional, Pfad lokal); offen: Test mit echtem ART CMD und Clip, Vorzeichen prüfen, `aus_clip` an den Plate Assistant
+- ~~ALE pro Karte aus den Clips (Start-TC, fps)~~ gebaut, gegen den Stage-Parser geprüft; offen: an den Stage-Server schicken (Befehl mit der Stage festlegen)
 - Referenz-Takes (Grau-/Chromkugel, Cleanplate) zur Plate verweisen
 
 ## Phase 3: HDRI ohne KI
