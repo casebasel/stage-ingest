@@ -57,7 +57,7 @@ Gewünscht: Karte freigegeben (wann), Speicherort, `aus_clip` je Take, HDRI-Zust
 - Der Ingest **schreibt auf `projekt` nur über `aenderungen_anwenden`** mit einem eigenen Benutzer (legt Marlon an), nicht über `ingest_writer`. Rückmeldungen bleiben in den eigenen Tabellen des Ingest.
 - Schema und Formular kommen aus dem gemeinsamen Paket `casebasel/stage-projekt` (öffentlich, Stage pflegt den Inhalt).
 - Schema steht (Plate Assistant, Migration 0009/0010, Systemkarte 3e1050f; genau: plate-assistant `docs/ABGLEICH.md`). Ordner mit dem **Kurznamen** (`A–Z`, `0–9`, `_`, z. B. `HAPPY_END`).
-- **Zugang des Ingest:** eigener Benutzer mit `app_metadata.app = "ingest"` (legt Marlon an). Liest `dreh`, `plate`, `take`, `foto`, `projekt` und den Bucket `fotos`; schreibt über `aenderungen_anwenden` nur `projekt`. `ingest_meldung`, HDRI-Bucket und Jobs kommen später mit eigenen Migrationen.
+- ~~**Zugang des Ingest:** eigener Benutzer mit `app_metadata.app = "ingest"`~~ (überholt: persönliches Konto, siehe Anmeldung; der Technik-Benutzer wird entfernt). Liest `dreh`, `plate`, `take`, `foto`, `projekt` und den Bucket `fotos`; schreibt über `aenderungen_anwenden` nur `projekt`. `ingest_meldung`, HDRI-Bucket und Jobs kommen später mit eigenen Migrationen.
 - Der Kurzname ist nach dem Anlegen fest; Ordnernamen ändern sich nie. Doppeltes Anlegen wird je Feld zusammengeführt, Anlegen geht immer (Systemkarte 269e680).
 
 ## HDRI-Datensatz (Entwurf der HDRI-Session, 07.10.2026, noch nicht angewendet)
@@ -75,3 +75,4 @@ Gewünscht: Karte freigegeben (wann), Speicherort, `aus_clip` je Take, HDRI-Zust
 - **HDRI löschen und `ingest_meldung` schreiben** darf nur ein Konto mit `app_metadata.ingest = true` (setzt Marlon pro Person, der Server prüft). Ohne das Kennzeichen: lesen und Projekte anlegen; die App zeigt „Löschen nicht freigegeben“.
 - Adresse und Anon-Key setzt der Release-Build aus den Repository-Variablen `SUPABASE_ADRESSE` und `SUPABASE_ANON_KEY` ein (`docs/RELEASING.md`).
 - Persönliches Konto = volle Rechte eines iPhones; der Ingest hält sich an BESITZ.md (schreibt nur `projekt`, später eigene Meldungen) und meldet sich als Gerät „Stage Ingest (Mac|Windows)“. Passwort vergessen: über die iPhone-App. Löschen mit `app_metadata.ingest = true` (JSON-Wert) erst ab Migration 0015; gelöschte Dateien in der Antwort einzeln prüfen.
+- **Sperre im Code** (Systemkarte 05dc71c): Stage Ingest schreibt nie `dreh`, `plate`, `take`, `foto`. Alle Änderungen laufen durch `aenderungen_pruefen` in `src-tauri/src/plate.rs` (erlaubt: `projekt`, `ingest_meldung`, `hdri_job`), mit Test. Migration 0015 angewendet: HDRI löschen nur mit `app_metadata.ingest = true`.

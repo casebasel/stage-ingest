@@ -14,6 +14,22 @@ use ingest_kern::soll::{ohne_endung, SollClip};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+/// Tabellen, die der Ingest ändern darf (Systemkarte 05dc71c, BESITZ.md). Der Server beschränkt ein persönliches
+/// Konto nicht mehr; diese Liste ist die Sperre. Nie: dreh, plate, take, foto.
+pub const DARF_AENDERN: &[&str] = &["projekt", "ingest_meldung", "hdri_job"];
+
+/// Prüft alle Änderungen einer Anfrage an `aenderungen_anwenden`, bevor sie das Netz verlassen.
+pub fn aenderungen_pruefen(body: &Value) -> Result<(), String> {
+    let liste = body["p_aenderungen"].as_array().ok_or("p_aenderungen fehlt")?;
+    for a in liste {
+        let t = a["tabelle"].as_str().unwrap_or("");
+        if !DARF_AENDERN.contains(&t) {
+            return Err(format!("Stage Ingest ändert „{t}“ nicht (gehört dem Plate Assistant)"));
+        }
+    }
+    Ok(())
+}
+
 const SCHLUESSELBUND_DIENST: &str = "ch.filmstudiobasel.stage-ingest.plate-assistant";
 
 #[derive(Debug, Clone, Deserialize)]
@@ -229,6 +245,7 @@ impl Plate {
                 "zeit": jetzt.timestamp_micros(),
             }]
         });
+        aenderungen_pruefen(&body)?;
         let url = format!("{}/rest/v1/rpc/aenderungen_anwenden", z.adresse.trim_end_matches('/'));
         for neu in [false, true] {
             let token = self.token(z, neu)?;
@@ -471,6 +488,27 @@ mod tests {
         let d = drehs_aus(&json!([{"id":"01D","name":"Rheinufer","datum":"2026-10-28","produktion":"Happy End"}]));
         assert_eq!(d[0].projekt_id, None);
         assert_eq!(d[0].produktion, "Happy End");
+    }
+
+    #[test]
+    fn schreibt_nie_tabellen_des_plate_assistant() {
+        for t in ["dreh", "plate", "take", "foto", "hdri", "hdri_frame", ""] {
+            let body = json!({"p_aenderungen": [{"tabelle": "projekt"}, {"tabelle": t}]});
+            assert!(aenderungen_pruefen(&body).is_err(), "{t} muss gesperrt sein");
+        }
+        assert!(aenderungen_pruefen(&json!({"p_aenderungen": [{"tabelle": "projekt"}]})).is_ok());
+        // Im ganzen App-Code gibt es genau einen Aufruf von aenderungen_anwenden, und der geht durch die Sperre.
+        let code = include_str!("plate.rs");
+        assert_eq!(code.matches(&format!("{}{}", "rpc/aenderungen", "_anwenden")).count(), 1);
+        // Die Sperre steht vor dem einzigen Aufruf.
+        let sperre = code.find(&format!("{}{}", "aenderungen_pruefen(&body", ")?")).expect("Sperre fehlt");
+        let aufruf = code.find(&format!("{}{}", "rpc/aenderungen", "_anwenden")).unwrap();
+        assert!(sperre < aufruf);
+        for datei in
+            [include_str!("lib.rs"), include_str!("projekt.rs"), include_str!("plates.rs"), include_str!("stage.rs")]
+        {
+            assert!(!datei.contains(&format!("{}{}", "aenderungen", "_anwenden\"")), "Schreiben nur über plate.rs");
+        }
     }
 
     #[test]
