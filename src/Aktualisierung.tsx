@@ -6,7 +6,8 @@ import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { getVersion } from "@tauri-apps/api/app";
 
-const PRUEFEN_ALLE_MS = 6 * 60 * 60 * 1000;
+// Alle 30 Minuten und immer, wenn das Fenster wieder in den Vordergrund kommt (die App läuft oft den ganzen Drehtag).
+const PRUEFEN_ALLE_MS = 30 * 60 * 1000;
 
 /** Vergleicht „1.2.3“-Versionen; negativ, wenn a älter ist. */
 export function versionVergleich(a: string, b: string) {
@@ -38,9 +39,19 @@ export function useAktualisierung() {
     };
     pruefen();
     const t = setInterval(pruefen, PRUEFEN_ALLE_MS);
+    let zuletzt = Date.now();
+    const imVordergrund = () => {
+      // Nicht bei jedem Fensterwechsel ins Netz: höchstens alle 2 Minuten.
+      if (Date.now() - zuletzt > 2 * 60 * 1000) {
+        zuletzt = Date.now();
+        pruefen();
+      }
+    };
+    window.addEventListener("focus", imVordergrund);
     return () => {
       aus = true;
       clearInterval(t);
+      window.removeEventListener("focus", imVordergrund);
     };
   }, []);
 
