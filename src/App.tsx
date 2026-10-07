@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { FolderInput, HardDrive, Moon, Plus, Sun, X } from "lucide-react";
-import { gemerktesThema, themaSetzen, type Thema } from "./thema";
+import { FolderInput, HardDrive, Moon, Plus, Sun, SunMoon, X } from "lucide-react";
+import { anwenden, gemerkteWahl, type Wahl } from "./thema";
 import {
   abbrechen,
   aufFortschritt,
@@ -265,17 +265,25 @@ export function App() {
   );
 }
 
+const WAHLEN: { wahl: Wahl; wort: string; Zeichen: typeof Sun }[] = [
+  { wahl: "auto", wort: "Automatisch", Zeichen: SunMoon },
+  { wahl: "tag", wort: "Tag", Zeichen: Sun },
+  { wahl: "nacht", wort: "Nacht", Zeichen: Moon },
+];
+
+/** Drei Stufen wie im Plate Assistant; ein Klick schaltet weiter: Automatisch → Tag → Nacht. */
 function ThemaSchalter() {
-  const [thema, setThema] = useState<Thema>(gemerktesThema);
-  const wechseln = () => {
-    const neu = thema === "tag" ? "nacht" : "tag";
-    themaSetzen(neu);
-    setThema(neu);
-  };
+  const [wahl, setWahl] = useState<Wahl>(gemerkteWahl);
+  useEffect(() => anwenden(wahl), [wahl]);
+  const jetzt = WAHLEN.find((w) => w.wahl === wahl)!;
+  const weiter = WAHLEN[(WAHLEN.indexOf(jetzt) + 1) % WAHLEN.length];
   return (
-    <button className="k-taste k-taste-klein k-taste-leise" onClick={wechseln} title="Zwischen Tag und Nacht wechseln">
-      {thema === "tag" ? <Sun size={16} strokeWidth={1.75} /> : <Moon size={16} strokeWidth={1.75} />}
-      {thema === "tag" ? "Tag" : "Nacht"}
+    <button
+      className="k-taste k-taste-klein k-taste-leise"
+      onClick={() => setWahl(weiter.wahl)}
+      title={`Darstellung: ${jetzt.wort}. Klick: ${weiter.wort}`}
+    >
+      <jetzt.Zeichen size={16} strokeWidth={1.75} /> {jetzt.wort}
     </button>
   );
 }

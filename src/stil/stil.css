@@ -1,5 +1,8 @@
-/* Stage Ingest – Grundwerte, unverändert aus der Stage Companion App übernommen (vp-companion-app: apps/web/src/stil.css, DESIGN.md).
-   Welt: „Das Instrument im Dunkeln“. Amber nur Hauptaktion und Fokus, Gold für Warnungen, Grün für bereit; Rot heisst Aufnahme und kommt hier nicht vor. */
+/* Stage Ingest – Grundwerte aus der Stage Companion App (vp-companion-app: apps/web/src/stil.css, DESIGN.md).
+   Welt: „Das Instrument im Dunkeln“. Amber nur Hauptaktion und Fokus, Gold für Warnungen, Grün für bereit;
+   Rot heisst Aufnahme und kommt hier nicht vor.
+   Abweichung von der Stage nach den Lesbarkeitsregeln des Plate Assistant: Text nachts >= 6,8:1 (leiser Text
+   0.70 statt 0.60), tags >= 5,4:1, Linien kräftiger (tags >= 3:1). text-aus nur für Gesperrtes. */
 
 :root {
   color-scheme: dark;
@@ -9,13 +12,13 @@
   --rinne: oklch(0.075 0.004 255);
   --flaeche: oklch(0.13 0.006 255);
   --erhaben: oklch(0.17 0.007 255);
-  --linie: oklch(0.22 0.008 255);
-  --linie-stark: oklch(0.32 0.010 255);
+  --linie: oklch(0.28 0.008 255);
+  --linie-stark: oklch(0.40 0.010 255);
 
   /* Text, vier Stufen */
   --text: oklch(0.90 0.004 255);
   --text-2: oklch(0.76 0.008 255);
-  --text-3: oklch(0.60 0.010 255);
+  --text-3: oklch(0.70 0.010 255);
   --text-aus: oklch(0.42 0.010 255);
 
   /* Amber: nur Speichern und der lebende Stick */
@@ -121,8 +124,8 @@ button:disabled {
   --rinne: oklch(0.915 0.006 255);
   --flaeche: oklch(0.99 0.002 255);
   --erhaben: oklch(1 0 0);
-  --linie: oklch(0.83 0.008 255);
-  --linie-stark: oklch(0.62 0.012 255);
+  --linie: oklch(0.63 0.008 255);
+  --linie-stark: oklch(0.50 0.012 255);
 
   --text: oklch(0.17 0.012 255);
   --text-2: oklch(0.30 0.012 255);
