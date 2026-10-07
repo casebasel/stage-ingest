@@ -8,7 +8,9 @@ import {
   bytesText,
   karteEinlesen,
   vorabPruefen,
+  zielNachpruefen,
   type Befund,
+  type Nachpruefung,
   type Fortschritt,
   type KartenErgebnis,
   type Abweichung,
@@ -16,7 +18,7 @@ import {
 import { Aktualisierung, useAktualisierung } from "./Aktualisierung";
 import { Verlauf } from "./Verlauf";
 
-type Phase = "bereit" | "kopieren" | "pruefen" | "fertig" | "fehler";
+type Phase = "bereit" | "kopieren" | "pruefen" | "nachlesen" | "nachpruefen" | "fertig" | "fehler";
 
 type Stand = {
   dateien: number;
@@ -59,6 +61,9 @@ export function App() {
   useEffect(() => merken("ziele", zielOrdner), [zielOrdner]);
   useEffect(() => merken("mitMd5", mitMd5), [mitMd5]);
   useEffect(() => merken("mindestKopien", mindestKopien), [mindestKopien]);
+  const [zweimalLesen, setZweimalLesen] = useState<boolean>(() => gemerkt("zweimalLesen", false));
+  useEffect(() => merken("zweimalLesen", zweimalLesen), [zweimalLesen]);
+  const [nachpruefung, setNachpruefung] = useState<Nachpruefung | null>(null);
   const [phase, setPhase] = useState<Phase>("bereit");
   const [stand, setStand] = useState<Stand>(LEERER_STAND);
   const [ergebnis, setErgebnis] = useState<KartenErgebnis | null>(null);
@@ -74,6 +79,10 @@ export function App() {
         if (f.phase === "pruefen") {
           setPhase("pruefen");
           return { ...s, pruefZiel: f.ziel, pruefPfad: f.pfad };
+        }
+        if (f.phase === "nachlesen" || f.phase === "nachpruefen") {
+          setPhase(f.phase);
+          return { ...s, pruefPfad: f.pfad };
         }
         const m = f.meldung;
         switch (m.art) {
@@ -93,7 +102,7 @@ export function App() {
     };
   }, []);
 
-  const laeuft = phase === "kopieren" || phase === "pruefen";
+  const laeuft = phase === "kopieren" || phase === "pruefen" || phase === "nachlesen" || phase === "nachpruefen";
   // Jede Karte kommt in einen eigenen Ordner mit ihrem Namen (z. B. A001R132) unter dem gewählten Ziel.
   const ziele = quelle ? zielOrdner.map((z) => z.replace(/[\\/]+$/, "") + trenner(z) + name(quelle)) : [];
 
@@ -135,8 +144,27 @@ export function App() {
     setStand({ ...LEERER_STAND, beginn: Date.now() });
     setPhase("kopieren");
     try {
-      setErgebnis(await karteEinlesen({ quelle, ziele, mitMd5, mindestKopien }));
+      setNachpruefung(null);
+      setErgebnis(await karteEinlesen({ quelle, ziele, mitMd5, mindestKopien, zweimalLesen }));
       setPhase("fertig");
+    } catch (e) {
+      setFehler(String(e));
+      setPhase("fehler");
+    }
+    setAbbruchFragen(false);
+  }
+
+  async function nachpruefenKlick() {
+    const ordner = await open({ directory: true, title: "Kopie mit ascmhl-Ordner wählen (z. B. A001R132)" });
+    if (typeof ordner !== "string") return;
+    setFehler(null);
+    setErgebnis(null);
+    setNachpruefung(null);
+    setStand({ ...LEERER_STAND, beginn: Date.now() });
+    setPhase("nachpruefen");
+    try {
+      setNachpruefung(await zielNachpruefen(ordner));
+      setPhase("bereit");
     } catch (e) {
       setFehler(String(e));
       setPhase("fehler");
@@ -231,6 +259,15 @@ export function App() {
               Zusätzlich MD5
               <input type="checkbox" checked={mitMd5} disabled={laeuft} onChange={(e) => setMitMd5(e.target.checked)} />
             </label>
+            <label className="i-schalter" title="Erkennt einen Kartenleser, der unzuverlässig liefert. Dauert länger.">
+              Karte zweimal lesen
+              <input
+                type="checkbox"
+                checked={zweimalLesen}
+                disabled={laeuft}
+                onChange={(e) => setZweimalLesen(e.target.checked)}
+              />
+            </label>
             <div className="k-zeile">
               <span className="k-zeile-name">Prüfsumme</span>
               <span className="k-zeile-wert mono">XXH3-128{mitMd5 ? " + MD5" : ""}</span>
@@ -238,6 +275,16 @@ export function App() {
             <div className="k-zeile">
               <span className="k-zeile-name">Zurücklesen</span>
               <span className="k-zeile-wert">jedes Ziel, ohne Cache</span>
+            </div>
+          </section>
+
+          <section className="k-gruppe">
+            <h2>Bestehende Kopie</h2>
+            <span className="k-leise k-klein">Vollständig gegen ihr ASC MHL prüfen, jederzeit.</span>
+            <div className="i-knopfreihe">
+              <button className="k-taste" onClick={nachpruefenKlick} disabled={laeuft}>
+                Ziel nachprüfen …
+              </button>
             </div>
           </section>
         </aside>
@@ -256,6 +303,7 @@ export function App() {
               abbrechen={abbrechenKlick}
               abbruchFragen={abbruchFragen}
             />
+            {nachpruefung && <NachpruefungAnzeige n={nachpruefung} />}
             {ergebnis && <Ergebnis ergebnis={ergebnis} />}
             {!laeuft && <Verlauf neu={ergebnis?.kopie.beginn ?? ""} />}
           </div>
@@ -290,7 +338,8 @@ function ThemaSchalter() {
 
 function Kopflampe({ phase, ergebnis }: { phase: Phase; ergebnis: KartenErgebnis | null }) {
   if (phase === "kopieren") return <span className="k-lampe k-lampe-leise"><i /> Kopiert</span>;
-  if (phase === "pruefen") return <span className="k-lampe k-lampe-leise"><i /> Prüft</span>;
+  if (phase === "pruefen" || phase === "nachlesen" || phase === "nachpruefen")
+    return <span className="k-lampe k-lampe-leise"><i /> Prüft</span>;
   if (phase === "fehler") return <span className="k-lampe k-lampe-warn"><i /> Fehler</span>;
   if (ergebnis?.freigabe.sicher) return <span className="k-lampe k-lampe-ok"><i /> Sicher zum Formatieren</span>;
   if (ergebnis) return <span className="k-lampe k-lampe-warn"><i /> Nicht freigegeben</span>;
@@ -311,14 +360,20 @@ function Zustand(p: {
 }) {
   const { phase, stand, ergebnis } = p;
 
-  if (phase === "kopieren" || phase === "pruefen") {
+  if (phase === "kopieren" || phase === "pruefen" || phase === "nachlesen" || phase === "nachpruefen") {
     const anteil = stand.bytes > 0 ? stand.gelesen / stand.bytes : 0;
     const sekunden = Math.max(1, (Date.now() - stand.beginn) / 1000);
     const tempo = stand.gelesen / sekunden;
     return (
       <section className="i-zustand">
         <span className="i-zustand-titel">
-          {phase === "kopieren" ? "Kopiert an alle Ziele" : `Liest Ziel ${stand.pruefZiel + 1} von ${p.ziele.length} zurück`}
+          {phase === "kopieren"
+            ? "Kopiert an alle Ziele"
+            : phase === "pruefen"
+              ? `Liest Ziel ${stand.pruefZiel + 1} von ${p.ziele.length} zurück`
+              : phase === "nachlesen"
+                ? "Liest die Karte ein zweites Mal"
+                : "Prüft die Kopie gegen ihr ASC MHL"}
         </span>
         {phase === "kopieren" && (
           <div className="i-balken" aria-label="Fortschritt">
@@ -395,6 +450,27 @@ function Zustand(p: {
           <HardDrive size={16} strokeWidth={1.75} /> {ergebnis || phase === "fehler" ? "Neue Karte einlesen" : "Einlesen"}
         </button>
       </div>
+    </section>
+  );
+}
+
+function NachpruefungAnzeige({ n }: { n: Nachpruefung }) {
+  return (
+    <section className="i-zustand">
+      <span className={`i-zustand-titel k-lampe ${n.abweichungen.length === 0 ? "k-lampe-ok" : "k-lampe-warn"}`}>
+        <i /> {n.abweichungen.length === 0 ? "Kopie unverändert" : "Kopie weicht ab"}
+      </span>
+      <span className="i-pfad mono" title={n.ordner}>
+        {n.ordner}
+      </span>
+      <span className="i-zustand-grund">
+        {n.geprueft} Dateien gegen <span className="mono">{n.generation}</span> geprüft
+      </span>
+      {n.abweichungen.map((a) => (
+        <span key={abweichungText(a)} className="i-abweichung">
+          {abweichungText(a)}
+        </span>
+      ))}
     </section>
   );
 }

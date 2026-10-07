@@ -48,9 +48,17 @@ export type Meldung =
 
 export type Fortschritt =
   | { phase: "kopieren"; meldung: Meldung }
-  | { phase: "pruefen"; ziel: number; pfad: string };
+  | { phase: "pruefen"; ziel: number; pfad: string }
+  | { phase: "nachlesen"; pfad: string }
+  | { phase: "nachpruefen"; pfad: string };
 
-export type KartenAuftrag = { quelle: string; ziele: string[]; mitMd5: boolean; mindestKopien: number };
+export type KartenAuftrag = {
+  quelle: string;
+  ziele: string[];
+  mitMd5: boolean;
+  mindestKopien: number;
+  zweimalLesen?: boolean;
+};
 
 export type Befund = { stufe: "fehler" | "warnung"; text: string };
 export const vorabPruefen = (auftrag: KartenAuftrag) => invoke<Befund[]>("vorab_pruefen", { auftrag });
@@ -78,3 +86,6 @@ export type VerlaufEintrag = {
   ziele: { ordner: string; gut: boolean; bericht: string | null }[];
 };
 export const verlauf = () => invoke<VerlaufEintrag[]>("verlauf");
+
+export type Nachpruefung = { ordner: string; generation: string; geprueft: number; abweichungen: Abweichung[] };
+export const zielNachpruefen = (ordner: string) => invoke<Nachpruefung>("ziel_nachpruefen", { ordner });

@@ -214,6 +214,87 @@ fn kette_xml(kette: &[(usize, String, String)]) -> String {
     x + "</ascmhldirectory>\n"
 }
 
+/// Ergebnis von [`nachpruefen`].
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct Nachpruefung {
+    pub ordner: PathBuf,
+    /// Neueste Generation, gegen die geprüft wurde (z. B. `0002_A001R132_….mhl`).
+    pub generation: String,
+    pub geprueft: usize,
+    pub abweichungen: Vec<crate::pruefen::Abweichung>,
+}
+
+impl Nachpruefung {
+    pub fn gut(&self) -> bool {
+        self.abweichungen.is_empty()
+    }
+}
+
+/// Liest einen Ordner mit `ascmhl/` vollständig ohne Cache und vergleicht jede Datei mit dem neuesten
+/// Hash ihrer Historie. Geht auch Wochen später und bei Kopien anderer Werkzeuge mit ASC MHL.
+pub fn nachpruefen(
+    ordner: &Path,
+    abbruch: &std::sync::atomic::AtomicBool,
+    mut melden: impl FnMut(&str),
+) -> io::Result<Nachpruefung> {
+    use crate::pruefen::Abweichung;
+    let historie = historie_lesen(&ordner.join(ORDNER))?;
+    let generation = historie
+        .kette
+        .last()
+        .map(|k| k.1.clone())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "kein ascmhl/ascmhl_chain.xml im Ordner"))?;
+
+    let mut soll: BTreeMap<&str, (Option<&String>, Option<&String>)> = BTreeMap::new();
+    for ((pfad, v), h) in &historie.hashes {
+        let e = soll.entry(pfad.as_str()).or_default();
+        match v {
+            Verfahren::Xxh128 => e.0 = Some(h),
+            Verfahren::Md5 => e.1 = Some(h),
+        }
+    }
+    let vorhanden: BTreeSet<String> = walkdir::WalkDir::new(ordner)
+        .min_depth(1)
+        .into_iter()
+        .filter_entry(|e| e.depth() != 1 || e.file_name() != ORDNER)
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_file() && e.file_name() != ".DS_Store")
+        .map(|e| crate::kopie::relativ(ordner, e.path()))
+        .collect();
+
+    let mut abweichungen = Vec::new();
+    let mut geprueft = 0;
+    for (pfad, (xxh, md5)) in &soll {
+        if abbruch.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(io::Error::new(io::ErrorKind::Interrupted, "abgebrochen"));
+        }
+        melden(pfad);
+        if !vorhanden.contains(*pfad) {
+            abweichungen.push(Abweichung::Fehlt { pfad: pfad.to_string() });
+            continue;
+        }
+        match crate::ohne_cache::pruefsumme(&ordner.join(pfad), md5.is_some()) {
+            Err(e) => abweichungen.push(Abweichung::Unlesbar { pfad: pfad.to_string(), fehler: e.to_string() }),
+            Ok((ist, _)) => {
+                let falsch = xxh.is_some_and(|h| *h != ist.xxh128_hex())
+                    || md5.is_some_and(|h| Some(h.clone()) != ist.md5_hex());
+                if falsch {
+                    abweichungen.push(Abweichung::Pruefsumme {
+                        pfad: pfad.to_string(),
+                        soll: xxh.or(*md5).cloned().unwrap_or_default(),
+                        ist: if xxh.is_some() { ist.xxh128_hex() } else { ist.md5_hex().unwrap_or_default() },
+                    });
+                }
+            }
+        }
+        geprueft += 1;
+    }
+    for pfad in vorhanden.iter().filter(|p| !soll.contains_key(p.as_str())) {
+        abweichungen.push(Abweichung::Zusaetzlich { pfad: pfad.clone() });
+    }
+    Ok(Nachpruefung { ordner: ordner.into(), generation, geprueft, abweichungen })
+}
+
 /// Was eine mitgebrachte Historie schon enthält.
 #[derive(Default)]
 struct Historie {

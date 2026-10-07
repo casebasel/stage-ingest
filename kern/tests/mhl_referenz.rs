@@ -77,3 +77,45 @@ fn mitgebrachte_historie_wird_fortgesetzt() {
     assert!(xml.contains("action=\"verified\"") && !xml.contains("action=\"original\""));
     verify(&r, &ziel);
 }
+
+#[test]
+fn nachpruefen_findet_veraenderung_und_fremde_datei() {
+    // Läuft ohne Referenz: prüft unsere eigene Nachprüfung gegen unser eigenes MHL.
+    let t = tempfile::tempdir().unwrap();
+    karte(&t.path().join("A001R132"));
+    let ziel = t.path().join("ziel/A001R132");
+    let a = Auftrag { quelle: t.path().join("A001R132"), ziele: vec![ziel.clone()], mit_md5: true };
+    let kopie = kopieren(&a, &AtomicBool::new(false), |_| {}).unwrap();
+    mhl::schreiben(&ziel, &kopie, &angaben()).unwrap();
+
+    let gut = mhl::nachpruefen(&ziel, &AtomicBool::new(false), |_| {}).unwrap();
+    assert!(gut.gut(), "{gut:?}");
+    assert_eq!(gut.geprueft, 3);
+
+    let clip = ziel.join("Clips/A001C001_261007_R132.mov");
+    let mut d = fs::read(&clip).unwrap();
+    d[2_999_999] ^= 0x80;
+    fs::write(&clip, d).unwrap();
+    fs::write(ziel.join("fremd.txt"), b"?").unwrap();
+    fs::remove_file(ziel.join("A001R132.ale")).unwrap();
+    let schlecht = mhl::nachpruefen(&ziel, &AtomicBool::new(false), |_| {}).unwrap();
+    assert_eq!(schlecht.abweichungen.len(), 3, "{schlecht:?}");
+}
+
+#[test]
+fn nachpruefen_einer_fremden_kopie_mit_referenz_mhl() {
+    // Ordner, den das Referenz-Werkzeug versiegelt hat (z. B. Kopie eines anderen Programms).
+    let Some(r) = referenz() else { return };
+    let ascmhl = Path::new(&r).with_file_name(if cfg!(windows) { "ascmhl.exe" } else { "ascmhl" });
+    let t = tempfile::tempdir().unwrap();
+    let ordner = t.path().join("A001R132");
+    karte(&ordner);
+    assert!(Command::new(&ascmhl)
+        .args(["create", "-h", "xxh128", "-h", "md5"])
+        .arg(&ordner)
+        .status()
+        .unwrap()
+        .success());
+    let n = mhl::nachpruefen(&ordner, &AtomicBool::new(false), |_| {}).unwrap();
+    assert!(n.gut() && n.geprueft == 3, "{n:?}");
+}

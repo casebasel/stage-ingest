@@ -27,6 +27,9 @@ struct KartenAuftrag {
     ziele: Vec<PathBuf>,
     mit_md5: bool,
     mindest_kopien: usize,
+    /// Karte nach dem Kopieren ein zweites Mal lesen (erkennt einen unzuverlässigen Kartenleser).
+    #[serde(default)]
+    zweimal_lesen: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -34,6 +37,8 @@ struct KartenAuftrag {
 enum Fortschritt {
     Kopieren { meldung: Meldung },
     Pruefen { ziel: usize, pfad: String },
+    Nachlesen { pfad: String },
+    Nachpruefen { pfad: String },
 }
 
 #[derive(Debug, Serialize)]
@@ -169,6 +174,23 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
         let _ = app.emit(FORTSCHRITT, Fortschritt::Pruefen { ziel, pfad: pfad.to_string() });
     })
     .map_err(|e| e.to_string())?;
+    if auftrag.zweimal_lesen {
+        let anders = pruefen::quelle_nachlesen(&kopie, auftrag.mit_md5, abbruch, |pfad| {
+            let _ = app.emit(FORTSCHRITT, Fortschritt::Nachlesen { pfad: pfad.to_string() });
+        })
+        .map_err(|e| e.to_string())?;
+        if !anders.is_empty() {
+            // Dann sind alle Kopien fraglich, auch wenn sie unter sich übereinstimmen.
+            let text = format!(
+                "Karte liefert beim zweiten Lesen andere Daten ({} Dateien): Kartenleser oder Karte prüfen",
+                anders.len()
+            );
+            for u in &mut urteile {
+                u.kopierfehler.get_or_insert_with(|| text.clone());
+            }
+        }
+    }
+
     // ASC MHL nur auf gut geprüfte Ziele. Scheitert es, zählt das Ziel nicht für die Freigabe.
     let angaben = mhl::Angaben {
         werkzeug: "Stage Ingest".into(),
@@ -209,6 +231,32 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
     Ok(ergebnis)
 }
 
+/// Prüft eine bestehende Kopie gegen ihr ASC MHL (vollständig, ohne Cache).
+#[tauri::command]
+async fn ziel_nachpruefen(
+    app: AppHandle,
+    laufend: State<'_, Laufend>,
+    ordner: PathBuf,
+) -> Result<mhl::Nachpruefung, String> {
+    if laufend.aktiv.swap(true, Ordering::SeqCst) {
+        return Err("Es läuft schon ein Vorgang.".into());
+    }
+    laufend.abbruch.store(false, Ordering::SeqCst);
+    let aktiv = Arc::clone(&laufend.aktiv);
+    let abbruch = Arc::clone(&laufend.abbruch);
+    let ergebnis = tauri::async_runtime::spawn_blocking(move || {
+        mhl::nachpruefen(&ordner, &abbruch, |pfad| {
+            let _ = app.emit(FORTSCHRITT, Fortschritt::Nachpruefen { pfad: pfad.to_string() });
+        })
+        .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())
+    .and_then(|r| r);
+    aktiv.store(false, Ordering::SeqCst);
+    ergebnis
+}
+
 /// Bricht auf ausdrücklichen Wunsch ab. Nie automatisch, auch nicht für ein Update.
 #[tauri::command]
 fn abbrechen(laufend: State<'_, Laufend>) {
@@ -236,7 +284,14 @@ pub fn run() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![vorab_pruefen, karte_einlesen, abbrechen, laeuft, verlauf])
+        .invoke_handler(tauri::generate_handler![
+            vorab_pruefen,
+            karte_einlesen,
+            ziel_nachpruefen,
+            abbrechen,
+            laeuft,
+            verlauf
+        ])
         .run(tauri::generate_context!())
         .expect("Stage Ingest konnte nicht starten");
 }

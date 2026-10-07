@@ -109,3 +109,35 @@ fn zusaetzliche(ordner: &Path, erwartet: &BTreeSet<&str>) -> Vec<String> {
         .filter(|p| !erwartet.contains(p.as_str()) || p.ends_with(TEIL_ENDUNG))
         .collect()
 }
+
+/// Liest die Karte ein zweites Mal ohne Cache und vergleicht mit dem ersten Lesen. Erkennt einen
+/// Kartenleser, der unzuverlässig liefert: dann wären alle Kopien gleich falsch und das Zurücklesen
+/// der Ziele würde es nicht bemerken.
+pub fn quelle_nachlesen(
+    kopie: &Kopie,
+    mit_md5: bool,
+    abbruch: &AtomicBool,
+    mut melden: impl FnMut(&str),
+) -> Ergebnis<Vec<Abweichung>> {
+    let mut abweichungen = Vec::new();
+    for datei in &kopie.dateien {
+        if abbruch.load(Ordering::Relaxed) {
+            return Err(Fehler::Abgebrochen);
+        }
+        melden(&datei.pfad);
+        let pfad = kopie.quelle.join(&datei.pfad);
+        match ohne_cache::pruefsumme(&pfad, mit_md5) {
+            Err(e) => abweichungen.push(Abweichung::Unlesbar { pfad: datei.pfad.clone(), fehler: e.to_string() }),
+            Ok((_, ist)) if ist != datei.groesse => {
+                abweichungen.push(Abweichung::Groesse { pfad: datei.pfad.clone(), soll: datei.groesse, ist })
+            }
+            Ok((summe, _)) if summe != datei.pruefsumme => abweichungen.push(Abweichung::Pruefsumme {
+                pfad: datei.pfad.clone(),
+                soll: datei.pruefsumme.xxh128_hex(),
+                ist: summe.xxh128_hex(),
+            }),
+            Ok(_) => {}
+        }
+    }
+    Ok(abweichungen)
+}

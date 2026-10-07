@@ -173,3 +173,17 @@ fn abbruch_raeumt_die_eigenen_ziele_weg() {
     // Der nächste Versuch geht ohne Aufräumen von Hand.
     assert!(kopieren(&auftrag, &AtomicBool::new(false), |_| {}).is_ok());
 }
+
+#[test]
+fn zweites_lesen_der_karte_findet_veraenderte_quelle() {
+    use ingest_kern::pruefen::quelle_nachlesen;
+    let t = tempfile::tempdir().unwrap();
+    karte(&t.path().join("karte"));
+    let auftrag = Auftrag { quelle: t.path().join("karte"), ziele: vec![t.path().join("a/k")], mit_md5: false };
+    let kopie = kopieren(&auftrag, &AtomicBool::new(false), |_| {}).unwrap();
+    assert!(quelle_nachlesen(&kopie, false, &AtomicBool::new(false), |_| {}).unwrap().is_empty());
+    // Wie ein Leser, der beim zweiten Mal andere Bytes liefert.
+    fs::write(t.path().join("karte/A001R132/A001C002_261007_R132.mov"), b"zweiter cliP").unwrap();
+    let a = quelle_nachlesen(&kopie, false, &AtomicBool::new(false), |_| {}).unwrap();
+    assert!(matches!(&a[..], [Abweichung::Pruefsumme { .. }]), "{a:?}");
+}
