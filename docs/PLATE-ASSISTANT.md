@@ -50,3 +50,9 @@ Rückfälle: `clip_name` → Timecode-Überlappung → Zeitfenster der Plate →
 Gewünscht: Karte freigegeben (wann), Speicherort, `aus_clip` je Take, HDRI-Zustand und EXR-Pfade, Klärungsliste (Clips ohne Take, Takes ohne Clip).
 
 **Entschieden 07.10.2026:** eigene Tabellen des Ingest (`ingest_meldung`, HDRI-Jobs), Rolle `ingest_writer`, angelegt von Marlon. `aus_clip` nur in der Meldung; der Plate Assistant übernimmt ihn an seinen Take. HDRI: `captured`/`uploaded` setzt der Plate Assistant, `processed`/`linked` der Ingest.
+
+## Projekt (entschieden 07.10.2026, Systemkarte 58963fa, a5f5177)
+
+- Tabelle `projekt` in der gemeinsamen Supabase (bisher `supabase-plate-assistant`, künftig `supabase-stage`); Projekte sind in allen drei Apps anleg-, änder- und auswählbar.
+- Der Ingest **schreibt auf `projekt` nur über `aenderungen_anwenden`** mit einem eigenen Benutzer (legt Marlon an), nicht über `ingest_writer`. Rückmeldungen bleiben in den eigenen Tabellen des Ingest.
+- Schema und Formular kommen aus dem gemeinsamen Paket `casebasel/stage-projekt` (öffentlich, Stage pflegt den Inhalt).
