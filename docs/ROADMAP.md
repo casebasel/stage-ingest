@@ -1,0 +1,57 @@
+# Roadmap Stage Ingest
+
+Stand 07.10.2026. Nur diese App; app-übergreifende Abhängigkeiten stehen in der Systemkarte (`casebasel/stage-system`). Phasen wie in `docs/KONZEPT.md`, Kapitel 11.
+
+## Jetzt: Phase 1 abschliessen (Ziel: Plate-Dreh mit der ALEXA Mini, Ende Oktober 2026)
+
+Gebaut ist der Kern (siehe KONZEPT Kapitel 14). Offen, in dieser Reihenfolge:
+
+1. **Releases** 0.1.1 (Tag/Nacht, ad-hoc Signatur Mac) und 0.1.2 (drei Stufen, Kontraste); Update-Banner einmal echt testen.
+2. **Sicherheit nachschärfen**
+   - Optional: Karte ein zweites Mal lesen (erkennt einen fehlerhaften Kartenleser)
+   - „Ziel nachprüfen“: eine Kopie jederzeit gegen ihr ASC MHL prüfen
+   - Seriennummer der Platte auch am Mac (IORegistry)
+   - Unabhängige Code-Prüfung des Kerns
+3. **Test mit echter Hardware** (Marlon)
+   - Mac: echte Karte über den Kartenleser auf zwei externe Platten und aufs NAS
+   - Windows: auf Ada mit `A001R132`
+   - Bericht und Gerätekennung kontrollieren
+4. Erst danach: Stage Ingest am Dreh einsetzen, die ersten Tage parallel zum bisherigen Werkzeug.
+
+## Phase 0: Prüfungen (laufen nebenher)
+
+| Prüfung | Wer | Wann |
+| --- | --- | --- |
+| CAP-Info-Felder (`PA:<take.id>`) kommen im Clip/ALE an | Plate Assistant schreibt, Ingest liest | Mini-Test um den 20.10. |
+| Entwerten an einer Ersatzkarte an der echten Amira | Marlon + Ingest | vor Freischalten der Funktion |
+| DiffHDR auf Ada messen (Zeit, VRAM) | Ingest | vor Phase 4 |
+
+## Phase 2: Zuordnung, Ordnerstruktur, Anbindung
+
+- Ordnerstruktur `<Produktion>/<Datum>_<Dreh>/01_KAMERA … 05_METADATEN` bestätigen (Marlon), Bericht nach `04_BERICHTE`
+- Produktion → Kunde/Projekt der Stage beim ersten Import zuordnen und merken
+- Plate Assistant lesen (Dreh, Plate, Take, Fotos); Rückmeldung über eigene Tabellen (`ingest_meldung`, Rolle `ingest_writer`, legt Marlon an)
+- Clip ↔ Take: Info 1 → `clip_name` → Timecode → Zeitfenster; Klärungsliste
+- Soll-Liste: Studio-Takes von der Stage (WebSocket), Plate-Takes vom Plate Assistant; fehlende Clips vor der Freigabe melden
+- ART CMD: Neigung, Rollen, Objektiv pro Bild nach `05_METADATEN`, `aus_clip` an den Plate Assistant
+- ALE pro Karte (von der Karte oder erzeugt) an den Stage-Server
+- Referenz-Takes (Grau-/Chromkugel, Cleanplate) zur Plate verweisen
+
+## Phase 3: HDRI ohne KI
+
+HDRI-Dienst auf Ada (rechnet nur, wenn nDisplay nicht läuft): Debevec-Merge, Stitching, EXR mit Maske; Prüfen/Freigeben und Ausrichten in der App; Rohdaten aus Supabase Storage, Löschen erst nach geprüftem Ingest.
+
+## Phase 4: KI-Stufen
+
+Nadir (ComfyUI), Lichter (DiffHDR); „gemessen“ und „ergänzt“ getrennt sichtbar.
+
+## Phase 5: DeckLink-Livebild
+
+Neigung/Rollen aus dem SDI-Signal.
+
+## Entscheidungen, die Marlon noch treffen muss
+
+- Ordnerstruktur (Phase 2)
+- Farbwelt: Stage-Design behalten oder an den Plate Assistant angleichen
+- Rolle `ingest_writer` in der Plate-Assistant-Supabase anlegen (Phase 2)
+- Zugang von VM 170 zu Ada für Windows-Tests (oder Tests von Hand)
