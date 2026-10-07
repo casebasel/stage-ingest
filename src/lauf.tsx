@@ -243,6 +243,9 @@ function useLaufHalten() {
           paProjekt && (paProjekt.fps || paProjekt.codec || paProjekt.aufloesungPx)
             ? { fps: paProjekt.fps ?? null, codec: paProjekt.codec ?? null, aufloesungPx: paProjekt.aufloesungPx ?? null }
             : null,
+        projektAngaben: paProjekt
+          ? { firma: paProjekt.firma ?? null, regie: paProjekt.regie ?? null, dop: paProjekt.dop ?? null }
+          : null,
       });
       setErgebnis(r);
       setLetzteQuelle(quelle);

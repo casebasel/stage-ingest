@@ -1243,6 +1243,29 @@ input[type="checkbox"][role="switch"]:checked::before {
   font-weight: 650;
   color: var(--text);
 }
+.projekt-formular {
+  grid-row: 3;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 20px;
+}
+.projekt-formular > .block,
+.dreh-einstellungen > .block {
+  max-width: 880px;
+  margin: 0 auto;
+}
+.dreh-einstellungen {
+  padding: 12px 12px 0;
+}
+.einstellungen-knoepfe {
+  justify-content: flex-end;
+  align-items: center;
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--linie);
+}
+.einstellungen-knoepfe > .status {
+  margin-right: auto;
+}
 .projekt-rumpf {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 300px;

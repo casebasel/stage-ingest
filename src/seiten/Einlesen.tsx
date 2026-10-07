@@ -16,6 +16,7 @@ import {
   Network,
   Plus,
   RotateCcw,
+  Settings,
   TriangleAlert,
   X,
 } from "lucide-react";
@@ -32,6 +33,7 @@ import {
 import { useEinstellungen } from "../einstellungen";
 import { drehsVon, useKonto } from "../konto";
 import { useLauf, type Quelle } from "../lauf";
+import { ProjektEinstellungen } from "../ProjektEinstellungen";
 import { Pfad, Status, dauerText, name, zahl, type Ton } from "../teile";
 
 const ALLE_MS = 3000;
@@ -471,6 +473,7 @@ function DrehZeile() {
   const konto = useKonto();
   const verbunden = konto.verbindung === "verbunden";
   const [neu, setNeu] = useState<{ name: string; kurzname: string; fehler: string | null } | null>(null);
+  const [einstellen, setEinstellen] = useState(false);
   const passende = drehsVon(konto.drehs, lauf.paProjekt);
 
   async function anlegen() {
@@ -556,12 +559,37 @@ function DrehZeile() {
             <input value={lauf.drehName} placeholder="z. B. Rheinufer" onChange={(ev) => lauf.setDrehName(ev.target.value)} />
           )}
         </label>
+        {verbunden && lauf.paProjekt && !neu && (
+          <button
+            className="knopf-symbol"
+            aria-pressed={einstellen}
+            aria-label="Projekt-Einstellungen"
+            title="Projekt-Einstellungen"
+            onClick={() => setEinstellen(!einstellen)}
+          >
+            <Settings size={16} strokeWidth={1.75} />
+          </button>
+        )}
         {verbunden && !neu && (
           <button className="knopf" onClick={() => setNeu({ name: "", kurzname: "", fehler: null })}>
             <Plus size={14} strokeWidth={2} aria-hidden /> Neues Projekt
           </button>
         )}
       </div>
+      {einstellen && lauf.paProjekt && (
+        <div className="dreh-einstellungen">
+          <ProjektEinstellungen
+            projekt={konto.projekte.find((p) => p.id === lauf.paProjekt!.id) ?? lauf.paProjekt}
+            schliessen={(p) => {
+              setEinstellen(false);
+              if (p) {
+                lauf.setPaProjekt(konto.projekte.find((x) => x.id === p.id) ?? p);
+                lauf.setProjektText(p.name);
+              }
+            }}
+          />
+        </div>
+      )}
       {neu && (
         <div className="neues-projekt">
           <label className="eingabe-gruppe">

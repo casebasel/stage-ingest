@@ -118,7 +118,7 @@ const laufwerke = () => [
   { pfad: "/Volumes/NAS", name: "NAS", gesamt: 48_000_000_000_000, frei: 21_700_000_000_000, netz: true, karte: null },
 ];
 
-const projekt = { id: "projekt-happy_end", name: "Happy End", kurzname: "HAPPY_END", aktiv: true, fps: 25, codec: "ProRes 422 HQ", aufloesungPx: "3840x2160" };
+const projekt = { id: "projekt-happy_end", name: "Happy End", kurzname: "HAPPY_END", aktiv: true, fps: 25, codec: "ProRes 422 HQ", aufloesungPx: "3840x2160", art: "werbung", firma: "Beispiel Film AG", regie: "", dop: "" };
 
 const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
   "plugin:app|version": () => "0.1.6 · Vorschau",
@@ -183,6 +183,7 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
     { id: "d2", name: "Münsterplatz", datum: "2026-10-28", projektId: projekt.id, produktion: "" },
   ],
   plate_soll: () => [],
+  plate_projekt_aendern: () => null,
   plate_projekt_anlegen: (a) => `projekt-${String(a.kurzname).toLowerCase()}`,
   kurzname_vorschlag: (a) => kurz(String(a.name)),
   ziel_nachpruefen: async () => {

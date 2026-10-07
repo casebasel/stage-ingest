@@ -45,7 +45,15 @@ fn bericht_wird_gesetzt() {
         2,
         Umfang { dateien: kopie.dateien.len(), ganze_karte: true, historie_abweichungen: 0 },
     );
-    let pdf = pdf(&kopie, &urteile, &kennungen, &freigabe, 1, &Angaben { version: "0.1.0", mit_md5: true }).unwrap();
+    let pdf = pdf(
+        &kopie,
+        &urteile,
+        &kennungen,
+        &freigabe,
+        1,
+        &Angaben { version: "0.1.0", mit_md5: true, projekt: vec![("Regie".into(), "Ada Lovelace".into())] },
+    )
+    .unwrap();
     assert!(pdf.starts_with(b"%PDF"));
     if let Ok(ziel) = std::env::var("BERICHT_PROBE") {
         fs::write(ziel, &pdf).unwrap();

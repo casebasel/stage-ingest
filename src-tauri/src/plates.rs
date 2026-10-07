@@ -173,6 +173,7 @@ mod tests {
             freigegeben: true,
             unabhaengige_kopien: 2,
             grund: String::new(),
+            projekt: Default::default(),
             clips: vec![
                 ClipEintrag {
                     name: "A001C003_261028_R1AB".into(),

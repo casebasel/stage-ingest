@@ -15,7 +15,27 @@ export type Projekt = {
   fps?: number | null;
   codec?: string | null;
   aufloesungPx?: string | null;
+  sensorFps?: number | null;
+  sensorModus?: string | null;
+  aufloesung?: string | null;
+  /** Projekt-Einstellungen (Zahnrad, Migration 0016). */
+  art?: string | null;
+  firma?: string | null;
+  regie?: string | null;
+  dop?: string | null;
 };
+
+/** Arten laut Systemkarte; der Server prüft die Liste. */
+export const ARTEN: [string, string][] = [
+  ["", "–"],
+  ["spielfilm", "Spielfilm"],
+  ["serie", "Serie"],
+  ["werbung", "Werbung"],
+  ["musikvideo", "Musikvideo"],
+  ["dokumentarfilm", "Dokumentarfilm"],
+  ["test", "Studiotest / R&D"],
+  ["sonstiges", "Sonstiges"],
+];
 export type DrehKurz = { id: string; name: string; datum: string; projektId: string | null; produktion: string };
 
 export const KURZNAME = /^[A-Z0-9]+(_[A-Z0-9]+)*$/;
@@ -124,6 +144,12 @@ function useKontoHalten() {
     return { id, name, kurzname, aktiv: true };
   }
 
+  /** Projekt-Einstellungen speichern; nur geänderte Felder (Namen wie in der Datenbank). */
+  async function projektAendern(id: string, felder: Record<string, string | number | null>) {
+    await invoke("plate_projekt_aendern", { zugang, id, felder });
+    await laden();
+  }
+
   const kurznameVorschlag = async (name: string) => (await invoke<string | null>("kurzname_vorschlag", { name })) ?? "";
 
   return {
@@ -140,6 +166,7 @@ function useKontoHalten() {
     laden: () => laden(),
     anmelden,
     projektAnlegen,
+    projektAendern,
     kurznameVorschlag,
   };
 }

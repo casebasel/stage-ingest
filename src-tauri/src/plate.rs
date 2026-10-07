@@ -76,6 +76,21 @@ pub struct Projekt {
     pub codec: Option<String>,
     #[serde(default)]
     pub aufloesung_px: Option<String>,
+    #[serde(default)]
+    pub sensor_fps: Option<f64>,
+    #[serde(default)]
+    pub sensor_modus: Option<String>,
+    #[serde(default)]
+    pub aufloesung: Option<String>,
+    /// Projekt-Einstellungen (Migration 0016): Art, Produktionsfirma, Regie, DoP.
+    #[serde(default)]
+    pub art: Option<String>,
+    #[serde(default)]
+    pub firma: Option<String>,
+    #[serde(default)]
+    pub regie: Option<String>,
+    #[serde(default)]
+    pub dop: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -166,7 +181,7 @@ impl Plate {
     /// Projekte (ohne gelöschte). Gibt es die Tabelle noch nicht (vor Migration 0009), ist die Liste leer.
     pub fn projekte(&self, z: &Zugang) -> Result<Vec<Projekt>, String> {
         // Mit den Kameraeinstellungen (ab Migration 0016); vorher ohne diese Spalten.
-        let mit = "projekt?select=id,name,kurzname,aktiv,fps,codec,aufloesung_px&geloescht=eq.false&order=name.asc";
+        let mit = "projekt?select=id,name,kurzname,aktiv,fps,sensor_fps,sensor_modus,codec,aufloesung,aufloesung_px,art,firma,regie,dop&geloescht=eq.false&order=name.asc";
         let ohne = "projekt?select=id,name,kurzname,aktiv&geloescht=eq.false&order=name.asc";
         match self.lesen(z, mit).or_else(|_| self.lesen(z, ohne)) {
             Ok(v) => Ok(projekte_aus(&v)),
@@ -254,7 +269,7 @@ impl Plate {
         let jetzt = chrono::Utc::now();
         let body = json!({
             // Eigener Gerätename, damit der Verlauf im Plate Assistant lesbar bleibt.
-            "p_geraet": if cfg!(target_os = "macos") { "Stage Ingest (Mac)" } else if cfg!(windows) { "Stage Ingest (Windows)" } else { "Stage Ingest" },
+            "p_geraet": geraet_name(),
             "p_aenderungen": [{
                 "id": ulid_aehnlich(),
                 "tabelle": "projekt",
@@ -265,7 +280,64 @@ impl Plate {
                 "zeit": jetzt.timestamp_micros(),
             }]
         });
-        aenderungen_pruefen(&body)?;
+        let v = self.anwenden(z, &body)?;
+        let ergebnis = v[0]["ergebnis"].as_str().unwrap_or("");
+        match ergebnis {
+            "uebernommen" | "aelter" | "doppelt" => Ok(id),
+            _ => Err(format!("Projekt nicht angelegt: {}", v[0]["grund"].as_str().unwrap_or(ergebnis))),
+        }
+    }
+
+    /// Projekt-Einstellungen (Zahnrad, Systemkarte `SCHNITTSTELLEN.md`) ändern: eine Änderung pro Feld.
+    /// Der Kurzname ist fest und wird nie geschickt; nur die Felder der Projekt-Einstellungen sind erlaubt.
+    pub fn projekt_aendern(&self, z: &Zugang, id: &str, felder: &serde_json::Map<String, Value>) -> Result<(), String> {
+        const ERLAUBT: &[&str] = &[
+            "name",
+            "art",
+            "firma",
+            "regie",
+            "dop",
+            "fps",
+            "sensor_fps",
+            "sensor_modus",
+            "codec",
+            "aufloesung",
+            "aufloesung_px",
+        ];
+        if let Some(f) = felder.keys().find(|f| !ERLAUBT.contains(&f.as_str())) {
+            return Err(format!("Feld „{f}“ wird hier nicht geändert"));
+        }
+        if felder.is_empty() {
+            return Ok(());
+        }
+        let jetzt = chrono::Utc::now().timestamp_micros();
+        let aenderungen: Vec<Value> = felder
+            .iter()
+            .map(|(feld, wert)| {
+                json!({ "id": ulid_aehnlich(), "tabelle": "projekt", "datensatz": id, "feld": feld, "wert": wert, "zeit": jetzt })
+            })
+            .collect();
+        let body = json!({ "p_geraet": geraet_name(), "p_aenderungen": aenderungen });
+        let v = self.anwenden(z, &body)?;
+        let abgelehnt: Vec<String> = v
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|e| !matches!(e["ergebnis"].as_str(), Some("uebernommen" | "aelter" | "doppelt")))
+            .map(|e| e["grund"].as_str().or(e["ergebnis"].as_str()).unwrap_or("abgelehnt").to_owned())
+            .collect();
+        if abgelehnt.is_empty() {
+            Ok(())
+        } else if abgelehnt.iter().any(|g| g.contains("column") || g.contains("Spalte")) {
+            Err("Die Datenbank kennt die neuen Projektfelder noch nicht (Migration 0016 fehlt). Nur der Name lässt sich schon ändern.".into())
+        } else {
+            Err(format!("Nicht gespeichert: {}", abgelehnt.join("; ")))
+        }
+    }
+
+    /// Schickt Änderungen an `aenderungen_anwenden` (vorher gegen die Besitzregel geprüft). Bei 401 einmal neu anmelden.
+    fn anwenden(&self, z: &Zugang, body: &Value) -> Result<Value, String> {
+        aenderungen_pruefen(body)?;
         let url = format!("{}/rest/v1/rpc/aenderungen_anwenden", z.adresse.trim_end_matches('/'));
         for neu in [false, true] {
             let token = self.token(z, neu)?;
@@ -275,19 +347,23 @@ impl Plate {
                 .set("Authorization", &format!("Bearer {token}"))
                 .send_json(body.clone())
             {
-                Ok(a) => {
-                    let v: Value = a.into_json().map_err(|e| e.to_string())?;
-                    let ergebnis = v[0]["ergebnis"].as_str().unwrap_or("");
-                    return match ergebnis {
-                        "uebernommen" | "aelter" | "doppelt" => Ok(id),
-                        _ => Err(format!("Projekt nicht angelegt: {}", v[0]["grund"].as_str().unwrap_or(ergebnis))),
-                    };
-                }
+                Ok(a) => return a.into_json().map_err(|e| e.to_string()),
                 Err(ureq::Error::Status(401, _)) if !neu => continue,
                 Err(e) => return Err(fehler(e)),
             }
         }
         Err("Anmeldung beim Plate Assistant abgelehnt".into())
+    }
+}
+
+/// Eigener Gerätename, damit der Verlauf im Plate Assistant lesbar bleibt.
+fn geraet_name() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "Stage Ingest (Mac)"
+    } else if cfg!(windows) {
+        "Stage Ingest (Windows)"
+    } else {
+        "Stage Ingest"
     }
 }
 
@@ -332,6 +408,10 @@ fn text(v: &Value) -> String {
     v.as_str().unwrap_or_default().trim().to_owned()
 }
 
+fn text_oder_nichts(v: &Value) -> Option<String> {
+    v.as_str().map(str::to_owned).filter(|t| !t.trim().is_empty())
+}
+
 fn projekte_aus(v: &Value) -> Vec<Projekt> {
     v.as_array()
         .into_iter()
@@ -344,7 +424,14 @@ fn projekte_aus(v: &Value) -> Vec<Projekt> {
             // numeric kommt von PostgREST als Zahl oder Text
             fps: p["fps"].as_f64().or_else(|| p["fps"].as_str().and_then(|t| t.parse().ok())),
             codec: p["codec"].as_str().map(str::to_owned).filter(|t| !t.trim().is_empty()),
-            aufloesung_px: p["aufloesung_px"].as_str().map(str::to_owned).filter(|t| !t.trim().is_empty()),
+            aufloesung_px: text_oder_nichts(&p["aufloesung_px"]),
+            sensor_fps: p["sensor_fps"].as_f64().or_else(|| p["sensor_fps"].as_str().and_then(|t| t.parse().ok())),
+            sensor_modus: text_oder_nichts(&p["sensor_modus"]),
+            aufloesung: text_oder_nichts(&p["aufloesung"]),
+            art: text_oder_nichts(&p["art"]),
+            firma: text_oder_nichts(&p["firma"]),
+            regie: text_oder_nichts(&p["regie"]),
+            dop: text_oder_nichts(&p["dop"]),
         })
         .collect()
 }
@@ -544,7 +631,7 @@ mod tests {
         let code = include_str!("plate.rs");
         assert_eq!(code.matches(&format!("{}{}", "rpc/aenderungen", "_anwenden")).count(), 1);
         // Die Sperre steht vor dem einzigen Aufruf.
-        let sperre = code.find(&format!("{}{}", "aenderungen_pruefen(&body", ")?")).expect("Sperre fehlt");
+        let sperre = code.find(&format!("{}{}", "aenderungen_pruefen(body", ")?")).expect("Sperre fehlt");
         let aufruf = code.find(&format!("{}{}", "rpc/aenderungen", "_anwenden")).unwrap();
         assert!(sperre < aufruf);
         for datei in

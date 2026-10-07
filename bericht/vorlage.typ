@@ -4,6 +4,7 @@
 
 #let ok = rgb("#2f8a46")
 #let gold = rgb("#b07a10")
+#let rot = rgb("#b3261e")  // nur Datenverlust: nicht freigegeben (gemeinsames Design)
 #let leise = rgb("#5d6470")
 #let linie = rgb("#d5d8dd")
 
@@ -28,9 +29,9 @@
 #text(fill: leise)[#d.quelle]
 
 #v(10pt)
-#block(stroke: (left: 3pt + if d.freigabe.sicher { ok } else { gold }), inset: (left: 10pt, y: 4pt))[
-  #text(14pt, weight: "semibold", fill: if d.freigabe.sicher { ok } else { gold })[
-    #if d.freigabe.sicher [Sicher zum Formatieren] else [Nicht freigegeben]
+#block(stroke: (left: 3pt + if d.freigabe.sicher { ok } else { rot }), inset: (left: 10pt, y: 4pt))[
+  #text(14pt, weight: "semibold", fill: if d.freigabe.sicher { ok } else { rot })[
+    #if d.freigabe.sicher [Sicher zum Formatieren] else [Nicht freigegeben · Karte nicht formatieren]
   ] \
   #d.freigabe.grund (verlangt: #d.freigabe.mindest_kopien)
   #for h in d.freigabe.hinweise [ \ #text(fill: gold)[#h] ]
@@ -41,6 +42,7 @@
   columns: (auto, 1fr),
   column-gutter: 14pt,
   row-gutter: 5pt,
+  ..d.projekt.map(((n, w)) => (text(fill: leise)[#n], [#w])).flatten(),
   text(fill: leise)[Beginn], mono(d.beginn),
   text(fill: leise)[Ende], mono(d.ende),
   text(fill: leise)[Dateien], [#mono(str(d.dateien.len())) · #mono(d.summe)],

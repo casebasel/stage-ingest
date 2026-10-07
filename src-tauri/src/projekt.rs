@@ -205,6 +205,7 @@ mod tests {
                 freigegeben: true,
                 unabhaengige_kopien: 2,
                 grund: String::new(),
+                projekt: Default::default(),
                 clips: vec![
                     ClipEintrag {
                         name: "A001C003_261028_R1AB".into(),
@@ -244,6 +245,13 @@ mod tests {
             fps: None,
             codec: None,
             aufloesung_px: None,
+            sensor_fps: None,
+            sensor_modus: None,
+            aufloesung: None,
+            art: None,
+            firma: None,
+            regie: None,
+            dop: None,
         };
         let u = zusammenfuehren(p, &drehs, vec![karte], vec![]);
         let plate = &u.drehs[0].plates[0];

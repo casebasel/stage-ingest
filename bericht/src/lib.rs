@@ -34,6 +34,8 @@ pub enum Fehler {
 pub struct Angaben<'a> {
     pub version: &'a str,
     pub mit_md5: bool,
+    /// Projektangaben für den Kopf, nur gefüllte (z. B. „Projekt“, „Produktionsfirma“, „Regie“, „DoP“).
+    pub projekt: Vec<(String, String)>,
 }
 
 #[derive(Serialize)]
@@ -46,6 +48,7 @@ struct Daten {
     ende: String,
     summe: String,
     mit_md5: bool,
+    projekt: Vec<[String; 2]>,
     dieses_ziel: usize,
     freigabe: Freigabe,
     ziele: Vec<ZielDaten>,
@@ -87,6 +90,7 @@ pub fn pdf(
         ende: zeit(&kopie.ende),
         summe: groesse(kopie.dateien.iter().map(|d| d.groesse).sum()),
         mit_md5: angaben.mit_md5,
+        projekt: angaben.projekt.iter().map(|(n, w)| [n.clone(), w.clone()]).collect(),
         dieses_ziel: dieses_ziel + 1,
         freigabe: freigabe.clone(),
         ziele: urteile

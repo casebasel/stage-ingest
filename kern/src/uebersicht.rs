@@ -25,6 +25,9 @@ pub struct KartenZusammenfassung {
     pub unabhaengige_kopien: usize,
     pub grund: String,
     pub clips: Vec<ClipEintrag>,
+    /// Projektangaben zum Nachschlagen (Projekt, Kurzname, Produktionsfirma, Regie, DoP), nur gefüllte.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub projekt: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -119,6 +122,7 @@ mod tests {
             freigegeben: true,
             unabhaengige_kopien: 2,
             grund: "2 unabhängige Kopien geprüft".into(),
+            projekt: Default::default(),
             clips: vec![ClipEintrag {
                 name: "A001C003_261028_R1AB".into(),
                 pfad: "A001C003_261028_R1AB.mov".into(),

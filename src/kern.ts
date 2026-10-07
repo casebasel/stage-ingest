@@ -71,6 +71,7 @@ export type KartenAuftrag = {
   plateZugang?: { adresse: string; anonKey: string; email: string } | null;
   plateDreh?: string | null;
   kamera?: { fps: number | null; codec: string | null; aufloesungPx: string | null } | null;
+  projektAngaben?: { firma: string | null; regie: string | null; dop: string | null } | null;
 };
 
 export type SollClip = {

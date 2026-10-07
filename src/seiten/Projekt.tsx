@@ -2,7 +2,8 @@
 // Beantwortet vor dem Formatieren: Ist von diesem Projekt alles da? Welche Takes haben noch keinen Clip?
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Settings } from "lucide-react";
+import { ProjektEinstellungen } from "../ProjektEinstellungen";
 import { useEinstellungen } from "../einstellungen";
 import { useKonto, type Projekt as ProjektT } from "../konto";
 import { useLauf } from "../lauf";
@@ -51,6 +52,9 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
   const [drehFilter, setDrehFilter] = useState("");
   const [ansicht, setAnsicht] = useState<"takes" | "karten" | "klaerung">("takes");
   const [gewaehlt, setGewaehlt] = useState<string | null>(null);
+  const [einstellen, setEinstellen] = useState(false);
+  // Aktueller Stand des Projekts (nach dem Speichern neu geladen) für das Formular.
+  const aktuell = konto.projekte.find((p) => p.id === projekt?.id) ?? projekt;
 
   async function laden(p: ProjektT) {
     setLaedt(true);
@@ -124,6 +128,11 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
             </button>
           </>
         )}
+        {verbunden && projekt?.id && (
+          <button className="knopf" aria-pressed={einstellen} onClick={() => setEinstellen(!einstellen)} title="Projekt-Einstellungen">
+            <Settings size={14} strokeWidth={2} aria-hidden /> Einstellungen
+          </button>
+        )}
         {projekt && (
           <button className="knopf" disabled={laedt} onClick={() => laden(projekt)}>
             <RefreshCw size={14} strokeWidth={2} aria-hidden className={laedt ? "dreht" : ""} /> {laedt ? "Lädt …" : "Neu laden"}
@@ -150,7 +159,17 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
         </p>
       )}
 
-      {!u ? (
+      {einstellen && aktuell ? (
+        <div className="projekt-formular">
+          <ProjektEinstellungen
+            projekt={aktuell}
+            schliessen={(p) => {
+              setEinstellen(false);
+              if (p) setProjekt(p);
+            }}
+          />
+        </div>
+      ) : !u ? (
         <div className="leer">
           <h2>{laedt ? "Lädt die Übersicht …" : "Projekt wählen"}</h2>
           <p>

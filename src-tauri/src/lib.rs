@@ -59,6 +59,38 @@ struct KartenAuftrag {
     /// Standard-Kameraeinstellungen des Projekts: Abweichungen der Clips nur als Warnung, nie als Sperre.
     #[serde(default)]
     kamera: Option<ingest_kern::clip::Kameraeinstellung>,
+    /// Produktionsfirma, Regie, DoP des Projekts (Projekt-Einstellungen): für Bericht und Zusammenfassung.
+    #[serde(default)]
+    projekt_angaben: Option<ProjektAngaben>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjektAngaben {
+    #[serde(default)]
+    firma: Option<String>,
+    #[serde(default)]
+    regie: Option<String>,
+    #[serde(default)]
+    dop: Option<String>,
+}
+
+/// Gefüllte Projektangaben in fester Reihenfolge: Projekt, Kurzname, Drehort, Produktionsfirma, Regie, DoP.
+fn projekt_zeilen(auftrag: &KartenAuftrag) -> Vec<(String, String)> {
+    let mut z = Vec::new();
+    if let Some(d) = &auftrag.dreh {
+        z.push(("Projekt".to_owned(), d.projekt.clone()));
+        z.push(("Kurzname".to_owned(), d.kurzname.clone().unwrap_or_else(|| struktur::kurzname(&d.projekt))));
+        z.push(("Drehort".to_owned(), format!("{} · {}", d.name, d.datum)));
+    }
+    if let Some(a) = &auftrag.projekt_angaben {
+        for (n, w) in [("Produktionsfirma", &a.firma), ("Regie", &a.regie), ("DoP", &a.dop)] {
+            if let Some(w) = w.as_ref().map(|t| t.trim()).filter(|t| !t.is_empty()) {
+                z.push((n.to_owned(), w.to_owned()));
+            }
+        }
+    }
+    z
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -448,7 +480,8 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
     }
     // Bericht auf jedes Ziel, auch auf fehlerhafte (dort belegt er den Fehler), soweit schreibbar.
     let version = app.package_info().version.to_string();
-    let angaben = ingest_bericht::Angaben { version: &version, mit_md5: auftrag.mit_md5 };
+    let angaben =
+        ingest_bericht::Angaben { version: &version, mit_md5: auftrag.mit_md5, projekt: projekt_zeilen(auftrag) };
     let berichte: Vec<Result<PathBuf, String>> = (0..urteile.len())
         .map(|i| {
             let pdf =
@@ -479,6 +512,7 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
             freigegeben: freigabe.sicher,
             unabhaengige_kopien: freigabe.unabhaengige_kopien,
             grund: freigabe.grund.clone(),
+            projekt: projekt_zeilen(auftrag).into_iter().collect(),
             clips: clips
                 .iter()
                 .map(|c| {
@@ -663,6 +697,18 @@ async fn plate_projekt_anlegen(
     im_hintergrund(move || p.projekt_anlegen(&zugang, &name, &kurzname)).await
 }
 
+/// Projekt-Einstellungen ändern (Zahnrad). Nur erlaubte Felder, Kurzname nie.
+#[tauri::command]
+async fn plate_projekt_aendern(
+    plate: State<'_, Arc<plate::Plate>>,
+    zugang: plate::Zugang,
+    id: String,
+    felder: serde_json::Map<String, serde_json::Value>,
+) -> Result<(), String> {
+    let p = Arc::clone(&plate);
+    im_hintergrund(move || p.projekt_aendern(&zugang, &id, &felder)).await
+}
+
 /// Projektübersicht: Plan aus dem Plate Assistant und eingelesene Karten auf den Zielordnern.
 #[tauri::command]
 async fn projekt_uebersicht(
@@ -797,6 +843,7 @@ pub fn run() {
             plate_drehs,
             plate_soll,
             plate_projekt_anlegen,
+            plate_projekt_aendern,
             kurzname_vorschlag,
             stage_projekt,
             projekt_uebersicht,
@@ -847,6 +894,7 @@ mod gemeinsamer_test {
             plate_dreh: None,
             art_cmd: None,
             kamera: None,
+            projekt_angaben: None,
         };
         let k = Auftrag { quelle: karte, ziele: auftrag.ziele.clone(), mit_md5: false };
         let kopie = kopie::kopieren(&k, &AtomicBool::new(false), |_| {}).unwrap();
