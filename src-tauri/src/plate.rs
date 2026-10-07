@@ -135,7 +135,12 @@ impl Plate {
         let url = format!("{}/rest/v1/{pfad_und_abfrage}", z.adresse.trim_end_matches('/'));
         for neu in [false, true] {
             let token = self.token(z, neu)?;
-            match agent().get(&url).set("apikey", &z.anon_key).set("Authorization", &format!("Bearer {token}")).call() {
+            match agent()
+                .get(&url)
+                .set("apikey", &key_bereinigen(&z.anon_key))
+                .set("Authorization", &format!("Bearer {token}"))
+                .call()
+            {
                 Ok(a) => return a.into_json().map_err(|e| e.to_string()),
                 Err(ureq::Error::Status(401, _)) if !neu => continue,
                 Err(e) => return Err(fehler(e)),
@@ -199,7 +204,12 @@ impl Plate {
         let url = format!("{}/storage/v1/object/authenticated/fotos/{}", z.adresse.trim_end_matches('/'), pfad);
         for neu in [false, true] {
             let token = self.token(z, neu)?;
-            match agent().get(&url).set("apikey", &z.anon_key).set("Authorization", &format!("Bearer {token}")).call() {
+            match agent()
+                .get(&url)
+                .set("apikey", &key_bereinigen(&z.anon_key))
+                .set("Authorization", &format!("Bearer {token}"))
+                .call()
+            {
                 Ok(a) => {
                     let mut daten = Vec::new();
                     std::io::Read::read_to_end(&mut a.into_reader().take(60 * 1024 * 1024), &mut daten)
@@ -251,7 +261,7 @@ impl Plate {
             let token = self.token(z, neu)?;
             match agent()
                 .post(&url)
-                .set("apikey", &z.anon_key)
+                .set("apikey", &key_bereinigen(&z.anon_key))
                 .set("Authorization", &format!("Bearer {token}"))
                 .send_json(body.clone())
             {
@@ -271,15 +281,33 @@ impl Plate {
     }
 }
 
+/// Anon-Key bereinigen: Leerzeichen, Zeilenumbrüche, Anführungszeichen und ein vorangestelltes `ANON_KEY=`
+/// entfernen (typische Kopierfehler beim Eintragen der Variable).
+pub fn key_bereinigen(k: &str) -> String {
+    let k = k.trim();
+    let k = k.strip_prefix("ANON_KEY=").or_else(|| k.strip_prefix("SUPABASE_ANON_KEY=")).unwrap_or(k);
+    k.chars().filter(|c| !c.is_whitespace() && *c != '"' && *c != '\'').collect()
+}
+
 fn anmelden(z: &Zugang, body: Value, art: &str) -> Result<Sitzung, String> {
-    let url = format!("{}/auth/v1/token?grant_type={art}", z.adresse.trim_end_matches('/'));
-    let v: Value = agent()
-        .post(&url)
-        .set("apikey", &z.anon_key)
-        .send_json(body)
-        .map_err(fehler)?
-        .into_json()
-        .map_err(|e| e.to_string())?;
+    let url = format!("{}/auth/v1/token?grant_type={art}", z.adresse.trim().trim_end_matches('/'));
+    let antwort = agent().post(&url).set("apikey", &key_bereinigen(&z.anon_key)).send_json(body);
+    let v: Value = match antwort {
+        Ok(a) => a.into_json().map_err(|e| e.to_string())?,
+        // Klartext statt Servertext: 401 = Schlüssel falsch, 400 invalid_grant = E-Mail/Passwort falsch.
+        Err(ureq::Error::Status(401, _)) => {
+            return Err("Zugangsschlüssel (Anon-Key) ungültig: die App ist mit dem falschen Schlüssel gebaut oder er ist falsch eingetragen. Unter „Andere Adresse …“ prüfen.".into())
+        }
+        Err(ureq::Error::Status(400, a)) => {
+            let t = a.into_string().unwrap_or_default();
+            return Err(if t.contains("invalid_grant") || t.contains("Invalid login") {
+                "E-Mail oder Passwort falsch (dasselbe wie im Plate Assistant auf dem iPhone).".into()
+            } else {
+                format!("Anmeldung abgelehnt: {}", t.chars().take(200).collect::<String>())
+            });
+        }
+        Err(e) => return Err(fehler(e)),
+    };
     Ok(Sitzung {
         zugang_email: z.email.clone(),
         ingest_recht: v["user"]["app_metadata"]["ingest"] == true,
@@ -509,6 +537,12 @@ mod tests {
         {
             assert!(!datei.contains(&format!("{}{}", "aenderungen", "_anwenden\"")), "Schreiben nur über plate.rs");
         }
+    }
+
+    #[test]
+    fn key_wird_bereinigt() {
+        assert_eq!(key_bereinigen(" ANON_KEY=\"eyJabc.def\"\n"), "eyJabc.def");
+        assert_eq!(key_bereinigen("eyJ abc"), "eyJabc");
     }
 
     #[test]
