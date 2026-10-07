@@ -28,8 +28,8 @@ Gebaut ist der Kern (siehe KONZEPT Kapitel 14). Offen, in dieser Reihenfolge:
 
 ## Phase 2: Zuordnung, Ordnerstruktur, Anbindung
 
-- Ordnerstruktur `<Produktion>/<Datum>_<Dreh>/01_KAMERA … 05_METADATEN` bestätigen (Marlon), Bericht nach `04_BERICHTE`
-- Produktion → Kunde/Projekt der Stage beim ersten Import zuordnen und merken
+- ~~Ordnerstruktur `<Produktion>/<Datum>_<Dreh>/01_KAMERA … 05_METADATEN`, Bericht nach `04_BERICHTE`~~ bestätigt und gebaut (Produktion vorerst als Text)
+- Produktion als gemeinsame Liste über die Supabase (Wunsch Marlon 07.10.2026: im Plate Assistant anlegen, überall synchron); Abstimmung läuft über stage-system
 - Plate Assistant lesen (Dreh, Plate, Take, Fotos); Rückmeldung über eigene Tabellen (`ingest_meldung`, Rolle `ingest_writer`, legt Marlon an)
 - Clip ↔ Take: Info 1 → `clip_name` → Timecode → Zeitfenster; Klärungsliste
 - ~~Soll-Liste Studio~~ gebaut (07.10.2026): Stage-CSV-Export, Abgleich nach Kamera+Reel, fehlende Clips als Hinweis vor der Freigabe; offen: Plate-Takes vom Plate Assistant als zweite Quelle
@@ -51,7 +51,6 @@ Neigung/Rollen aus dem SDI-Signal.
 
 ## Entscheidungen, die Marlon noch treffen muss
 
-- Ordnerstruktur (Phase 2)
 - Farbwelt: Stage-Design behalten oder an den Plate Assistant angleichen
 - Rolle `ingest_writer` in der Plate-Assistant-Supabase anlegen (Phase 2)
 - Zugang von VM 170 zu Ada für Windows-Tests (oder Tests von Hand)

@@ -46,7 +46,7 @@ Kamera-Originale **1:1 wie auf der Karte**, mit ASC MHL. Plates verweisen auf Cl
   05_METADATEN/              ALE pro Karte, Bewegungs-/Objektivdaten pro Clip (ART CMD)
 ```
 
-Die Struktur ist ein Vorschlag (Phase 2 bestätigen). **NAS-Ziel:** ein eigenes Footage-Dataset auf den Festplatten, z. B. `Footage/<Kunde>/<Projekt>/<Datum>_<Dreh>/`, mit den Kunden- und Projektnamen der Stage-Konsole. Die Produktion eines Drehs ordnet der Ingest beim ersten Import einem Kunden/Projekt zu und merkt sich das. Der genaue Pool-Pfad steht in der lokalen Einstellung.
+Die Struktur ist von Marlon bestätigt (07.10.2026) und gebaut (`kern/src/struktur.rs`); ohne Produktion und Dreh kommt die Karte direkt in den Zielordner. **NAS-Ziel:** ein eigenes Footage-Dataset auf den Festplatten, z. B. `Footage/<Kunde>/<Projekt>/<Datum>_<Dreh>/`, mit den Kunden- und Projektnamen der Stage-Konsole. Die Produktion eines Drehs ordnet der Ingest beim ersten Import einem Kunden/Projekt zu und merkt sich das. Der genaue Pool-Pfad steht in der lokalen Einstellung.
 
 ## 6. Zuordnung Clip ↔ Take
 
@@ -122,7 +122,6 @@ Wege und Formate stehen in der Systemkarte (`SCHNITTSTELLEN.md`); was dort „of
 
 - Info-Felder im Clip an der Mini prüfen (um den 20.10.).
 - Empfang von Clips/ALE auf dem Stage-Server (mit Stage).
-- Ordnerstruktur bestätigen (Phase 2).
 - Laufzeit und VRAM von DiffHDR auf Ada (Phase 0).
 
 ## 14. Stand (07.10.2026)
