@@ -31,6 +31,8 @@ export type Stand = {
   pruefZiel: number;
   pruefPfad: string;
   pruefNummer: number;
+  /** Beginn des Zurücklesens des aktuellen Ziels (für Tempo und Restzeit pro Ziel). */
+  pruefBeginn: number;
   beginn: number;
   ausfaelle: { ordner: string; fehler: string }[];
   /** Zahl der Ziele beim Start (die Auswahl kann sich danach ändern). */
@@ -49,6 +51,7 @@ const LEER: Stand = {
   pruefZiel: 0,
   pruefPfad: "",
   pruefNummer: 0,
+  pruefBeginn: 0,
   beginn: 0,
   ausfaelle: [],
   zielZahl: 0,
@@ -168,6 +171,7 @@ function useLaufHalten() {
             ...s,
             liste: s.liste.map((d) => (d.pfad === f.pfad ? { ...d, geprueft: Math.max(d.geprueft, f.ziel + 1) } : d)),
             pruefNummer: f.ziel === s.pruefZiel ? s.pruefNummer + 1 : 1,
+            pruefBeginn: s.pruefNummer === 0 || f.ziel !== s.pruefZiel ? Date.now() : s.pruefBeginn,
             pruefZiel: f.ziel,
             pruefPfad: f.pfad,
           };

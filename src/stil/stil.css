@@ -1130,6 +1130,19 @@ input[type="checkbox"][role="switch"]:checked::before {
   transform-origin: left center;
   transition: transform 300ms linear;
 }
+.balken-klein {
+  height: 6px;
+  margin-top: 6px;
+}
+.balken-ok > div {
+  background: var(--ok);
+}
+.balken-fehler > div {
+  background: var(--fehler);
+}
+.spalte-balken {
+  width: 22%;
+}
 .werte {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, auto)) minmax(0, 1fr);

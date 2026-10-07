@@ -737,6 +737,7 @@ function Fortschritt() {
           <tr>
             <th className="spalte-nr">#</th>
             <th>Ziel</th>
+            <th className="spalte-balken">Fortschritt</th>
             <th>Stand</th>
           </tr>
         </thead>
@@ -745,24 +746,48 @@ function Fortschritt() {
             const aus = ausgefallen(z);
             let ton: Ton = "leise";
             let text = "Wartet auf das Zurücklesen";
+            // Zurückgelesene Bytes dieses Ziels: Dateien, die es schon abgeschlossen hat (die laufende zählt noch nicht).
+            const fertig = stand.liste
+              .filter((d) => d.geprueft > i && !(i === stand.pruefZiel && d.pfad === stand.pruefPfad && phase === "pruefen"))
+              .reduce((n, d) => n + d.groesse, 0);
+            let teil = 0;
             if (aus) {
               ton = "fehler";
               text = `Ausgefallen: ${aus.fehler}`;
             } else if (phase === "kopieren") {
               ton = "laeuft";
-              text = `Schreibt · ${zahl(anteil * 100, 0)} %`;
+              text = `Schreibt · ${bytesText(tempo)}/s`;
+              teil = anteil;
             } else if (phase === "pruefen" && i === stand.pruefZiel) {
               ton = "laeuft";
-              text = `Liest zurück · Datei ${stand.pruefNummer} von ${stand.dateien}`;
+              const s = Math.max(1, (Date.now() - stand.pruefBeginn) / 1000);
+              const t = fertig / s;
+              teil = stand.bytes > 0 ? fertig / stand.bytes : 0;
+              text = `Liest zurück · Datei ${stand.pruefNummer} von ${stand.dateien}${
+                t > 0 ? ` · ${bytesText(t)}/s · noch ${dauerText((stand.bytes - fertig) / t)}` : ""
+              }`;
             } else if (phase !== "pruefen" || i < stand.pruefZiel) {
               ton = "ok";
               text = "Zurückgelesen, Ergebnis am Schluss";
+              teil = 1;
             }
             return (
               <tr key={z}>
                 <td className="spalte-nr zahl">{i + 1}</td>
                 <td className="zelle-pfad">
                   <Pfad pfad={z} />
+                </td>
+                <td className="spalte-balken">
+                  <div
+                    className={`balken balken-klein ${ton === "ok" ? "balken-ok" : ton === "fehler" ? "balken-fehler" : ""}`}
+                    role="progressbar"
+                    aria-label={`Ziel ${i + 1}`}
+                    aria-valuenow={Math.round(teil * 100)}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                  >
+                    <div style={{ transform: `scaleX(${teil.toFixed(4)})` }} />
+                  </div>
                 </td>
                 <td>
                   <Status ton={ton}>{text}</Status>
@@ -1143,6 +1168,12 @@ function Dateiliste() {
   const GRENZE = 400;
   const sichtbar = stand.liste.length > GRENZE ? stand.liste.slice(-GRENZE) : stand.liste;
   const zuletzt = stand.liste.length - 1;
+  // Beim Kopieren die laufende Datei im Blick halten (unten), solange niemand selbst hochgescrollt hat.
+  const rumpf = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const r = rumpf.current;
+    if (r && phase === "kopieren" && r.scrollHeight - r.scrollTop - r.clientHeight < 80) r.scrollTop = r.scrollHeight;
+  }, [stand.liste.length, phase]);
   if (stand.liste.length === 0) return null;
   return (
     <section className="block dateiliste" aria-labelledby="t-dateien">
@@ -1153,7 +1184,7 @@ function Dateiliste() {
           {stand.liste.length > GRENZE && ` · die letzten ${GRENZE} gezeigt`}
         </span>
       </div>
-      <div className="dateiliste-rumpf">
+      <div className="dateiliste-rumpf" ref={rumpf}>
         <table className="tabelle">
           <thead>
             <tr>
