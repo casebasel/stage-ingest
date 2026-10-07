@@ -33,7 +33,7 @@ type Zeile = { dreh: DrehStand; plate: PlateStand; take: TakeStand; ton: Ton; st
 
 function stand(t: TakeStand): { ton: Ton; stand: string } {
   if (t.freigegeben) return { ton: "ok", stand: "Sicher" };
-  if (t.karte) return { ton: "warn", stand: "Nicht freigegeben" };
+  if (t.karte) return { ton: "rot", stand: "Nicht freigegeben" };
   return { ton: "fehler", stand: "Karte fehlt" };
 }
 
@@ -269,7 +269,7 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
                         <td className="zahl">{k.drehOrdner}</td>
                         <td className="rechts zahl">{k.inhalt.clips.length}</td>
                         <td>
-                          <Status ton={k.inhalt.freigegeben ? "ok" : "warn"}>
+                          <Status ton={k.inhalt.freigegeben ? "ok" : "rot"}>
                             {k.inhalt.freigegeben ? `Sicher · ${k.inhalt.unabhaengigeKopien} Kopien` : "Nicht freigegeben"}
                           </Status>
                         </td>

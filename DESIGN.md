@@ -12,19 +12,19 @@ colors:
   text: "oklch(0.940 0.003 255)"
   text-2: "oklch(0.820 0.006 255)"
   text-3: "oklch(0.745 0.008 255)"
-  akzent: "oklch(0.470 0.150 252)"
-  akzent-hover: "oklch(0.520 0.150 252)"
-  akzent-text: "oklch(0.760 0.120 250)"
-  auf-akzent: "oklch(0.990 0 0)"
-  auswahl: "oklch(0.340 0.085 252)"
-  auswahl-leise: "oklch(0.260 0.050 252)"
+  akzent: "oklch(0.720 0.140 65)"
+  akzent-hover: "oklch(0.770 0.140 65)"
+  akzent-text: "oklch(0.800 0.130 70)"
+  auf-akzent: "oklch(0.150 0.010 60)"
+  auswahl: "oklch(0.330 0.060 65)"
+  auswahl-leise: "oklch(0.250 0.035 65)"
   ok: "oklch(0.760 0.150 150)"
   warn: "oklch(0.820 0.140 80)"
-  fehler: "oklch(0.710 0.170 25)"
+  rot: "oklch(0.710 0.170 25)"
   ok-grund: "oklch(0.285 0.065 150)"
   warn-grund: "oklch(0.300 0.060 80)"
-  fehler-grund: "oklch(0.290 0.075 25)"
-  gefahr: "oklch(0.480 0.190 25)"
+  rot-grund: "oklch(0.290 0.075 25)"
+  rot-flaeche: "oklch(0.460 0.190 25)"
 typography:
   urteil:
     fontFamily: "Geist Variable, -apple-system, BlinkMacSystemFont, Segoe UI, system-ui, sans-serif"
@@ -94,8 +94,8 @@ components:
     rounded: "{rounded.rund}"
     padding: "0 20px"
     height: "38px"
-  knopf-gefahr:
-    backgroundColor: "{colors.gefahr}"
+  knopf-rot:
+    backgroundColor: "{colors.rot-flaeche}"
     textColor: "{colors.auf-akzent}"
     rounded: "{rounded.klein}"
     padding: "0 12px"
@@ -136,12 +136,15 @@ components:
     textColor: "{colors.text}"
     rounded: "{rounded.urteil}"
     padding: "20px 22px"
-  urteil-fehler:
-    backgroundColor: "{colors.fehler-grund}"
+  urteil-rot:
+    backgroundColor: "{colors.rot-grund}"
     textColor: "{colors.text}"
     rounded: "{rounded.urteil}"
     padding: "20px 22px"
 ---
+
+> Gemeinsames Design der drei Apps: `casebasel/stage-system/DESIGN-GEMEINSAM.md` (Tokens, Signalregeln, Tasten). Diese Datei beschreibt den Ingest; eigene Abweichung ist nur das Urteilsband.
+
 
 # Design System: Stage Ingest
 
@@ -168,16 +171,16 @@ Zwei vollwertige Sätze: **Nacht** (Standard, `:root`) für das dunkle Studio un
 Graphit ohne Farbstich, ein kühles Arbeitsblau und drei Signalfarben, jede mit einem eigenen dunklen (Nacht) bzw. hellen (Tag) Grund.
 
 ### Primary
-- **Arbeitsblau** (`akzent`): Füllung der Hauptaktion („Einlesen“, „Karte auswerfen“), aktive Seitenreiter- und Reiter-Unterstreichung (2 px), Fortschrittsbalken, aktiver Schritt, eingeschalteter Schalter, Rand der Angebotsleiste. `akzent-hover` ist die Hover-Stufe.
-- **Blauer Text** (`akzent-text`): Fokusring (2 px), Verweise, Zeichen gewählter Elemente (aktiver Seitenreiter, gewählte Quelle, Karte), Laufzeichen im Status.
+- **Akzent** (`akzent`, nachts Bernstein, tags Blau): Füllung der Hauptaktion („Einlesen“, „Karte auswerfen“), aktive Seitenreiter- und Reiter-Unterstreichung (2 px), Fortschrittsbalken, aktiver Schritt, eingeschalteter Schalter, Rand der Angebotsleiste. `akzent-hover` ist die Hover-Stufe.
+- **Akzent-Text** (`akzent-text`): Fokusring (2 px), Verweise, Zeichen gewählter Elemente (aktiver Seitenreiter, gewählte Quelle, Karte), Laufzeichen im Status.
 - **Auswahl** (`auswahl`): gewählte Tabellenzeile, gewählte Quelle in der Seitenleiste, gedrückter Segmentknopf, Textauswahl.
 - **Leise Auswahl** (`auswahl-leise`): Grund der Angebotsleiste, des Aktualisierungsbanners, der laufenden Anzeige im Kopf und des aktuellen Takes im Inspektor.
 
 ### Secondary
 - **Sicher-Grün** (`ok`, Grund `ok-grund`): bewiesene Kopien, „Sicher zum Formatieren“, erledigte Schritte.
 - **Achtung-Gold** (`warn`, Grund `warn-grund`): Hinweise, die nicht sperren; Pflicht-Update-Banner; Rückfrage beim Senken der Schwelle.
-- **Fehler-Rot** (`fehler`, Grund `fehler-grund`): Fehler und „Nicht freigegeben · Karte nicht formatieren“.
-- **Gefahr** (`gefahr`): nur Füllung zerstörerischer oder riskanter Bestätigungen (Abbruch bestätigen, Schwelle senken). Kein Text in dieser Farbe.
+- **Rot** (`rot`, Grund `rot-grund`): nur Datenverlust: „Nicht freigegeben · Karte nicht formatieren“, „Nicht kopiert“, veränderte Kopie. Jede andere Störung ist Gold (Status `fehler` = Kreis-X in `warn`).
+- **Rote Fläche** (`rot-flaeche`): nur Füllung zerstörerischer oder riskanter Bestätigungen (Abbruch bestätigen, Schwelle senken), weisser Text. Kein Text in dieser Farbe.
 
 ### Neutral
 - **Fenster** (`fenster`): App-Grund hinter allem, Startleiste.
@@ -189,7 +192,7 @@ Graphit ohne Farbstich, ein kühles Arbeitsblau und drei Signalfarben, jede mit 
 - **Text, Text 2, Text 3** (`text`, `text-2`, `text-3`): Inhalt / Bedienbeschriftung im Ruhezustand / Nebeninfo, Spaltenköpfe, Hilfetexte.
 
 ### Tag-Satz
-Tag ersetzt jeden Wert, nicht nur Hell und Dunkel: Fenster `oklch(0.880 0.004 255)`, Panel `oklch(0.975 0.002 255)`, Panel 2 `oklch(0.935 0.004 255)`, Feld `oklch(1 0 0)`, Hover `oklch(0.915 0.006 255)`, Linie `oklch(0.820 0.006 255)`, Linie stark `oklch(0.600 0.010 255)`; Text `oklch(0.190 0.010 255)` / `oklch(0.320 0.010 255)` / `oklch(0.420 0.010 255)`; Akzent `oklch(0.500 0.160 255)`, Akzent-Hover und Akzent-Text `oklch(0.450 0.160 255)`; Auswahl `oklch(0.870 0.055 252)`, leise `oklch(0.925 0.030 252)`; OK `oklch(0.470 0.130 150)`, Warn `oklch(0.490 0.115 70)`, Fehler `oklch(0.480 0.180 25)`, Gefahr `oklch(0.500 0.190 25)`; Gründe `oklch(0.920 0.055 150)`, `oklch(0.935 0.065 88)`, `oklch(0.925 0.045 25)`. Tags wird der Akzent dunkler beim Hover (nachts heller), und die Grundschrift steht auf Gewicht 450.
+Tag ersetzt jeden Wert, nicht nur Hell und Dunkel: Fenster `oklch(0.880 0.004 255)`, Panel `oklch(0.975 0.002 255)`, Panel 2 `oklch(0.935 0.004 255)`, Feld `oklch(1 0 0)`, Hover `oklch(0.915 0.006 255)`, Linie `oklch(0.820 0.006 255)`, Linie stark `oklch(0.600 0.010 255)`; Text `oklch(0.190 0.010 255)` / `oklch(0.320 0.010 255)` / `oklch(0.420 0.010 255)`; Akzent `oklch(0.500 0.160 255)`, Akzent-Hover und Akzent-Text `oklch(0.450 0.160 255)`; Auswahl `oklch(0.870 0.055 252)`, leise `oklch(0.925 0.030 252)`; OK `oklch(0.470 0.130 150)`, Warn `oklch(0.490 0.115 70)`, Rot `oklch(0.480 0.180 25)`, rote Fläche `oklch(0.500 0.190 25)`; Gründe `oklch(0.920 0.055 150)`, `oklch(0.935 0.065 88)`, `oklch(0.925 0.045 25)`. Tags wird der Akzent dunkler beim Hover (nachts heller), und die Grundschrift steht auf Gewicht 450.
 
 ### Named Rules
 **The Ein-Blau Rule.** Blau bedeutet „hier handeln“ oder „das ist gewählt“. Keine blauen Dekorflächen, keine blauen Überschriften, keine zweite Akzentfarbe.
@@ -254,7 +257,7 @@ Nüchtern und klar abgestuft.
 - **Normal:** Panel-2-Grund, Rand `linie-stark`, Kontaktschatten. Hover `hover`, gedrückt `linie`, deaktiviert 45 % Deckkraft ohne Schatten.
 - **Haupt:** Akzent gefüllt, Text `auf-akzent`, Gewicht 600. Eine Hauptaktion pro Bereich.
 - **Gross:** 38 px, 20 px seitlich, 14 px, 6 px Rundung: nur „Einlesen“ in der Startleiste.
-- **Gefahr:** `gefahr` gefüllt, weisser Text, Hover per Helligkeit 1,08: nur zweiter Schritt einer riskanten Bestätigung.
+- **Gefahr:** `rot-flaeche` gefüllt, weisser Text, Hover per Helligkeit 1,08: nur zweiter Schritt einer riskanten Bestätigung.
 - **Klein:** 24 px, 8 px seitlich, 12 px (z. B. „Öffnen“ in Tabellen).
 - **Symbolknopf:** 28 × 28 px, ohne Rand, `text-2`, Hover `hover`.
 
@@ -286,7 +289,7 @@ Dichte Liste wie in Silverstack. Kopf klebend, 12 px `text-3`/500, Unterkante `l
 Zeichen 14 px (Strich 2) + Wort in Textfarbe; nur das Zeichen trägt die Signalfarbe. „Läuft“ dreht das LoaderCircle in `akzent-text`. Im Kopf als 28-px-Knopf, der zur Einrichtung führt.
 
 ### Urteilsband (Signatur)
-Nach dem Lauf über die ganze Breite: dreispaltig (Zeichen 44 px, Text, Knöpfe), 20 × 22 px Innenabstand, 8 px Rundung, Grund und Rand in der Zustandsfarbe (`ok-grund`/`ok`, `warn-grund`/`warn`, `fehler-grund`/`fehler`). Titel 26 px/700 in Textfarbe, darunter Karte und Kopienzahl (14 px), Kennwertzeile in Mono `text-3`, Belege pro Platte als Status-Zeilen, rechts „Karte auswerfen“ (Haupt) und „Bericht öffnen“. Bei Nein lautet der Titel immer „… · Karte nicht formatieren“. Darunter verbinden sich die Reiter Ziele · Abgleich · Dateien · Metadaten mit ihrem Inhalt.
+Nach dem Lauf über die ganze Breite: dreispaltig (Zeichen 44 px, Text, Knöpfe), 20 × 22 px Innenabstand, 8 px Rundung, Grund und Rand in der Zustandsfarbe (`ok-grund`/`ok` bei Ja, `rot-grund`/`rot` bei jedem Nein). Titel 26 px/700 in Textfarbe, darunter Karte und Kopienzahl (14 px), Kennwertzeile in Mono `text-3`, Belege pro Platte als Status-Zeilen, rechts „Karte auswerfen“ (Haupt) und „Bericht öffnen“. Bei Nein lautet der Titel immer „… · Karte nicht formatieren“. Darunter verbinden sich die Reiter Ziele · Abgleich · Dateien · Metadaten mit ihrem Inhalt.
 
 ### Fortschritt
 Balken 10 px, Feldgrund, 5 px Rundung, Füllung Akzent per `scaleX` (300 ms linear). Darunter Werte in 15 px/500 mit 12-px-Bezeichnung; Schrittfolge mit 18-px-Nummernkreisen, aktiver Schritt gefüllt in Akzent, erledigte mit grünem Häkchen.

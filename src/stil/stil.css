@@ -22,22 +22,22 @@
   --text-3: oklch(0.745 0.008 255);
   --text-aus: oklch(0.500 0.008 255);
 
-  /* Hauptaktion und Auswahl */
-  --akzent: oklch(0.470 0.150 252);
-  --akzent-hover: oklch(0.520 0.150 252);
-  --akzent-text: oklch(0.760 0.120 250);
-  --auf-akzent: oklch(0.990 0 0);
-  --auswahl: oklch(0.340 0.085 252);
-  --auswahl-leise: oklch(0.260 0.050 252);
+  /* Hauptaktion und Auswahl: nachts Bernstein, tags Blau (gemeinsames Design, Marlon 07.10.2026) */
+  --akzent: oklch(0.720 0.140 65);
+  --akzent-hover: oklch(0.770 0.140 65);
+  --akzent-text: oklch(0.800 0.130 70);
+  --auf-akzent: oklch(0.150 0.010 60);
+  --auswahl: oklch(0.330 0.060 65);
+  --auswahl-leise: oklch(0.250 0.035 65);
 
   /* Zustände */
   --ok: oklch(0.760 0.150 150);
   --warn: oklch(0.820 0.140 80);
-  --fehler: oklch(0.710 0.170 25);
+  --rot: oklch(0.710 0.170 25);
   --ok-grund: oklch(0.285 0.065 150);
   --warn-grund: oklch(0.300 0.060 80);
-  --fehler-grund: oklch(0.290 0.075 25);
-  --gefahr: oklch(0.480 0.190 25);
+  --rot-grund: oklch(0.290 0.075 25);
+  --rot-flaeche: oklch(0.460 0.190 25);
 
   --schrift: "Geist Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --mono: "Geist Mono Variable", ui-monospace, "SF Mono", Consolas, monospace;
@@ -72,11 +72,11 @@
 
   --ok: oklch(0.470 0.130 150);
   --warn: oklch(0.490 0.115 70);
-  --fehler: oklch(0.480 0.180 25);
+  --rot: oklch(0.480 0.180 25);
   --ok-grund: oklch(0.920 0.055 150);
   --warn-grund: oklch(0.935 0.065 88);
-  --fehler-grund: oklch(0.925 0.045 25);
-  --gefahr: oklch(0.500 0.190 25);
+  --rot-grund: oklch(0.925 0.045 25);
+  --rot-flaeche: oklch(0.500 0.190 25);
 
   --schatten: 0 1px 2px oklch(0 0 0 / 0.12);
 }
@@ -169,11 +169,12 @@ code {
 .leise {
   color: var(--text-3);
 }
+/* Signalfarbe nie am Text (gemeinsames Design): Hervorhebung über Gewicht, Bedeutung über das Zeichen daneben. */
 .text-fehler {
-  color: var(--fehler);
+  font-weight: 600;
 }
 .text-warn {
-  color: var(--warn);
+  font-weight: 600;
 }
 .rechts {
   text-align: right;
@@ -246,13 +247,13 @@ code {
   background: var(--akzent);
 }
 .knopf-gefahr {
-  background: var(--gefahr);
-  border-color: var(--gefahr);
-  color: var(--auf-akzent);
+  background: var(--rot-flaeche);
+  border-color: var(--rot-flaeche);
+  color: oklch(0.99 0 0);
   font-weight: 600;
 }
 .knopf-gefahr:hover:not(:disabled) {
-  background: var(--gefahr);
+  background: var(--rot-flaeche);
   filter: brightness(1.08);
 }
 .knopf-gross {
@@ -408,7 +409,10 @@ input[type="checkbox"][role="switch"]:checked::before {
   color: var(--warn);
 }
 .status-fehler > svg {
-  color: var(--fehler);
+  color: var(--warn);
+}
+.status-rot > svg {
+  color: var(--rot);
 }
 .status-leise {
   color: var(--text-3);
@@ -696,7 +700,7 @@ input[type="checkbox"][role="switch"]:checked::before {
   font-size: 12px;
 }
 .unterzeile.text-fehler {
-  color: var(--fehler);
+  color: var(--text);
 }
 
 .tabelle-waehlbar tbody tr {
@@ -978,9 +982,9 @@ input[type="checkbox"][role="switch"]:checked::before {
   background: var(--warn-grund);
   border-color: var(--warn);
 }
-.urteil-fehler {
-  background: var(--fehler-grund);
-  border-color: var(--fehler);
+.urteil-rot {
+  background: var(--rot-grund);
+  border-color: var(--rot);
 }
 .urteil-ok .urteil-zeichen {
   color: var(--ok);
@@ -988,8 +992,8 @@ input[type="checkbox"][role="switch"]:checked::before {
 .urteil-warn .urteil-zeichen {
   color: var(--warn);
 }
-.urteil-fehler .urteil-zeichen {
-  color: var(--fehler);
+.urteil-rot .urteil-zeichen {
+  color: var(--rot);
 }
 .urteil-text {
   display: grid;
@@ -1138,7 +1142,7 @@ input[type="checkbox"][role="switch"]:checked::before {
   background: var(--ok);
 }
 .balken-fehler > div {
-  background: var(--fehler);
+  background: var(--warn);
 }
 .spalte-balken {
   width: 22%;
@@ -1384,6 +1388,26 @@ input[type="checkbox"][role="switch"]:checked::before {
 }
 .feld-meldung {
   padding: 0 12px 10px;
+}
+.schluessel {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 0 12px 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--linie);
+  border-radius: var(--rund-klein);
+  background: var(--feld);
+}
+.schluessel dt {
+  color: var(--text-3);
+}
+.schluessel dd {
+  overflow-wrap: anywhere;
+}
+.schluessel-hilfe {
+  grid-column: 1 / -1;
+  font-size: 12px;
 }
 .anmeldung {
   border-top: 1px solid var(--linie);

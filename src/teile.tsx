@@ -1,10 +1,11 @@
 // Kleine Bausteine, die alle Seiten teilen. Zustand nie nur über Farbe: immer Zeichen und Wort.
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { CircleAlert, CircleCheck, CircleDashed, CircleX, LoaderCircle } from "lucide-react";
 
-export type Ton = "ok" | "warn" | "fehler" | "leise" | "laeuft";
+/** `rot` nur für Datenverlust (nicht freigegeben, Kopie verändert); jede andere Störung ist `fehler` (gold, mit X). */
+export type Ton = "ok" | "warn" | "fehler" | "rot" | "leise" | "laeuft";
 
-const ZEICHEN = { ok: CircleCheck, warn: CircleAlert, fehler: CircleX, leise: CircleDashed, laeuft: LoaderCircle };
+const ZEICHEN = { ok: CircleCheck, warn: CircleAlert, fehler: CircleX, rot: CircleX, leise: CircleDashed, laeuft: LoaderCircle };
 
 /** Zustand mit Zeichen und Wort, z. B. in Tabellen und im Kopf. */
 export function Status({ ton, children, title }: { ton: Ton; children: ReactNode; title?: string }) {
@@ -28,10 +29,14 @@ export function Pfad({ pfad, className = "" }: { pfad: string; className?: strin
 
 /** Eine Zeile der Einrichtung: Bezeichnung und Erklärung links, Bedienelement rechts. */
 export function Feld({ name, hilfe, children }: { name: ReactNode; hilfe?: ReactNode; children: ReactNode }) {
+  // Die Zeile ist eine Gruppe mit der Bezeichnung als Namen; die Eingaben tragen zusätzlich ein eigenes aria-label.
+  const id = useId();
   return (
-    <div className="feld">
+    <div className="feld" role="group" aria-labelledby={id}>
       <div className="feld-text">
-        <span className="feld-name">{name}</span>
+        <span className="feld-name" id={id}>
+          {name}
+        </span>
         {hilfe && <span className="feld-hilfe">{hilfe}</span>}
       </div>
       <div className="feld-wert">{children}</div>

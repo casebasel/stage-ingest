@@ -31,6 +31,7 @@ export function Einrichtung({ wahl, setWahl }: { wahl: Wahl; setWahl: (w: Wahl) 
           >
             <input
               className="zahl"
+              aria-label="Adresse des Stage-Servers"
               placeholder="z. B. http://stage-server:4400"
               value={e.stageAdresse}
               disabled={gesperrt}
@@ -41,7 +42,11 @@ export function Einrichtung({ wahl, setWahl }: { wahl: Wahl; setWahl: (w: Wahl) 
               Verbindung testen
             </button>
           </Feld>
-          {lauf.soll?.fehler && <p className="feld-meldung text-warn">{lauf.soll.fehler}</p>}
+          {lauf.soll?.fehler && (
+            <p className="feld-meldung">
+              <Status ton="warn">{lauf.soll.fehler}</Status>
+            </p>
+          )}
         </section>
 
         <section className="block" aria-labelledby="t-pruef">
@@ -54,6 +59,7 @@ export function Einrichtung({ wahl, setWahl }: { wahl: Wahl; setWahl: (w: Wahl) 
           >
             <input
               className="zahl eingabe-kurz"
+              aria-label="Unabhängige Kopien für die Freigabe"
               type="number"
               min={1}
               max={9}
@@ -95,12 +101,13 @@ export function Einrichtung({ wahl, setWahl }: { wahl: Wahl; setWahl: (w: Wahl) 
             <span className="zahl">XXH3-128{e.mitMd5 ? " + MD5" : ""}</span>
           </Feld>
           <Feld name="Zusätzlich MD5" hilfe="Für Häuser, die MD5 verlangen. Kostet Rechenzeit.">
-            <input type="checkbox" role="switch" checked={e.mitMd5} disabled={gesperrt} onChange={(ev) => e.setMitMd5(ev.target.checked)} />
+            <input type="checkbox" role="switch" aria-label="Zusätzlich MD5" checked={e.mitMd5} disabled={gesperrt} onChange={(ev) => e.setMitMd5(ev.target.checked)} />
           </Feld>
           <Feld name="Karte zweimal lesen" hilfe="Erkennt einen Kartenleser, der unzuverlässig liefert. Dauert länger.">
             <input
               type="checkbox"
               role="switch"
+              aria-label="Karte zweimal lesen"
               checked={e.zweimalLesen}
               disabled={gesperrt}
               onChange={(ev) => e.setZweimalLesen(ev.target.checked)}
@@ -116,6 +123,7 @@ export function Einrichtung({ wahl, setWahl }: { wahl: Wahl; setWahl: (w: Wahl) 
           <Feld name="ARRI ART CMD" hilfe="Neigung, Rollen und Brennweite pro Bild in die Metadaten jeder Karte. Optional.">
             <input
               className="zahl"
+              aria-label="Pfad zu ARRI ART CMD"
               placeholder="z. B. /Applications/ARRI/art-cmd"
               value={e.artCmd}
               disabled={gesperrt}
@@ -210,6 +218,7 @@ function Konto() {
               <Feld name="Supabase-Adresse">
                 <input
                   className="zahl"
+                  aria-label="Supabase-Adresse"
                   value={k.zugang.adresse}
                   disabled={gesperrt}
                   spellCheck={false}
@@ -219,6 +228,7 @@ function Konto() {
               <Feld name="Zugangsschlüssel (Anon-Key)">
                 <input
                   className="zahl"
+                  aria-label="Zugangsschlüssel (Anon-Key)"
                   value={k.zugang.anonKey}
                   disabled={gesperrt}
                   spellCheck={false}
@@ -230,6 +240,7 @@ function Konto() {
           <Feld name="E-Mail">
             <input
               type="email"
+              aria-label="E-Mail"
               autoComplete="username"
               value={k.zugang.email}
               disabled={gesperrt}
@@ -240,6 +251,7 @@ function Konto() {
           <Feld name="Passwort" hilfe="Vergessen? In der iPhone-App zurücksetzen.">
             <input
               type="password"
+              aria-label="Passwort"
               autoComplete="current-password"
               value={passwort}
               disabled={gesperrt}
@@ -247,11 +259,14 @@ function Konto() {
             />
           </Feld>
           {k.meldung && (
-            <p className="feld-meldung text-fehler">
-              {k.meldung}
-              {k.eigenerZugang && " Verwendet wird eine von Hand eingetragene Adresse, nicht die eingebaute."}
+            <p className="feld-meldung">
+              <Status ton="fehler">
+                {k.meldung}
+                {k.eigenerZugang && " Verwendet wird eine von Hand eingetragene Adresse, nicht die eingebaute."}
+              </Status>
             </p>
           )}
+          {k.verbindung === "fehler" && <Schluesselangaben adresse={k.zugang.adresse} schluessel={k.zugang.anonKey} eigene={k.eigenerZugang} />}
           <div className="knopfreihe">
             <button
               type="submit"
@@ -281,5 +296,41 @@ function Konto() {
         </form>
       )}
     </section>
+  );
+}
+
+/** Zum Vergleichen mit der iPhone-App: welche Adresse und welcher Schlüssel verwendet werden, ohne den Schlüssel
+ *  ganz zu zeigen (Rolle und Ausgeber aus dem Schlüssel, dazu die letzten sechs Zeichen). */
+function Schluesselangaben({ adresse, schluessel, eigene }: { adresse: string; schluessel: string; eigene: boolean }) {
+  const k = schluessel.trim().replace(/^ANON_KEY=/, "").replace(/^["']|["']$/g, "");
+  let inhalt: { role?: string; iss?: string; ref?: string } = {};
+  try {
+    const teil = k.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    inhalt = JSON.parse(atob(teil.padEnd(teil.length + ((4 - (teil.length % 4)) % 4), "=")));
+  } catch {
+    // kein JWT: dann ist schon das der Fehler
+  }
+  return (
+    <dl className="schluessel">
+      <dt>Server</dt>
+      <dd className="zahl">{adresse || "–"}</dd>
+      <dt>Schlüssel</dt>
+      <dd>
+        {k ? (
+          <>
+            {inhalt.role ? `Rolle ${inhalt.role}` : "kein gültiger Schlüssel (kein JWT)"}
+            {inhalt.iss && ` · ausgegeben von ${inhalt.iss}`}
+            {inhalt.ref && ` · Projekt ${inhalt.ref}`} · endet auf <span className="zahl">…{k.slice(-6)}</span> ·{" "}
+            {eigene ? "von Hand eingetragen" : "in die App eingebaut"}
+          </>
+        ) : (
+          "fehlt"
+        )}
+      </dd>
+      <dd className="leise schluessel-hilfe">
+        Mit dem Schlüssel der iPhone-App vergleichen: Stimmen Server und letzte Zeichen nicht überein, ist der falsche
+        Schlüssel eingebaut (GitHub-Variable SUPABASE_ANON_KEY) oder die falsche Adresse (SUPABASE_ADRESSE).
+      </dd>
+    </dl>
   );
 }

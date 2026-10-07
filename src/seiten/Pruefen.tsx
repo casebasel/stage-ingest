@@ -54,7 +54,7 @@ export function Pruefen() {
         )}
         {!pruefend && n && (
           <div className="nachpruefung">
-            <Status ton={n.abweichungen.length === 0 ? "ok" : "fehler"}>
+            <Status ton={n.abweichungen.length === 0 ? "ok" : "rot"}>
               <strong>{n.abweichungen.length === 0 ? "Kopie unverändert" : `Kopie weicht ab (${n.abweichungen.length})`}</strong> ·{" "}
               {n.geprueft} Dateien gegen <span className="zahl">{n.generation}</span> geprüft
             </Status>
@@ -109,7 +109,7 @@ export function Pruefen() {
                       {e.ziele.filter((z) => z.gut).length} von {e.ziele.length} gut
                     </td>
                     <td>
-                      <Status ton={e.sicher ? "ok" : "warn"} title={e.grund}>
+                      <Status ton={e.sicher ? "ok" : "rot"} title={e.grund}>
                         {e.sicher ? "Sicher" : "Nicht freigegeben"}
                       </Status>
                     </td>

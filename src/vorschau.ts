@@ -172,7 +172,11 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
   ],
   soll_von_stage: () => [],
   stage_projekt: () => null,
-  plate_anmelden: () => ({ email: "team@beispiel.invalid", ingestRecht: false }),
+  plate_anmelden: () => {
+    if (params.get("konto") === "fehler")
+      throw "Der Server lehnt den Zugangsschlüssel (Anon-Key) ab. E-Mail und Passwort wurden noch gar nicht geprüft.";
+    return { email: "team@beispiel.invalid", ingestRecht: false };
+  },
   plate_projekte: () => [projekt, { id: "projekt-moevenpick", name: "Mövenpick Spot", kurzname: "MOEVENPICK", aktiv: false }],
   plate_drehs: () => [
     { id: "d1", name: "Rheinufer", datum: "2026-10-28", projektId: projekt.id, produktion: "" },
@@ -228,7 +232,13 @@ export function einrichten() {
     if (params.get("konto") !== "nein" && !localStorage.getItem("ingest.plate.zugang"))
       localStorage.setItem(
         "ingest.plate.zugang",
-        JSON.stringify({ adresse: "https://beispiel.invalid", anonKey: "beispiel", email: "team@beispiel.invalid" }),
+        JSON.stringify({
+          adresse: "https://beispiel.invalid",
+          // Beispiel-JWT ohne Wert (Rolle anon), nur damit die Vorschau die Schlüsselangaben zeigen kann.
+          anonKey: "eyJhbGciOiJIUzI1NiJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIn0.beispiel-ohne-wert",
+          email: "team@beispiel.invalid",
+          eigene: true,
+        }),
       );
     const t = params.get("thema");
     if (t === "tag" || t === "nacht") localStorage.setItem("ingest.thema", t);

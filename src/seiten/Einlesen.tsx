@@ -622,7 +622,7 @@ function Fehlerband({ fehler }: { fehler: string }) {
   // Erste Zeile ist die Meldung des Kerns in Klartext (Problem und betroffener Pfad); weitere Zeilen sind Einzelheiten.
   const [problem, ...rest] = fehler.trim().split("\n");
   return (
-    <section className="urteil urteil-fehler" role="alert">
+    <section className="urteil urteil-rot" role="alert">
       <CircleX size={40} strokeWidth={1.75} aria-hidden className="urteil-zeichen" />
       <div className="urteil-text">
         <h1>Nicht kopiert · Karte nicht formatieren</h1>
@@ -821,7 +821,8 @@ function Urteil({ ergebnis, laufwerke }: { ergebnis: KartenErgebnis; laufwerke: 
   const lauf = useLauf();
   const { freigabe, urteile, kennungen, abgleich } = ergebnis;
   const fehlerhaft = urteile.some((u) => u.kopierfehler || u.abweichungen.length > 0);
-  const ton = freigabe.sicher ? "ok" : fehlerhaft ? "fehler" : "warn";
+  // Rot heisst Datenverlust droht: jede nicht freigegebene Karte (gemeinsames Design).
+  const ton = freigabe.sicher ? "ok" : "rot";
   const karte = lauf.letzteQuelle;
   const steckt = !!karte?.laufwerk && laufwerke.some((l) => l.pfad === karte.pfad);
   const [auswurf, setAuswurf] = useState<{ ton: Ton; text: string } | null>(null);
@@ -854,7 +855,7 @@ function Urteil({ ergebnis, laufwerke }: { ergebnis: KartenErgebnis; laufwerke: 
       <section className={`urteil urteil-${ton}`} aria-live="polite">
         {ton === "ok" ? (
           <CircleCheck size={44} strokeWidth={1.75} aria-hidden className="urteil-zeichen" />
-        ) : ton === "fehler" ? (
+        ) : fehlerhaft ? (
           <CircleX size={44} strokeWidth={1.75} aria-hidden className="urteil-zeichen" />
         ) : (
           <TriangleAlert size={44} strokeWidth={1.75} aria-hidden className="urteil-zeichen" />
@@ -875,7 +876,7 @@ function Urteil({ ergebnis, laufwerke }: { ergebnis: KartenErgebnis; laufwerke: 
               const k = kennungen[i];
               return (
                 <li key={u.ordner}>
-                  <Status ton={gut ? "ok" : "fehler"}>
+                  <Status ton={gut ? "ok" : "rot"}>
                     {k?.beschreibung || name(u.ordner)}
                     {k?.seriennummer && <span className="zahl"> · SN {k.seriennummer}</span>} ·{" "}
                     {gut ? `${u.geprueft} Dateien zurückgelesen` : "fehlerhaft"}
@@ -1002,7 +1003,7 @@ function ZieleTabelle({ ergebnis }: { ergebnis: KartenErgebnis }) {
                 {k && !k.sicher && <span className="unterzeile">Platte nicht bestimmbar</span>}
               </td>
               <td>
-                <Status ton={gut ? "ok" : "fehler"}>{gut ? `${u.geprueft} Dateien geprüft` : "Fehlerhaft"}</Status>
+                <Status ton={gut ? "ok" : "rot"}>{gut ? `${u.geprueft} Dateien geprüft` : "Fehlerhaft"}</Status>
                 {u.kopierfehler && <span className="unterzeile text-fehler">Kopieren: {u.kopierfehler}</span>}
                 {u.abweichungen.map((a) => (
                   <span key={abweichungText(a)} className="unterzeile text-fehler">

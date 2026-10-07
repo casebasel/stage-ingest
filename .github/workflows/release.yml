@@ -50,6 +50,7 @@ jobs:
           ROLLE=$(printf '%s' "$K" | cut -d. -f2 | tr '_-' '/+' | base64 -d 2>/dev/null | grep -o '"role":"[a-z_]*"' || echo "nicht lesbar")
           case "$CODE" in
             200) echo "::notice::Server nimmt den Anon-Key an (HTTP 200, Rolle $ROLLE)";;
+            403) echo "::notice::Server von GitHub aus nicht prüfbar (HTTP 403, vermutlich Cloudflare); Schlüssel-Rolle $ROLLE";;
             *) echo "::warning::Server lehnt den Anon-Key ab oder ist nicht erreichbar (HTTP $CODE, Rolle $ROLLE). Variable SUPABASE_ANON_KEY prüfen.";;
           esac
       - name: Bauen, signieren, ins Release laden
