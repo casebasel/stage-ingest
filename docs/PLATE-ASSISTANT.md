@@ -58,3 +58,4 @@ Gewünscht: Karte freigegeben (wann), Speicherort, `aus_clip` je Take, HDRI-Zust
 - Schema und Formular kommen aus dem gemeinsamen Paket `casebasel/stage-projekt` (öffentlich, Stage pflegt den Inhalt).
 - Schema steht (Plate Assistant, Migration 0009/0010, Systemkarte 3e1050f; genau: plate-assistant `docs/ABGLEICH.md`). Ordner mit dem **Kurznamen** (`A–Z`, `0–9`, `_`, z. B. `HAPPY_END`).
 - **Zugang des Ingest:** eigener Benutzer mit `app_metadata.app = "ingest"` (legt Marlon an). Liest `dreh`, `plate`, `take`, `foto`, `projekt` und den Bucket `fotos`; schreibt über `aenderungen_anwenden` nur `projekt`. `ingest_meldung`, HDRI-Bucket und Jobs kommen später mit eigenen Migrationen.
+- Der Kurzname ist nach dem Anlegen fest; Ordnernamen ändern sich nie. Doppeltes Anlegen wird je Feld zusammengeführt, Anlegen geht immer (Systemkarte 269e680).
