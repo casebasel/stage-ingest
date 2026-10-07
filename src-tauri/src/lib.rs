@@ -1,5 +1,7 @@
 //! Tauri-Hülle um den Kern: Befehle für die Oberfläche, Fortschritt als Ereignisse.
 
+mod stage;
+
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -34,6 +36,9 @@ struct KartenAuftrag {
     /// Karte nach dem Kopieren ein zweites Mal lesen (erkennt einen unzuverlässigen Kartenleser).
     #[serde(default)]
     zweimal_lesen: bool,
+    /// Adresse des Stage-Servers (lokale Einstellung): nach dem Einlesen wird die Karte dorthin gemeldet.
+    #[serde(default)]
+    stage_adresse: Option<String>,
     /// Soll-Liste (vor dem Start von der Stage geladen); leer, wenn keine Quelle eingestellt ist.
     #[serde(default)]
     soll: Vec<SollClip>,
@@ -68,6 +73,8 @@ struct KartenErgebnis {
     ale: Vec<Option<PathBuf>>,
     /// Bewegungs- und Objektivdaten pro Clip (ART CMD), falls eingestellt: Clip und Auswertung.
     bewegung: Vec<(String, Bewegung)>,
+    /// Antwort der Stage auf `ingest.karte` (oder Fehlertext), `None` ohne Stage-Adresse.
+    stage: Option<Result<serde_json::Value, String>>,
     /// Abgleich mit der Soll-Liste (`None` ohne Soll-Liste).
     abgleich: Option<Abgleich>,
     /// PDF-Bericht je Ziel: Pfad oder Fehlertext.
@@ -76,6 +83,61 @@ struct KartenErgebnis {
 }
 
 const FORTSCHRITT: &str = "ingest://fortschritt";
+
+/// Daten für `ingest.karte` (Form abgestimmt mit der Stage, Systemkarte b71386f).
+#[allow(clippy::too_many_arguments)]
+fn stage_daten(
+    app: &AppHandle,
+    auftrag: &KartenAuftrag,
+    kopie: &Kopie,
+    urteile: &[Urteil],
+    kennungen: &[Kennung],
+    clips: &[ClipZeile],
+    ale: &[Option<PathBuf>],
+    berichte: &[Result<PathBuf, String>],
+    freigabe: &Freigabe,
+) -> serde_json::Value {
+    use serde_json::json;
+    let art = |k: &Kennung| match (k.art, k.sicher) {
+        (geraet::Art::Netz, _) => "nas",
+        (geraet::Art::Platte, true) => "platte",
+        _ => "unbestimmt",
+    };
+    let gut: Vec<usize> = (0..urteile.len()).filter(|&i| urteile[i].gut()).collect();
+    let nas = gut.iter().find(|&&i| kennungen[i].art == geraet::Art::Netz).map(|&i| &urteile[i].ordner);
+    let pruefsumme: std::collections::HashMap<&str, String> =
+        kopie.dateien.iter().map(|d| (d.pfad.as_str(), d.pruefsumme.xxh128_hex())).collect();
+    let karte = geraet::kartenname(&auftrag.quelle);
+    json!({
+        "karte": karte,
+        "projekt": auftrag.dreh.as_ref().map(|d| struktur::kurzname(&d.projekt)),
+        "freigegeben": freigabe.sicher,
+        "version": app.package_info().version.to_string(),
+        "beginn": kopie.beginn.to_rfc3339(),
+        "kopien": gut.iter().map(|&i| json!({
+            "art": art(&kennungen[i]),
+            "geraet": kennungen[i].beschreibung,
+            "seriennummer": kennungen[i].seriennummer,
+            "pfad": urteile[i].ordner,
+        })).collect::<Vec<_>>(),
+        "clips": clips.iter().filter_map(|c| {
+            let a = c.angaben.as_ref()?;
+            let datei = c.pfad.rsplit('/').next().unwrap_or(&c.pfad);
+            let name = soll::ohne_endung(datei);
+            Some(json!({
+                "name": name,
+                "dateiname": datei,
+                "reel": soll::arri_reel(name).map(|(r, k)| format!("{r}{k}")),
+                "startTc": a.start_tc, "endTc": a.end_tc, "fps": a.fps, "bilder": a.bilder,
+                "xxh128": pruefsumme.get(c.pfad.as_str()),
+                "pfadAufNas": nas.map(|n| n.join(&c.pfad)),
+                "tcQuelle": "datei",
+            }))
+        }).collect::<Vec<_>>(),
+        "ale": ale.iter().flatten().next().and_then(|p| std::fs::read_to_string(p).ok()),
+        "bericht": gut.iter().find_map(|&i| berichte[i].as_ref().ok()),
+    })
+}
 
 /// Eine Zeile im Verlauf (`verlauf.jsonl` im App-Datenordner). Nur Zusammenfassung; die volle Wahrheit
 /// liegt in MHL und Bericht auf den Zielen.
@@ -278,7 +340,7 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
     let ale_text =
         clips.iter().any(|c| c.angaben.as_ref().is_some_and(|a| a.start_tc.is_some())).then(|| ale::ale(&clips));
     let karte = geraet::kartenname(&auftrag.quelle);
-    let ale = urteile
+    let ale: Vec<Option<PathBuf>> = urteile
         .iter()
         .map(|u| {
             let text = ale_text.as_ref().filter(|_| u.gut())?;
@@ -321,15 +383,20 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
     // Bericht auf jedes Ziel, auch auf fehlerhafte (dort belegt er den Fehler), soweit schreibbar.
     let version = app.package_info().version.to_string();
     let angaben = ingest_bericht::Angaben { version: &version, mit_md5: auftrag.mit_md5 };
-    let berichte = (0..urteile.len())
+    let berichte: Vec<Result<PathBuf, String>> = (0..urteile.len())
         .map(|i| {
             let pdf =
                 ingest_bericht::pdf(&kopie, &urteile, &kennungen, &freigabe, i, &angaben).map_err(|e| e.to_string())?;
             ingest_bericht::schreiben(&urteile[i].ordner, &pdf, &kopie.beginn).map_err(|e| e.to_string())
         })
         .collect();
+    // Karte an die Stage melden (nach Bericht, damit sein Pfad mitgeht). Ein Fehler sperrt nichts.
+    let stage = auftrag.stage_adresse.as_deref().filter(|a| !a.trim().is_empty()).map(|adresse| {
+        let daten = stage_daten(app, auftrag, &kopie, &urteile, &kennungen, &clips, &ale, &berichte, &freigabe);
+        stage::karte_melden(adresse, daten)
+    });
     let ergebnis =
-        KartenErgebnis { kopie, urteile, kennungen, mhl, clips, ale, bewegung, abgleich, berichte, freigabe };
+        KartenErgebnis { kopie, urteile, kennungen, mhl, clips, ale, bewegung, stage, abgleich, berichte, freigabe };
     if let Err(e) = verlauf_anhaengen(app, &ergebnis) {
         eprintln!("Verlauf nicht geschrieben: {e}"); // die Karte ist trotzdem kopiert und belegt
     }

@@ -39,6 +39,7 @@ export type KartenErgebnis = {
   clips: { pfad: string; angaben: { startTc: string | null; endTc: string | null; fps: number | null; bilder: number | null } | null; fehler: string | null }[];
   ale: (string | null)[];
   bewegung: [string, Bewegung][];
+  stage: { Ok: Record<string, unknown> } | { Err: string } | null;
   abgleich: Abgleich | null;
   berichte: ({ Ok: string } | { Err: string })[];
   freigabe: Freigabe;
@@ -65,6 +66,7 @@ export type KartenAuftrag = {
   soll?: SollClip[];
   dreh?: Dreh | null;
   artCmd?: string | null;
+  stageAdresse?: string | null;
 };
 
 export type SollClip = {

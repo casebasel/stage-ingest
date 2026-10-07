@@ -216,6 +216,7 @@ export function App() {
           soll: sollListe,
           dreh,
           artCmd: artCmd.trim() || null,
+          stageAdresse: stageAdresse.trim() || null,
         }));
       setPhase("fertig");
     } catch (e) {
@@ -386,8 +387,10 @@ export function App() {
           </section>
 
           <section className="k-gruppe">
-            <h2>Soll-Liste</h2>
-            <span className="k-leise k-klein">Gedrehte Takes von der Stage; fehlende Clips werden vor dem Formatieren gemeldet.</span>
+            <h2>Stage</h2>
+            <span className="k-leise k-klein">
+              Gedrehte Takes als Soll-Liste; nach dem Einlesen wird die Karte an die Stage gemeldet.
+            </span>
             <input
               className="i-eingabe mono"
               placeholder="http://stage-server:4400"
@@ -642,6 +645,27 @@ function abweichungText(a: Abweichung) {
   }
 }
 
+/** Antwort der Stage auf die Meldung der Karte (ingest.karte). */
+function StageAnzeige({ s }: { s: NonNullable<KartenErgebnis["stage"]> }) {
+  if ("Err" in s)
+    return (
+      <span className="k-lampe k-lampe-warn">
+        <i /> An die Stage nicht gemeldet: {s.Err}
+      </span>
+    );
+  const d = s.Ok as { ok?: boolean; zugeordnet?: number; mehrdeutig?: number; ohneTake?: number; meldung?: string };
+  return d.ok ? (
+    <span className="k-lampe k-lampe-ok">
+      <i /> An die Stage gemeldet: {d.zugeordnet ?? 0} Clips zugeordnet
+      {(d.mehrdeutig ?? 0) + (d.ohneTake ?? 0) > 0 && `, ${(d.mehrdeutig ?? 0) + (d.ohneTake ?? 0)} in der Konsole zu klären`}
+    </span>
+  ) : (
+    <span className="k-lampe k-lampe-warn">
+      <i /> Stage hat die Karte abgelehnt: {d.meldung ?? "ohne Grund"}
+    </span>
+  );
+}
+
 function AbgleichAnzeige({ a }: { a: NonNullable<KartenErgebnis["abgleich"]> }) {
   return (
     <section className="i-abschnitt">
@@ -689,6 +713,7 @@ function Ergebnis({ ergebnis }: { ergebnis: KartenErgebnis }) {
   return (
     <>
       {ergebnis.abgleich && <AbgleichAnzeige a={ergebnis.abgleich} />}
+      {ergebnis.stage && <StageAnzeige s={ergebnis.stage} />}
       {ergebnis.bewegung.length > 0 && (
         <section className="i-abschnitt">
           <h2>Bewegungsdaten</h2>
