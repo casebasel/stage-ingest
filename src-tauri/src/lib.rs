@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use ingest_kern::ale::{self, ClipZeile};
+use ingest_kern::artcmd::{self, Bewegung};
 use ingest_kern::freigabe::{self, Freigabe};
 use ingest_kern::geraet::{self, Kennung};
 use ingest_kern::kopie::{self, Auftrag, Kopie, Meldung};
@@ -39,6 +40,9 @@ struct KartenAuftrag {
     /// Drehstruktur anlegen (`<Produktion>/<Datum>_<Dreh>/01_KAMERA/…`); die Ziele sind dann schon Kartenziele darin.
     #[serde(default)]
     dreh: Option<Dreh>,
+    /// Pfad zu ARRI ART CMD (lokale Einstellung). Leer = keine Bewegungsdaten.
+    #[serde(default)]
+    art_cmd: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -62,6 +66,8 @@ struct KartenErgebnis {
     clips: Vec<ClipZeile>,
     /// ALE je Ziel: Pfad, `None` bei einem fehlerhaften Ziel oder ohne Clips mit Timecode.
     ale: Vec<Option<PathBuf>>,
+    /// Bewegungs- und Objektivdaten pro Clip (ART CMD), falls eingestellt: Clip und Auswertung.
+    bewegung: Vec<(String, Bewegung)>,
     /// Abgleich mit der Soll-Liste (`None` ohne Soll-Liste).
     abgleich: Option<Abgleich>,
     /// PDF-Bericht je Ziel: Pfad oder Fehlertext.
@@ -266,16 +272,6 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
             .push(format!("Nicht kopiert (Verknüpfung oder Sonderdatei): {}", kopie.ausgelassen.join(", ")));
     }
 
-    // Bericht auf jedes Ziel, auch auf fehlerhafte (dort belegt er den Fehler), soweit schreibbar.
-    let version = app.package_info().version.to_string();
-    let angaben = ingest_bericht::Angaben { version: &version, mit_md5: auftrag.mit_md5 };
-    let berichte = (0..urteile.len())
-        .map(|i| {
-            let pdf =
-                ingest_bericht::pdf(&kopie, &urteile, &kennungen, &freigabe, i, &angaben).map_err(|e| e.to_string())?;
-            ingest_bericht::schreiben(&urteile[i].ordner, &pdf, &kopie.beginn).map_err(|e| e.to_string())
-        })
-        .collect();
     // Clip-Angaben aus der ersten guten Kopie (geprüft, nicht von der Karte) und ein ALE auf jedes gute Ziel.
     let clips = urteile.iter().find(|u| u.gut()).map(|u| ale::clips_lesen(&kopie, &u.ordner)).unwrap_or_default();
     let ale_text =
@@ -291,7 +287,48 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
             ingest_kern::sicher_schreiben(&pfad, text.as_bytes()).ok().map(|_| pfad)
         })
         .collect();
-    let ergebnis = KartenErgebnis { kopie, urteile, kennungen, mhl, clips, ale, abgleich, berichte, freigabe };
+    // ART CMD: pro Clip eine CSV nach 05_METADATEN (aus der ersten guten Kopie), auf alle guten Ziele verteilt.
+    let mut bewegung = Vec::new();
+    if let (Some(art), Some(erstes)) = (auftrag.art_cmd.as_ref(), urteile.iter().find(|u| u.gut())) {
+        let gute: Vec<&PathBuf> = urteile.iter().filter(|u| u.gut()).map(|u| &u.ordner).collect();
+        let mut fehler = Vec::new();
+        for c in clips.iter().filter(|c| c.angaben.is_some()) {
+            let _ = app.emit(FORTSCHRITT, Fortschritt::Nachlesen { pfad: format!("ART CMD: {}", c.pfad) });
+            let stamm = soll::ohne_endung(&c.pfad).to_owned();
+            let ziel_csv = struktur::metadatenordner(&erstes.ordner).join(format!("{stamm}.csv"));
+            match artcmd::exportieren(art, &erstes.ordner.join(&c.pfad), &ziel_csv)
+                .and_then(|_| std::fs::read_to_string(&ziel_csv).map_err(|e| e.to_string()))
+                .and_then(|t| artcmd::auswerten(&t))
+            {
+                Ok(b) => {
+                    for z in gute.iter().skip(1) {
+                        let ordner = struktur::metadatenordner(z);
+                        let _ = std::fs::create_dir_all(&ordner);
+                        if let Ok(inhalt) = std::fs::read(&ziel_csv) {
+                            let _ = ingest_kern::sicher_schreiben(&ordner.join(format!("{stamm}.csv")), &inhalt);
+                        }
+                    }
+                    bewegung.push((c.pfad.clone(), b));
+                }
+                Err(e) => fehler.push(format!("{}: {e}", c.pfad)),
+            }
+        }
+        if !fehler.is_empty() {
+            freigabe.hinweise.push(format!("Bewegungsdaten (ART CMD) fehlen: {}", fehler.join("; ")));
+        }
+    }
+    // Bericht auf jedes Ziel, auch auf fehlerhafte (dort belegt er den Fehler), soweit schreibbar.
+    let version = app.package_info().version.to_string();
+    let angaben = ingest_bericht::Angaben { version: &version, mit_md5: auftrag.mit_md5 };
+    let berichte = (0..urteile.len())
+        .map(|i| {
+            let pdf =
+                ingest_bericht::pdf(&kopie, &urteile, &kennungen, &freigabe, i, &angaben).map_err(|e| e.to_string())?;
+            ingest_bericht::schreiben(&urteile[i].ordner, &pdf, &kopie.beginn).map_err(|e| e.to_string())
+        })
+        .collect();
+    let ergebnis =
+        KartenErgebnis { kopie, urteile, kennungen, mhl, clips, ale, bewegung, abgleich, berichte, freigabe };
     if let Err(e) = verlauf_anhaengen(app, &ergebnis) {
         eprintln!("Verlauf nicht geschrieben: {e}"); // die Karte ist trotzdem kopiert und belegt
     }

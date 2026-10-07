@@ -70,6 +70,9 @@ export function App() {
   const [nachpruefung, setNachpruefung] = useState<Nachpruefung | null>(null);
   // Soll-Liste: Adresse des Stage-Servers pro Rechner (nie im Repo). Leer = ohne Soll-Liste.
   const [stageAdresse, setStageAdresse] = useState<string>(() => gemerkt("stageAdresse", ""));
+  // Pfad zu ARRI ART CMD (lokal). Leer = keine Bewegungsdaten pro Clip.
+  const [artCmd, setArtCmd] = useState<string>(() => gemerkt("artCmd", ""));
+  useEffect(() => merken("artCmd", artCmd), [artCmd]);
   useEffect(() => merken("stageAdresse", stageAdresse), [stageAdresse]);
   const [soll, setSoll] = useState<{ liste: SollClip[]; fehler: string | null; zeit: number } | null>(null);
   async function sollLaden(): Promise<SollClip[]> {
@@ -190,7 +193,16 @@ export function App() {
       setNachpruefung(null);
       // Soll-Liste frisch holen; ist die Stage nicht erreichbar, wird trotzdem kopiert (Hinweis links).
       const sollListe = await sollLaden();
-      setErgebnis(await karteEinlesen({ quelle, ziele, mitMd5, mindestKopien, zweimalLesen, soll: sollListe, dreh }));
+      setErgebnis(await karteEinlesen({
+          quelle,
+          ziele,
+          mitMd5,
+          mindestKopien,
+          zweimalLesen,
+          soll: sollListe,
+          dreh,
+          artCmd: artCmd.trim() || null,
+        }));
       setPhase("fertig");
     } catch (e) {
       setFehler(String(e));
@@ -376,6 +388,31 @@ export function App() {
               </button>
               {soll && !soll.fehler && <span className="k-lampe k-lampe-ok"><i /> {soll.liste.length} Takes</span>}
               {soll?.fehler && <span className="k-lampe k-lampe-warn"><i /> nicht erreichbar</span>}
+            </div>
+          </section>
+
+          <section className="k-gruppe">
+            <h2>Bewegungsdaten</h2>
+            <span className="k-leise k-klein">Neigung, Rollen und Brennweite pro Bild mit ARRI ART CMD (optional).</span>
+            <input
+              className="i-eingabe mono"
+              placeholder="Pfad zu art-cmd"
+              value={artCmd}
+              disabled={laeuft}
+              onChange={(e) => setArtCmd(e.target.value)}
+              spellCheck={false}
+            />
+            <div className="i-knopfreihe">
+              <button
+                className="k-taste k-taste-klein"
+                disabled={laeuft}
+                onClick={async () => {
+                  const p = await open({ directory: false, title: "ART CMD wählen" });
+                  if (typeof p === "string") setArtCmd(p);
+                }}
+              >
+                Wählen …
+              </button>
             </div>
           </section>
 
@@ -627,6 +664,37 @@ function Ergebnis({ ergebnis }: { ergebnis: KartenErgebnis }) {
   return (
     <>
       {ergebnis.abgleich && <AbgleichAnzeige a={ergebnis.abgleich} />}
+      {ergebnis.bewegung.length > 0 && (
+        <section className="i-abschnitt">
+          <h2>Bewegungsdaten</h2>
+          <table className="i-tabelle">
+            <thead>
+              <tr>
+                <th>Clip</th>
+                <th className="rechts">Neigung</th>
+                <th className="rechts">Rollen</th>
+                <th className="rechts">Bereich</th>
+                <th className="rechts">Brennweite</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ergebnis.bewegung.map(([clip, b]) => (
+                <tr key={clip}>
+                  <td className="mono">{name(clip)}</td>
+                  <td className="mono">{b.tilt ? `${b.tilt.mittel.toFixed(1).replace(".", ",")}°` : "–"}</td>
+                  <td className="mono">{b.roll ? `${b.roll.mittel.toFixed(1).replace(".", ",")}°` : "–"}</td>
+                  <td className="mono">
+                    {b.tilt && b.roll
+                      ? `${(b.tilt.max - b.tilt.min).toFixed(1).replace(".", ",")}° / ${(b.roll.max - b.roll.min).toFixed(1).replace(".", ",")}°`
+                      : "–"}
+                  </td>
+                  <td className="mono">{b.brennweiteMm ? `${b.brennweiteMm.toFixed(1).replace(".", ",")} mm` : "–"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
       <section className="i-abschnitt">
         <h2>Ziele</h2>
         {urteile.map((u, i) => {

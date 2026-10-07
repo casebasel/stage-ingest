@@ -38,6 +38,7 @@ export type KartenErgebnis = {
   mhl: (string | null)[];
   clips: { pfad: string; angaben: { startTc: string | null; endTc: string | null; fps: number | null; bilder: number | null } | null; fehler: string | null }[];
   ale: (string | null)[];
+  bewegung: [string, Bewegung][];
   abgleich: Abgleich | null;
   berichte: ({ Ok: string } | { Err: string })[];
   freigabe: Freigabe;
@@ -63,6 +64,7 @@ export type KartenAuftrag = {
   zweimalLesen?: boolean;
   soll?: SollClip[];
   dreh?: Dreh | null;
+  artCmd?: string | null;
 };
 
 export type SollClip = { clip: string; szene: string; take: string; startTc: string; bewertung: string; quelle: string };
@@ -102,3 +104,6 @@ export const zielNachpruefen = (ordner: string) => invoke<Nachpruefung>("ziel_na
 export type Dreh = { projekt: string; datum: string; name: string };
 export const kartenziele = (quelle: string, basis: string[], dreh: Dreh | null) =>
   invoke<string[]>("kartenziele", { quelle, basis, dreh });
+
+export type Werte = { mittel: number; min: number; max: number };
+export type Bewegung = { bilder: number; tilt: Werte | null; roll: Werte | null; brennweiteMm: number | null };
