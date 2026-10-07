@@ -44,7 +44,9 @@ Ziele sind externe Platten (USB/Thunderbolt) und das NAS (SMB). Ein Kopiervorgan
 
 ## Brand Commitments
 
-Name „Stage Ingest“, Teil der Studio-Apps des Filmstudios Basel. Sprache der Oberfläche: Deutsch (Schweiz, „ss“ statt „ß“). Die heutige Nähe zur Stage Companion App ist **keine feste Vorgabe**; ein eigenes Erscheinungsbild ist möglich (Marlon, 07.10.2026).
+Name „Stage Ingest“, Teil der Studio-Apps des Filmstudios Basel. Sprache der Oberfläche: Deutsch (Schweiz, „ss“ statt „ß“). Die heutige Nähe zur Stage Companion App ist **keine feste Vorgabe** (Marlon, 07.10.2026).
+
+**Gestaltung: der Kategorie-Standard, mit voller Sorgfalt** (Marlon, 07.10.2026, Richtungswahl). Stage Ingest soll aussehen und sich bedienen wie die etablierten Profi-Werkzeuge der Kategorie, ohne eigene Eigenheiten. Massstab für Handwerk und Dichte sind **Silverstack / ShotPut Pro** (DIT-Offload) und **DaVinci Resolve** (Postproduktion). Vertrautheit ist hier gewollt: Wer diese Programme kennt, findet sich sofort zurecht.
 
 ## Evidence on Hand
 
