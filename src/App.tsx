@@ -248,6 +248,8 @@ export function App() {
           dreh,
           artCmd: artCmd.trim() || null,
           stageAdresse: stageAdresse.trim() || null,
+          plateZugang: paDreh ? gemerkterZugang() : null,
+          plateDreh: paDreh?.id ?? null,
         }));
       setPhase("fertig");
     } catch (e) {
@@ -784,6 +786,12 @@ function Ergebnis({ ergebnis }: { ergebnis: KartenErgebnis }) {
     <>
       {ergebnis.abgleich && <AbgleichAnzeige a={ergebnis.abgleich} />}
       {ergebnis.stage && <StageAnzeige s={ergebnis.stage} />}
+      {ergebnis.plates && (
+        <span className={`k-lampe ${ergebnis.plates.fehler.length ? "k-lampe-warn" : "k-lampe-ok"}`}>
+          <i /> 02_PLATES: {ergebnis.plates.plates} Plates, {ergebnis.plates.fotosNeu} neue Fotos
+          {ergebnis.plates.fehler.length > 0 && ` · ${ergebnis.plates.fehler.length} Fehler`}
+        </span>
+      )}
       {ergebnis.bewegung.length > 0 && (
         <section className="i-abschnitt">
           <h2>Bewegungsdaten</h2>

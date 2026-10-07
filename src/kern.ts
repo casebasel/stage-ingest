@@ -40,6 +40,7 @@ export type KartenErgebnis = {
   ale: (string | null)[];
   bewegung: [string, Bewegung][];
   stage: { Ok: Record<string, unknown> } | { Err: string } | null;
+  plates: { plates: number; fotosNeu: number; fehler: string[] } | null;
   abgleich: Abgleich | null;
   berichte: ({ Ok: string } | { Err: string })[];
   freigabe: Freigabe;
@@ -67,6 +68,8 @@ export type KartenAuftrag = {
   dreh?: Dreh | null;
   artCmd?: string | null;
   stageAdresse?: string | null;
+  plateZugang?: { adresse: string; anonKey: string; email: string } | null;
+  plateDreh?: string | null;
 };
 
 export type SollClip = {

@@ -208,6 +208,7 @@ mod tests {
                 clips: vec![
                     ClipEintrag {
                         name: "A001C003_261028_R1AB".into(),
+                        pfad: String::new(),
                         start_tc: None,
                         end_tc: None,
                         take_id: None,
@@ -215,6 +216,7 @@ mod tests {
                     },
                     ClipEintrag {
                         name: "A001C004_261028_R1AB".into(),
+                        pfad: String::new(),
                         start_tc: None,
                         end_tc: None,
                         take_id: Some("T2".into()),
@@ -222,6 +224,7 @@ mod tests {
                     },
                     ClipEintrag {
                         name: "A001C005_261028_R1AB".into(),
+                        pfad: String::new(),
                         start_tc: None,
                         end_tc: None,
                         take_id: None,

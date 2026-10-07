@@ -32,6 +32,9 @@ pub struct KartenZusammenfassung {
 pub struct ClipEintrag {
     /// Clipname ohne Endung.
     pub name: String,
+    /// Pfad auf der Karte (relativ, `/`), z. B. `A001C003_261028_R1AB.mov`.
+    #[serde(default)]
+    pub pfad: String,
     pub start_tc: Option<String>,
     pub end_tc: Option<String>,
     /// Take, dem der Clip zugeordnet wurde (Plate Assistant: ULID), falls bekannt.
@@ -57,6 +60,17 @@ pub fn schreiben(berichtordner: &Path, z: &KartenZusammenfassung) -> std::io::Re
     let text = serde_json::to_vec_pretty(z).map_err(std::io::Error::other)?;
     crate::sicher_schreiben(&pfad, &text)?;
     Ok(pfad)
+}
+
+/// Zusammenfassungen eines einzelnen Drehordners (`<Dreh>/04_BERICHTE/`).
+pub fn im_dreh(drehordner: &Path) -> Vec<KartenZusammenfassung> {
+    let Ok(dateien) = std::fs::read_dir(drehordner.join(BERICHTE)) else { return vec![] };
+    dateien
+        .flatten()
+        .map(|d| d.path())
+        .filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().ends_with(ENDUNG)))
+        .filter_map(|p| serde_json::from_slice(&std::fs::read(p).ok()?).ok())
+        .collect()
 }
 
 /// Sucht alle Zusammenfassungen eines Projekts unter `<basis>/<kurzname>/*/04_BERICHTE/`.
@@ -104,6 +118,7 @@ mod tests {
             grund: "2 unabhängige Kopien geprüft".into(),
             clips: vec![ClipEintrag {
                 name: "A001C003_261028_R1AB".into(),
+                pfad: "A001C003_261028_R1AB.mov".into(),
                 start_tc: Some("10:45:10:00".into()),
                 end_tc: Some("10:46:00:00".into()),
                 take_id: Some("01T1".into()),
@@ -119,5 +134,6 @@ mod tests {
         assert_eq!(g[0].inhalt, z);
         assert_eq!(k.len(), 1);
         assert!(suchen(t.path(), "ANDERES").0.is_empty());
+        assert_eq!(im_dreh(&t.path().join("HAPPY_END/2026-10-28_Rheinufer")), [z]);
     }
 }

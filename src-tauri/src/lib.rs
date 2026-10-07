@@ -1,6 +1,7 @@
 //! Tauri-Hülle um den Kern: Befehle für die Oberfläche, Fortschritt als Ereignisse.
 
 mod plate;
+mod plates;
 mod projekt;
 mod stage;
 
@@ -47,6 +48,11 @@ struct KartenAuftrag {
     /// Drehstruktur anlegen (`<Produktion>/<Datum>_<Dreh>/01_KAMERA/…`); die Ziele sind dann schon Kartenziele darin.
     #[serde(default)]
     dreh: Option<Dreh>,
+    /// Plate Assistant: Zugang und gewählter Drehort. Dann entstehen `02_PLATES/` mit plate.json und Fotos.
+    #[serde(default)]
+    plate_zugang: Option<plate::Zugang>,
+    #[serde(default)]
+    plate_dreh: Option<String>,
     /// Pfad zu ARRI ART CMD (lokale Einstellung). Leer = keine Bewegungsdaten.
     #[serde(default)]
     art_cmd: Option<PathBuf>,
@@ -75,6 +81,8 @@ struct KartenErgebnis {
     ale: Vec<Option<PathBuf>>,
     /// Bewegungs- und Objektivdaten pro Clip (ART CMD), falls eingestellt: Clip und Auswertung.
     bewegung: Vec<(String, Bewegung)>,
+    /// Ablage von `02_PLATES/` (Plates, neue Fotos, Fehler), `None` ohne Plate-Assistant-Drehort.
+    plates: Option<plates::Ablage>,
     /// Antwort der Stage auf `ingest.karte` (oder Fehlertext), `None` ohne Stage-Adresse.
     stage: Option<Result<serde_json::Value, String>>,
     /// Abgleich mit der Soll-Liste (`None` ohne Soll-Liste).
@@ -449,6 +457,7 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
                         end_tc: c.angaben.as_ref().and_then(|a| a.end_tc.clone()),
                         take_id: Some(take).filter(|t| !t.is_empty()),
                         zuordnung: art.to_string(),
+                        pfad: c.pfad.clone(),
                         name,
                     }
                 })
@@ -461,6 +470,25 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
         }
     }
 
+    // 02_PLATES: Plates des gewählten Drehorts mit Fotos und Verweisen auf die Clips (nur in einer Drehstruktur).
+    let plates_ablage = match (&auftrag.plate_zugang, &auftrag.plate_dreh, &auftrag.dreh) {
+        (Some(z), Some(dreh_id), Some(_)) => {
+            let drehordner: Vec<PathBuf> = urteile
+                .iter()
+                .filter(|u| u.gut())
+                .filter_map(|u| u.ordner.parent().and_then(Path::parent).map(Path::to_path_buf))
+                .collect();
+            let _ = app
+                .emit(FORTSCHRITT, Fortschritt::Nachlesen { pfad: "Plates und Fotos aus dem Plate Assistant".into() });
+            let a = plates::ablegen(&app.state::<Arc<plate::Plate>>(), z, dreh_id, &drehordner);
+            if !a.fehler.is_empty() {
+                freigabe.hinweise.push(format!("02_PLATES unvollständig: {}", a.fehler.join("; ")));
+            }
+            Some(a)
+        }
+        _ => None,
+    };
+
     // Karte an die Stage melden (nach Bericht, damit sein Pfad mitgeht). Ein Fehler sperrt nichts.
     let stage = auftrag.stage_adresse.as_deref().filter(|a| !a.trim().is_empty()).map(|adresse| {
         let version = app.package_info().version.to_string();
@@ -471,8 +499,20 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
         }
         stage::karte_melden(adresse, daten)
     });
-    let ergebnis =
-        KartenErgebnis { kopie, urteile, kennungen, mhl, clips, ale, bewegung, stage, abgleich, berichte, freigabe };
+    let ergebnis = KartenErgebnis {
+        kopie,
+        urteile,
+        kennungen,
+        mhl,
+        clips,
+        ale,
+        bewegung,
+        plates: plates_ablage,
+        stage,
+        abgleich,
+        berichte,
+        freigabe,
+    };
     if let Err(e) = verlauf_anhaengen(app, &ergebnis) {
         eprintln!("Verlauf nicht geschrieben: {e}"); // die Karte ist trotzdem kopiert und belegt
     }
@@ -708,6 +748,8 @@ mod gemeinsamer_test {
             stage_adresse: None,
             soll: vec![],
             dreh: None,
+            plate_zugang: None,
+            plate_dreh: None,
             art_cmd: None,
         };
         let k = Auftrag { quelle: karte, ziele: auftrag.ziele.clone(), mit_md5: false };

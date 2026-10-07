@@ -5,6 +5,7 @@
 //! Adresse, Anon-Key und E-Mail stehen in den lokalen Einstellungen der App, das Passwort im Schlüsselbund
 //! des Systems. Nichts davon kommt ins Repo.
 
+use std::io::Read as _;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -154,6 +155,33 @@ impl Plate {
             ),
         )?;
         Ok(soll_aus(&v, dreh_id))
+    }
+
+    /// Ein Drehort mit allen Plates (alle Felder), Fotos und Takes, für `02_PLATES/`.
+    pub fn dreh_mit_plates(&self, z: &Zugang, dreh_id: &str) -> Result<Value, String> {
+        self.lesen(
+            z,
+            &format!("dreh?id=eq.{}&select=id,name,datum,geloescht,plate(*,foto(*),take(*))", url_teil(dreh_id)),
+        )
+    }
+
+    /// Lädt ein Foto aus dem Bucket `fotos` (nur lesen).
+    pub fn foto_laden(&self, z: &Zugang, pfad: &str) -> Result<Vec<u8>, String> {
+        let url = format!("{}/storage/v1/object/authenticated/fotos/{}", z.adresse.trim_end_matches('/'), pfad);
+        for neu in [false, true] {
+            let token = self.token(z, neu)?;
+            match agent().get(&url).set("apikey", &z.anon_key).set("Authorization", &format!("Bearer {token}")).call() {
+                Ok(a) => {
+                    let mut daten = Vec::new();
+                    std::io::Read::read_to_end(&mut a.into_reader().take(60 * 1024 * 1024), &mut daten)
+                        .map_err(|e| e.to_string())?;
+                    return Ok(daten);
+                }
+                Err(ureq::Error::Status(401, _)) if !neu => continue,
+                Err(e) => return Err(fehler(e)),
+            }
+        }
+        Err("Anmeldung beim Plate Assistant abgelehnt".into())
     }
 
     /// Alle Drehorte eines Projekts mit Plates, Takes, Fotos und HDRI. Drehorte von vor Migration 0009 haben nur
