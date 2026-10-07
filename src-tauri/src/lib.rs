@@ -542,6 +542,12 @@ async fn plate_projekt_anlegen(
     im_hintergrund(move || p.projekt_anlegen(&zugang, &name, &kurzname)).await
 }
 
+/// Aktives Filmprojekt der Stage (für den Vorschlag im Studio), `None` ohne.
+#[tauri::command]
+async fn stage_projekt(adresse: String) -> Result<Option<serde_json::Value>, String> {
+    im_hintergrund(move || stage::aktives_projekt(&adresse)).await
+}
+
 /// Kurzname-Vorschlag nach der gemeinsamen Regel (für das Formular „Neues Projekt“).
 #[tauri::command]
 fn kurzname_vorschlag(name: String) -> Option<String> {
@@ -602,6 +608,7 @@ pub fn run() {
             plate_soll,
             plate_projekt_anlegen,
             kurzname_vorschlag,
+            stage_projekt,
             abbrechen,
             laeuft,
             verlauf

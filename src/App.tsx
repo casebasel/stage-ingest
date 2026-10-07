@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { invoke } from "@tauri-apps/api/core";
 import { FolderInput, HardDrive, Moon, Plus, Sun, SunMoon, X } from "lucide-react";
 import { anwenden, gemerkteWahl, type Wahl } from "./thema";
 import {
@@ -100,6 +101,16 @@ export function App() {
     try {
       const liste = await sollVonStage(stageAdresse.trim());
       setSoll({ liste, fehler: null, zeit: Date.now() });
+      // Im Studio: aktives Filmprojekt der Stage übernehmen, wenn noch keines eingetragen ist.
+      if (!projekt.trim()) {
+        const p = await invoke<{ id: string; name: string; kurzname: string } | null>("stage_projekt", {
+          adresse: stageAdresse.trim(),
+        }).catch(() => null);
+        if (p) {
+          setProjekt(p.name);
+          setPaProjekt({ id: p.id, name: p.name, kurzname: p.kurzname, aktiv: true });
+        }
+      }
       return liste;
     } catch (e) {
       setSoll({ liste: [], fehler: String(e), zeit: Date.now() });

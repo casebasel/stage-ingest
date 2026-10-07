@@ -49,6 +49,35 @@ pub fn karte_melden(adresse: &str, daten: Value) -> Result<Value, String> {
     Err("Stage hat nicht geantwortet".into())
 }
 
+/// Aktives Filmprojekt der Stage (Ereignis `sitzung.projekt {id, name, kurzname}`, Systemkarte c215147).
+/// Der Server schickt nach dem Verbinden seine Ereignisse; nach 3 s ohne dieses Ereignis: keines.
+pub fn aktives_projekt(adresse: &str) -> Result<Option<Value>, String> {
+    let rechner = gethostname::gethostname().to_string_lossy().into_owned();
+    let basis = adresse.trim().trim_end_matches('/').replacen("https://", "wss://", 1).replacen("http://", "ws://", 1);
+    let url = format!("{basis}/client?quelle=stage-ingest&geraet={}", url_teil(&rechner));
+    let (mut ws, _) = tungstenite::connect(url.as_str()).map_err(|e| format!("Stage nicht erreichbar: {e}"))?;
+    zeitgrenze(&mut ws);
+    let beginn = Instant::now();
+    let mut gefunden = None;
+    while beginn.elapsed() < Duration::from_secs(3) {
+        match ws.read() {
+            Ok(Message::Text(t)) => {
+                let Ok(v) = serde_json::from_str::<Value>(t.as_str()) else { continue };
+                if v["art"] == "ereignis" && v["typ"] == "sitzung.projekt" {
+                    gefunden = Some(v["daten"].clone()).filter(|d| d["kurzname"].is_string());
+                    break;
+                }
+            }
+            Ok(_) => {}
+            Err(tungstenite::Error::Io(e))
+                if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {}
+            Err(_) => break,
+        }
+    }
+    let _ = ws.close(None);
+    Ok(gefunden)
+}
+
 fn zeitgrenze(ws: &mut WebSocket<MaybeTlsStream<TcpStream>>) {
     if let MaybeTlsStream::Plain(s) = ws.get_mut() {
         let _ = s.set_read_timeout(Some(Duration::from_secs(2)));
