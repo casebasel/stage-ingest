@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
-members = ["kern", "src-tauri"]
-default-members = ["kern"]
+members = ["kern", "bericht", "src-tauri"]
+default-members = ["kern", "bericht"]
 
 [workspace.package]
 version = "0.1.0"

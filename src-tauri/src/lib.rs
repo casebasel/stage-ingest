@@ -43,6 +43,8 @@ struct KartenErgebnis {
     kennungen: Vec<Kennung>,
     /// Pfad der neuen `.mhl` je Ziel, `None` bei einem fehlerhaften Ziel.
     mhl: Vec<Option<PathBuf>>,
+    /// PDF-Bericht je Ziel: Pfad oder Fehlertext.
+    berichte: Vec<Result<PathBuf, String>>,
     freigabe: Freigabe,
 }
 
@@ -106,7 +108,18 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
         })
         .collect();
     let freigabe = freigabe::beurteilen(&urteile, &kennungen, auftrag.mindest_kopien);
-    Ok(KartenErgebnis { kopie, urteile, kennungen, mhl, freigabe })
+
+    // Bericht auf jedes Ziel, auch auf fehlerhafte (dort belegt er den Fehler), soweit schreibbar.
+    let version = app.package_info().version.to_string();
+    let angaben = ingest_bericht::Angaben { version: &version, mit_md5: auftrag.mit_md5 };
+    let berichte = (0..urteile.len())
+        .map(|i| {
+            let pdf =
+                ingest_bericht::pdf(&kopie, &urteile, &kennungen, &freigabe, i, &angaben).map_err(|e| e.to_string())?;
+            ingest_bericht::schreiben(&urteile[i].ordner, &pdf, &kopie.beginn).map_err(|e| e.to_string())
+        })
+        .collect();
+    Ok(KartenErgebnis { kopie, urteile, kennungen, mhl, berichte, freigabe })
 }
 
 /// Bricht auf ausdrücklichen Wunsch ab. Nie automatisch, auch nicht für ein Update.
