@@ -24,7 +24,7 @@ export type Freigabe = {
   kennung_unsicher: boolean;
   grund: string;
 };
-export type KartenErgebnis = { kopie: Kopie; urteile: Urteil[]; kennungen: Kennung[]; freigabe: Freigabe };
+export type KartenErgebnis = { kopie: Kopie; urteile: Urteil[]; kennungen: Kennung[]; mhl: (string | null)[]; freigabe: Freigabe };
 
 export type Meldung =
   | { art: "begonnen"; dateien: number; bytes: number }

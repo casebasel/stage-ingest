@@ -7,6 +7,7 @@ use std::sync::Arc;
 use ingest_kern::freigabe::{self, Freigabe};
 use ingest_kern::geraet::{self, Kennung};
 use ingest_kern::kopie::{self, Auftrag, Kopie, Meldung};
+use ingest_kern::mhl;
 use ingest_kern::pruefen::{self, Urteil};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
@@ -40,6 +41,8 @@ struct KartenErgebnis {
     kopie: Kopie,
     urteile: Vec<Urteil>,
     kennungen: Vec<Kennung>,
+    /// Pfad der neuen `.mhl` je Ziel, `None` bei einem fehlerhaften Ziel.
+    mhl: Vec<Option<PathBuf>>,
     freigabe: Freigabe,
 }
 
@@ -77,12 +80,33 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
         let _ = app.emit(FORTSCHRITT, Fortschritt::Kopieren { meldung });
     })
     .map_err(|e| e.to_string())?;
-    let urteile = pruefen::zurueckpruefen(&kopie, auftrag.mit_md5, abbruch, |ziel, pfad| {
+    let mut urteile = pruefen::zurueckpruefen(&kopie, auftrag.mit_md5, abbruch, |ziel, pfad| {
         let _ = app.emit(FORTSCHRITT, Fortschritt::Pruefen { ziel, pfad: pfad.to_string() });
     })
     .map_err(|e| e.to_string())?;
+    // ASC MHL nur auf gut geprüfte Ziele. Scheitert es, zählt das Ziel nicht für die Freigabe.
+    let angaben = mhl::Angaben {
+        werkzeug: "Stage Ingest".into(),
+        version: app.package_info().version.to_string(),
+        zeit: kopie.beginn,
+    };
+    let mhl = urteile
+        .iter_mut()
+        .map(|u| {
+            if !u.gut() {
+                return None;
+            }
+            match mhl::schreiben(&u.ordner, &kopie, &angaben) {
+                Ok(p) => Some(p),
+                Err(e) => {
+                    u.kopierfehler = Some(format!("ASC MHL nicht geschrieben: {e}"));
+                    None
+                }
+            }
+        })
+        .collect();
     let freigabe = freigabe::beurteilen(&urteile, &kennungen, auftrag.mindest_kopien);
-    Ok(KartenErgebnis { kopie, urteile, kennungen, freigabe })
+    Ok(KartenErgebnis { kopie, urteile, kennungen, mhl, freigabe })
 }
 
 /// Bricht auf ausdrücklichen Wunsch ab. Nie automatisch, auch nicht für ein Update.

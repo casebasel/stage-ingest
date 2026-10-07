@@ -19,7 +19,15 @@ jobs:
         with:
           components: clippy
       - uses: swatinem/rust-cache@v2
-      - name: Kern testen
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: ASC-MHL-Referenz installieren
+        shell: bash
+        run: |
+          pip install ascmhl
+          echo "ASCMHL_DEBUG=$(python -c 'import shutil; print(shutil.which("ascmhl-debug"))')" >> "$GITHUB_ENV"
+      - name: Kern testen (mit Prüfung gegen die ASC-MHL-Referenz)
         run: cargo test -p ingest-kern
       - name: Clippy
         run: cargo clippy -p ingest-kern --all-targets -- -D warnings

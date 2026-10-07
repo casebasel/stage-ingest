@@ -340,6 +340,7 @@ function abweichungText(a: Abweichung) {
 
 function Ergebnis({ ergebnis }: { ergebnis: KartenErgebnis }) {
   const { kopie, urteile, kennungen } = ergebnis;
+
   const summe = kopie.dateien.reduce((s, d) => s + d.groesse, 0);
   return (
     <>
@@ -356,6 +357,7 @@ function Ergebnis({ ergebnis }: { ergebnis: KartenErgebnis }) {
                 {u.ordner}
               </span>
               <span className="k-leise mono">{kennungen[i]?.wert}</span>
+              {ergebnis.mhl[i] && <span className="k-leise">ASC MHL: <span className="mono">{name(ergebnis.mhl[i]!)}</span></span>}
               {u.kopierfehler && <span className="i-abweichung">Kopieren: {u.kopierfehler}</span>}
               {u.abweichungen.map((a) => (
                 <span key={abweichungText(a)} className="i-abweichung">
