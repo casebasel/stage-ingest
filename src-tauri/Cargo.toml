@@ -27,3 +27,6 @@ ureq = "2"
 tungstenite = "0.24"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 gethostname = "0.5"
+
+[dev-dependencies]
+tempfile = "3"

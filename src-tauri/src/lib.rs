@@ -87,7 +87,7 @@ const FORTSCHRITT: &str = "ingest://fortschritt";
 /// Daten für `ingest.karte` (Form abgestimmt mit der Stage, Systemkarte b71386f).
 #[allow(clippy::too_many_arguments)]
 fn stage_daten(
-    app: &AppHandle,
+    version: &str,
     auftrag: &KartenAuftrag,
     kopie: &Kopie,
     urteile: &[Urteil],
@@ -104,16 +104,17 @@ fn stage_daten(
         _ => "unbestimmt",
     };
     let gut: Vec<usize> = (0..urteile.len()).filter(|&i| urteile[i].gut()).collect();
-    let nas = gut.iter().find(|&&i| kennungen[i].art == geraet::Art::Netz).map(|&i| &urteile[i].ordner);
+    // Pfad der Clips: auf dem NAS, sonst auf der ersten guten Kopie (die Stage verlangt einen Pfad).
+    let nas = gut.iter().find(|&&i| kennungen[i].art == geraet::Art::Netz).or(gut.first()).map(|&i| &urteile[i].ordner);
     let pruefsumme: std::collections::HashMap<&str, String> =
         kopie.dateien.iter().map(|d| (d.pfad.as_str(), d.pruefsumme.xxh128_hex())).collect();
     let karte = geraet::kartenname(&auftrag.quelle);
-    json!({
+    let mut daten = json!({
         "karte": karte.chars().take(40).collect::<String>(),
         // Schema der Stage: Kurzname höchstens 24 Zeichen.
         "projekt": auftrag.dreh.as_ref().map(|d| struktur::kurzname(&d.projekt).chars().take(24).collect::<String>()),
         "freigegeben": freigabe.sicher,
-        "version": app.package_info().version.to_string(),
+        "version": version,
         "beginn": kopie.beginn.to_rfc3339(),
         "kopien": gut.iter().enumerate().map(|(n, &i)| json!({
             "art": art(&kennungen[i]),
@@ -143,7 +144,21 @@ fn stage_daten(
         }).collect::<Vec<_>>(),
         "ale": ale.iter().flatten().next().and_then(|p| std::fs::read_to_string(p).ok()),
         "bericht": gut.iter().find_map(|&i| berichte[i].as_ref().ok()),
-    })
+    });
+    // Das Schema der Stage kennt optionale Felder (fehlen erlaubt), aber kein null: leere Felder weglassen.
+    ohne_null(&mut daten);
+    daten
+}
+
+fn ohne_null(v: &mut serde_json::Value) {
+    match v {
+        serde_json::Value::Object(m) => {
+            m.retain(|k, x| !x.is_null() || k == "projekt"); // projekt ist ausdrücklich „Kurzname oder null“
+            m.values_mut().for_each(ohne_null);
+        }
+        serde_json::Value::Array(a) => a.iter_mut().for_each(ohne_null),
+        _ => {}
+    }
 }
 
 /// Eine Zeile im Verlauf (`verlauf.jsonl` im App-Datenordner). Nur Zusammenfassung; die volle Wahrheit
@@ -399,7 +414,8 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
         .collect();
     // Karte an die Stage melden (nach Bericht, damit sein Pfad mitgeht). Ein Fehler sperrt nichts.
     let stage = auftrag.stage_adresse.as_deref().filter(|a| !a.trim().is_empty()).map(|adresse| {
-        let daten = stage_daten(app, auftrag, &kopie, &urteile, &kennungen, &clips, &ale, &berichte, &freigabe);
+        let version = app.package_info().version.to_string();
+        let daten = stage_daten(&version, auftrag, &kopie, &urteile, &kennungen, &clips, &ale, &berichte, &freigabe);
         // Die Stage verlangt mindestens einen Clip (Karte ohne lesbare .mov/.mxf: nichts zu melden).
         if daten["clips"].as_array().is_none_or(|c| c.is_empty()) {
             return Err("keine Clips mit Timecode auf der Karte, nichts gemeldet".to_string());
@@ -523,4 +539,47 @@ pub fn run() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod gemeinsamer_test {
+    //! Gemeinsamer Test mit einem Test-Server der Stage (nie gegen den echten Stage-Server):
+    //! `STAGE_TEST=ws-adresse STAGE_TEST_KARTE=<ordner> cargo test -p stage-ingest -- --ignored --nocapture`
+    use super::*;
+    use std::sync::atomic::AtomicBool;
+
+    #[test]
+    #[ignore]
+    fn karte_an_test_stage_melden() {
+        let adresse = std::env::var("STAGE_TEST").expect("STAGE_TEST");
+        let karte = PathBuf::from(std::env::var("STAGE_TEST_KARTE").expect("STAGE_TEST_KARTE"));
+        let t = tempfile::tempdir().unwrap();
+        let name = geraet::kartenname(&karte);
+        let auftrag = KartenAuftrag {
+            quelle: karte.clone(),
+            ziele: vec![t.path().join("nas").join(&name), t.path().join("ssd").join(&name)],
+            mit_md5: false,
+            mindest_kopien: 2,
+            zweimal_lesen: false,
+            stage_adresse: None,
+            soll: vec![],
+            dreh: None,
+            art_cmd: None,
+        };
+        let k = Auftrag { quelle: karte, ziele: auftrag.ziele.clone(), mit_md5: false };
+        let kopie = kopie::kopieren(&k, &AtomicBool::new(false), |_| {}).unwrap();
+        let urteile = pruefen::zurueckpruefen(&kopie, false, &AtomicBool::new(false), |_, _| {}).unwrap();
+        let kennungen: Vec<Kennung> = auftrag.ziele.iter().map(|z| geraet::kennung(z).unwrap()).collect();
+        let umfang = freigabe::Umfang { dateien: kopie.dateien.len(), ganze_karte: true, historie_abweichungen: 0 };
+        let freigabe = freigabe::beurteilen(&urteile, &kennungen, 2, umfang);
+        let clips = ale::clips_lesen(&kopie, &urteile[0].ordner);
+        let ale_pfad = vec![None, None];
+        let berichte = vec![Err("kein Bericht im Test".to_string()), Err("kein Bericht im Test".to_string())];
+        let daten =
+            stage_daten("test", &auftrag, &kopie, &urteile, &kennungen, &clips, &ale_pfad, &berichte, &freigabe);
+        println!("gesendet: {}", serde_json::to_string_pretty(&daten["clips"]).unwrap());
+        let antwort = stage::karte_melden(&adresse, daten).unwrap();
+        println!("Antwort der Stage: {antwort}");
+        assert_eq!(antwort["ok"], true, "{antwort}");
+    }
 }

@@ -59,3 +59,11 @@ Gewünscht: Karte freigegeben (wann), Speicherort, `aus_clip` je Take, HDRI-Zust
 - Schema steht (Plate Assistant, Migration 0009/0010, Systemkarte 3e1050f; genau: plate-assistant `docs/ABGLEICH.md`). Ordner mit dem **Kurznamen** (`A–Z`, `0–9`, `_`, z. B. `HAPPY_END`).
 - **Zugang des Ingest:** eigener Benutzer mit `app_metadata.app = "ingest"` (legt Marlon an). Liest `dreh`, `plate`, `take`, `foto`, `projekt` und den Bucket `fotos`; schreibt über `aenderungen_anwenden` nur `projekt`. `ingest_meldung`, HDRI-Bucket und Jobs kommen später mit eigenen Migrationen.
 - Der Kurzname ist nach dem Anlegen fest; Ordnernamen ändern sich nie. Doppeltes Anlegen wird je Feld zusammengeführt, Anlegen geht immer (Systemkarte 269e680).
+
+## HDRI-Datensatz (Entwurf der HDRI-Session, 07.10.2026, noch nicht angewendet)
+
+- `hdri`: id, dreh_id (Pflicht), plate_id (leer = ganzer Drehort), zustand `aufnahme|captured|uploaded` (processed/linked nur in den Job-Tabellen des Ingest), start/end_zeit, geraet, kamera (ultraweit|weit), **format** (`dng` = Bayer-RAW linear | `heic` = verarbeitet, nicht linear, nur gekennzeichneter Rückfall), hfov/vfov_grad, **bezugssystem** (xTrueNorthZVertical bzw. xArbitraryCorrectedZVertical), kompass_grad (rechtweisend für Yaw 0), gps, positionen, ev_stufen (tatsächlich verwendet, gleich für alle Positionen), vorschau_pfad.
+- `hdri_frame`: position, yaw/pitch/roll_grad (nur Startwert, ±1–2°), **lage_quaternion [w,x,y,z]**: Kamera → Welt, v_welt = q · v_kamera; Kamera x = rechts, y = oben, Blick = −z; Welt x = rechts von Yaw 0, y = Yaw 0 waagrecht, z = oben. belichtung_s, iso, ev, zeit, pfad, geloescht (wiederholte Position).
+- **Gruppieren nach Frames** (hdri_id, position, nicht gelöscht), nicht positionen × Stufen rechnen.
+- Storage: Bucket `hdri`, `<hdri_id>/<frame_id>.dng|.heic`, `vorschau.jpg`, `metadata.json` (`format_version: 1`). DNG unverändert mit Metadaten und OpcodeLists. TUS-Upload.
+- Löschrichtlinie für den Ingest-Benutzer: eigene Migration 0014, getrennt freizugeben (Marlon).
