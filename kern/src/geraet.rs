@@ -84,10 +84,10 @@ mod plattform {
         }
         match ganze_platte(&auf) {
             Some((platte, modell)) => Ok(Kennung {
+                seriennummer: seriennummer(&platte),
                 wert: format!("platte:{platte}"),
                 sicher: true,
                 art: Art::Platte,
-                seriennummer: None,
                 beschreibung: modell,
             }),
             None => volume(pfad, "Platte nicht bestimmbar"),
@@ -112,6 +112,45 @@ mod plattform {
             return None;
         }
         plist::from_bytes::<plist::Dictionary>(&aus.stdout).ok()
+    }
+
+    /// Seriennummer der Platte `diskN` aus `system_profiler` (USB, NVMe, SATA). Nur für Bericht und
+    /// Wiedererkennen; über „verschiedene Platten“ entscheidet der BSD-Name.
+    fn seriennummer(platte: &str) -> Option<String> {
+        let aus = Command::new("/usr/sbin/system_profiler")
+            .args(["-json", "SPUSBDataType", "SPUSBHostDataType", "SPNVMeDataType", "SPSerialATADataType"])
+            .output()
+            .ok()?;
+        let wurzel: serde_json::Value = serde_json::from_slice(&aus.stdout).ok()?;
+        suchen(&wurzel, platte, None)
+    }
+
+    /// Sucht den Knoten mit `bsd_name == platte` und nimmt die nächste Seriennummer auf dem Weg dorthin.
+    pub(super) fn suchen(knoten: &serde_json::Value, platte: &str, oben: Option<String>) -> Option<String> {
+        use serde_json::Value;
+        match knoten {
+            Value::Object(m) => {
+                let eigene = ["serial_num", "device_serial", "USBDeviceKeySerialNumber"]
+                    .iter()
+                    .filter_map(|k| m.get(*k).and_then(Value::as_str))
+                    .map(str::trim)
+                    .find(|s| brauchbar(s))
+                    .map(str::to_owned)
+                    .or(oben);
+                if m.get("bsd_name").and_then(Value::as_str) == Some(platte) {
+                    return eigene;
+                }
+                m.values().find_map(|v| suchen(v, platte, eigene.clone()))
+            }
+            Value::Array(a) => a.iter().find_map(|v| suchen(v, platte, oben.clone())),
+            _ => None,
+        }
+    }
+
+    /// Leere und Fantasie-Seriennummern billiger Gehäuse (`000000…`, `0123456789…`) verwerfen.
+    fn brauchbar(s: &str) -> bool {
+        let ziffern: Vec<char> = s.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+        ziffern.len() >= 4 && !ziffern.iter().all(|&c| c == '0') && !s.starts_with("0123456789")
     }
 
     /// Ganze physische Platte (BSD-Name) und Modell zu einem Einhängepunkt.
@@ -289,6 +328,20 @@ mod tests {
         assert_eq!(netz("//marlon@NAS.local/Footage", "x").wert, "netz:nas.local");
         assert_eq!(netz(r"\\NAS.local\Footage", "x").wert, "netz:nas.local");
         assert_eq!(netz(r"NAS.local\Andere", "x").wert, "netz:nas.local");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn seriennummer_aus_system_profiler() {
+        let json: serde_json::Value = serde_json::from_str(
+            r#"{"SPUSBDataType":[{"_items":[{"_name":"T7","serial_num":"S6XNNF0W123456",
+                "Media":[{"bsd_name":"disk4","volumes":[{"bsd_name":"disk4s1"}]}]},
+               {"_name":"Billig","serial_num":"000000000000","Media":[{"bsd_name":"disk5"}]}]}]}"#,
+        )
+        .unwrap();
+        assert_eq!(plattform::suchen(&json, "disk4", None).as_deref(), Some("S6XNNF0W123456"));
+        assert_eq!(plattform::suchen(&json, "disk5", None), None);
+        assert_eq!(plattform::suchen(&json, "disk9", None), None);
     }
 
     #[test]
