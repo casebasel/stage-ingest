@@ -8,7 +8,7 @@ colors:
   feld: "oklch(0.140 0.004 255)"
   hover: "oklch(0.240 0.006 255)"
   linie: "oklch(0.290 0.006 255)"
-  linie-stark: "oklch(0.420 0.008 255)"
+  linie-stark: "oklch(0.510 0.008 255)"
   text: "oklch(0.940 0.003 255)"
   text-2: "oklch(0.820 0.006 255)"
   text-3: "oklch(0.745 0.008 255)"

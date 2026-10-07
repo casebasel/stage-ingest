@@ -103,7 +103,7 @@
       "linie-stark": {
         "role": "neutral",
         "displayName": "Linie stark",
-        "canonical": "oklch(0.420 0.008 255)",
+        "canonical": "oklch(0.510 0.008 255)",
         "tag": "oklch(0.600 0.010 255)",
         "tonalRamp": [
           "oklch(0.150 0.008 255)",
