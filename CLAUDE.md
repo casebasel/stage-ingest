@@ -6,7 +6,8 @@ Sprache: Deutsch. Stil: direkt, klare Empfehlungen, keine Floskeln.
 
 | Pfad | Inhalt |
 | --- | --- |
-| `kern/` | Rust-Bibliothek ohne Oberfläche: Kopieren, Prüfsummen, Zurücklesen, Freigabe (Tests: `cargo test -p ingest-kern`) |
+| `kern/` | Rust-Bibliothek ohne Oberfläche: Kopieren, Prüfsummen, Zurücklesen, Geräteerkennung, Freigabe, Vorab-Prüfung, ASC MHL (Tests: `cargo test -p ingest-kern`; MHL gegen die Referenz mit `ASCMHL_DEBUG=<pfad zu ascmhl-debug>`) |
+| `bericht/` | PDF-Bericht (Typst-Vorlage `vorlage.typ`, Geist eingebettet) |
 | `src-tauri/` | App-Hülle, Befehle und Fortschritts-Ereignisse |
 | `src/` | Oberfläche; Design aus der Stage Companion App (deren `DESIGN.md`, Konsole) |
 | `docs/` | Konzept, HDRI-Briefing, Lesesicht Plate Assistant, Quellen aus der Stage, Recherche Kopieren/MHL |

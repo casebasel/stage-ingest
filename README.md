@@ -6,7 +6,8 @@ Eine App für macOS und Windows (Tauri 2, Kern in Rust, Oberfläche in React), d
 
 | Pfad | Inhalt |
 | --- | --- |
-| `kern/` | Rust-Bibliothek ohne Oberfläche: Kopieren, Prüfsummen, Zurücklesen, Freigabe |
+| `kern/` | Rust-Bibliothek ohne Oberfläche: Kopieren, Prüfsummen, Zurücklesen, Geräteerkennung, Freigabe, Vorab-Prüfung, ASC MHL |
+| `bericht/` | PDF-Bericht (Typst-Vorlage `vorlage.typ`, Geist eingebettet) |
 | `src-tauri/` | App-Hülle |
 | `src/` | Oberfläche (Design aus der Stage Companion App) |
 | `docs/KONZEPT.md` | Konzept und Entscheidungen |
