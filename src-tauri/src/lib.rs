@@ -51,6 +51,70 @@ struct KartenErgebnis {
 
 const FORTSCHRITT: &str = "ingest://fortschritt";
 
+/// Eine Zeile im Verlauf (`verlauf.jsonl` im App-Datenordner). Nur Zusammenfassung; die volle Wahrheit
+/// liegt in MHL und Bericht auf den Zielen.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct VerlaufEintrag {
+    beginn: String,
+    ende: String,
+    karte: String,
+    quelle: PathBuf,
+    dateien: usize,
+    bytes: u64,
+    sicher: bool,
+    grund: String,
+    ziele: Vec<VerlaufZiel>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct VerlaufZiel {
+    ordner: PathBuf,
+    gut: bool,
+    bericht: Option<PathBuf>,
+}
+
+fn verlauf_pfad(app: &AppHandle) -> Result<PathBuf, String> {
+    let ordner = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&ordner).map_err(|e| e.to_string())?;
+    Ok(ordner.join("verlauf.jsonl"))
+}
+
+fn verlauf_anhaengen(app: &AppHandle, e: &KartenErgebnis) -> Result<(), String> {
+    use std::io::Write;
+    let eintrag = VerlaufEintrag {
+        beginn: e.kopie.beginn.to_rfc3339(),
+        ende: e.kopie.ende.to_rfc3339(),
+        karte: e.kopie.quelle.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+        quelle: e.kopie.quelle.clone(),
+        dateien: e.kopie.dateien.len(),
+        bytes: e.kopie.dateien.iter().map(|d| d.groesse).sum(),
+        sicher: e.freigabe.sicher,
+        grund: e.freigabe.grund.clone(),
+        ziele: e
+            .urteile
+            .iter()
+            .zip(&e.berichte)
+            .map(|(u, b)| VerlaufZiel { ordner: u.ordner.clone(), gut: u.gut(), bericht: b.as_ref().ok().cloned() })
+            .collect(),
+    };
+    let zeile = serde_json::to_string(&eintrag).map_err(|e| e.to_string())?;
+    let mut f =
+        std::fs::OpenOptions::new().create(true).append(true).open(verlauf_pfad(app)?).map_err(|e| e.to_string())?;
+    writeln!(f, "{zeile}").map_err(|e| e.to_string())
+}
+
+/// Verlauf, neueste zuerst.
+#[tauri::command]
+fn verlauf(app: AppHandle) -> Result<Vec<VerlaufEintrag>, String> {
+    let pfad = verlauf_pfad(&app)?;
+    let text = std::fs::read_to_string(pfad).unwrap_or_default();
+    let mut liste: Vec<VerlaufEintrag> = text.lines().filter_map(|z| serde_json::from_str(z).ok()).collect();
+    liste.reverse();
+    Ok(liste)
+}
+
 fn befunde(auftrag: &KartenAuftrag) -> Vec<Befund> {
     let k = Auftrag { quelle: auftrag.quelle.clone(), ziele: auftrag.ziele.clone(), mit_md5: auftrag.mit_md5 };
     match kopie::groesse(&auftrag.quelle) {
@@ -138,7 +202,11 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
             ingest_bericht::schreiben(&urteile[i].ordner, &pdf, &kopie.beginn).map_err(|e| e.to_string())
         })
         .collect();
-    Ok(KartenErgebnis { kopie, urteile, kennungen, mhl, berichte, freigabe })
+    let ergebnis = KartenErgebnis { kopie, urteile, kennungen, mhl, berichte, freigabe };
+    if let Err(e) = verlauf_anhaengen(app, &ergebnis) {
+        eprintln!("Verlauf nicht geschrieben: {e}"); // die Karte ist trotzdem kopiert und belegt
+    }
+    Ok(ergebnis)
 }
 
 /// Bricht auf ausdrücklichen Wunsch ab. Nie automatisch, auch nicht für ein Update.
@@ -168,7 +236,7 @@ pub fn run() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![vorab_pruefen, karte_einlesen, abbrechen, laeuft])
+        .invoke_handler(tauri::generate_handler![vorab_pruefen, karte_einlesen, abbrechen, laeuft, verlauf])
         .run(tauri::generate_context!())
         .expect("Stage Ingest konnte nicht starten");
 }

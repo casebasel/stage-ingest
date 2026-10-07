@@ -65,3 +65,16 @@ export const bytesText = (n: number) => {
   if (n < 1e9) return `${(n / 1e6).toFixed(1).replace(".", ",")} MB`;
   return `${(n / 1e9).toFixed(2).replace(".", ",")} GB`;
 };
+
+export type VerlaufEintrag = {
+  beginn: string;
+  ende: string;
+  karte: string;
+  quelle: string;
+  dateien: number;
+  bytes: number;
+  sicher: boolean;
+  grund: string;
+  ziele: { ordner: string; gut: boolean; bericht: string | null }[];
+};
+export const verlauf = () => invoke<VerlaufEintrag[]>("verlauf");

@@ -13,6 +13,7 @@ import {
   type Abweichung,
 } from "./kern";
 import { Aktualisierung, useAktualisierung } from "./Aktualisierung";
+import { Verlauf } from "./Verlauf";
 
 type Phase = "bereit" | "kopieren" | "pruefen" | "fertig" | "fehler";
 
@@ -29,14 +30,34 @@ type Stand = {
 
 const LEERER_STAND: Stand = { dateien: 0, bytes: 0, gelesen: 0, datei: "", pruefZiel: 0, pruefPfad: "", beginn: 0, ausfaelle: [] };
 
+// Ziele und Einstellungen pro Rechner merken. Nur Bequemlichkeit: fehlt der Speicher, gilt der Standard.
+function gemerkt<T>(schluessel: string, standard: T): T {
+  try {
+    const wert = localStorage.getItem(`ingest.${schluessel}`);
+    return wert === null ? standard : (JSON.parse(wert) as T);
+  } catch {
+    return standard;
+  }
+}
+function merken(schluessel: string, wert: unknown) {
+  try {
+    localStorage.setItem(`ingest.${schluessel}`, JSON.stringify(wert));
+  } catch {
+    // privat oder gesperrt: dann eben nicht
+  }
+}
+
 const trenner = (pfad: string) => (pfad.includes("\\") ? "\\" : "/");
 const name = (pfad: string) => pfad.split(/[\\/]/).filter(Boolean).pop() ?? pfad;
 
 export function App() {
   const [quelle, setQuelle] = useState<string | null>(null);
-  const [zielOrdner, setZielOrdner] = useState<string[]>([]);
-  const [mitMd5, setMitMd5] = useState(false);
-  const [mindestKopien, setMindestKopien] = useState(2);
+  const [zielOrdner, setZielOrdner] = useState<string[]>(() => gemerkt("ziele", []));
+  const [mitMd5, setMitMd5] = useState<boolean>(() => gemerkt("mitMd5", false));
+  const [mindestKopien, setMindestKopien] = useState<number>(() => gemerkt("mindestKopien", 2));
+  useEffect(() => merken("ziele", zielOrdner), [zielOrdner]);
+  useEffect(() => merken("mitMd5", mitMd5), [mitMd5]);
+  useEffect(() => merken("mindestKopien", mindestKopien), [mindestKopien]);
   const [phase, setPhase] = useState<Phase>("bereit");
   const [stand, setStand] = useState<Stand>(LEERER_STAND);
   const [ergebnis, setErgebnis] = useState<KartenErgebnis | null>(null);
@@ -232,6 +253,7 @@ export function App() {
               abbruchFragen={abbruchFragen}
             />
             {ergebnis && <Ergebnis ergebnis={ergebnis} />}
+            {!laeuft && <Verlauf neu={ergebnis?.kopie.beginn ?? ""} />}
           </div>
         </main>
       </div>
