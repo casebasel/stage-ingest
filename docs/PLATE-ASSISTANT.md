@@ -67,3 +67,4 @@ Gewünscht: Karte freigegeben (wann), Speicherort, `aus_clip` je Take, HDRI-Zust
 - **Gruppieren nach Frames** (hdri_id, position, nicht gelöscht), nicht positionen × Stufen rechnen.
 - Storage: Bucket `hdri`, `<hdri_id>/<frame_id>.dng|.heic`, `vorschau.jpg`, `metadata.json` (`format_version: 1`). DNG unverändert mit Metadaten und OpcodeLists. TUS-Upload.
 - Löschen: Marlon hat entschieden (Systemkarte 3ee75ff), dass der Ingest die Rohdaten im Bucket `hdri` löscht, **erst nach geprüfter Ablage und Bericht ok**. Das Recht kommt als eigene Migration des Plate Assistant.
+- Löschregel (Migration 0014, noch nicht angewendet): nur der Benutzer `ingest`, nur Dateien unter `<hdri_id>/…`, deren `hdri`-Zeile `zustand = 'uploaded'` oder `geloescht = true` hat. Sonst löscht der Server still 0 Dateien: **Zahl der wirklich gelöschten Objekte prüfen.** Andere Buckets tabu, Zeilen `hdri`/`hdri_frame` bleiben. Weg: `DELETE /storage/v1/object/hdri` mit `{"prefixes": [...]}`.
