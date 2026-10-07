@@ -10,6 +10,7 @@ import {
   type KartenErgebnis,
   type Abweichung,
 } from "./kern";
+import { Aktualisierung, useAktualisierung } from "./Aktualisierung";
 
 type Phase = "bereit" | "kopieren" | "pruefen" | "fertig" | "fehler";
 
@@ -40,6 +41,7 @@ export function App() {
   const [fehler, setFehler] = useState<string | null>(null);
   const [abbruchFragen, setAbbruchFragen] = useState(false);
   const abbruchZeit = useRef(0);
+  const { update, pflicht, version } = useAktualisierung();
 
   useEffect(() => {
     const weg = aufFortschritt((f: Fortschritt) =>
@@ -114,10 +116,11 @@ export function App() {
   }
 
   return (
-    <div className="ingest">
+    <div className={`ingest ${update ? "ingest-update" : ""}`}>
+      <Aktualisierung update={update} pflicht={pflicht} laeuft={laeuft} />
       <header className="i-kopf">
         <div className="i-marke">
-          Stage Ingest <span className="mono">0.1.0</span>
+          Stage Ingest <span className="mono">{version}</span>
         </div>
         <Kopflampe phase={phase} ergebnis={ergebnis} />
       </header>
@@ -202,7 +205,7 @@ export function App() {
               ergebnis={ergebnis}
               fehler={fehler}
               ziele={ziele}
-              bereit={!!quelle && ziele.length > 0}
+              bereit={!!quelle && ziele.length > 0 && !pflicht}
               einlesen={einlesen}
               abbrechen={abbrechenKlick}
               abbruchFragen={abbruchFragen}

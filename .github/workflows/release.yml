@@ -1,0 +1,70 @@
+name: Release
+
+# Ablauf und Schlüssel: docs/RELEASING.md
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  bauen:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            args: "--target aarch64-apple-darwin"
+          - platform: windows-2025
+            target: x86_64-pc-windows-msvc
+            args: "--target x86_64-pc-windows-msvc"
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: swatinem/rust-cache@v2
+      - run: npm ci
+      - name: Bauen, signieren, ins Release laden
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Stage Ingest ${{ github.ref_name }}"
+          releaseBody: |
+            Mac: .dmg öffnen, App nach Programme ziehen. Beim ersten Start Rechtsklick auf die App → Öffnen.
+            Windows: Installer ausführen (ohne Administratorrechte).
+            Danach kommen Updates automatisch als Banner oben in der App.
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: true
+          args: ${{ matrix.args }}
+
+  mindestversion:
+    # Pflicht-Update: die Datei MINDESTVERSION kommt als Feld mindestVersion in latest.json.
+    needs: bauen
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: mindestVersion in latest.json eintragen
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ github.ref_name }}"
+          gh release download "$tag" --pattern latest.json --dir /tmp/r --repo "$GITHUB_REPOSITORY"
+          mindest="$(tr -d '[:space:]' < MINDESTVERSION)"
+          jq --arg m "$mindest" '. + {mindestVersion: $m}' /tmp/r/latest.json > /tmp/latest.json
+          gh release upload "$tag" /tmp/latest.json --clobber --repo "$GITHUB_REPOSITORY"

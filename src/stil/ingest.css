@@ -20,6 +20,10 @@ body {
   background: var(--grund);
 }
 
+.ingest-update {
+  grid-template-rows: auto 52px minmax(0, 1fr);
+}
+
 .i-kopf {
   display: flex;
   align-items: center;
@@ -224,4 +228,12 @@ body {
 .i-leer {
   max-width: 62ch;
   color: var(--text-3);
+}
+
+.i-update {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 16px;
 }

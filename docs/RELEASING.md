@@ -1,0 +1,24 @@
+# Releases und Updates
+
+Wie Syncomat: GitHub Actions baut die App für Mac (Apple Silicon) und Windows, signiert die Updates und legt sie ins öffentliche Release. Die App holt `https://github.com/casebasel/stage-ingest/releases/latest/download/latest.json` und zeigt oben einen Banner.
+
+## Schlüssel (einmalig)
+
+Der öffentliche Schlüssel steht in `src-tauri/tauri.conf.json` (`plugins.updater.pubkey`). Der private Schlüssel liegt **nie** im Repo.
+
+1. Den privaten Schlüssel als Repository-Secret `TAURI_SIGNING_PRIVATE_KEY` anlegen (Repo → Settings → Secrets and variables → Actions). Er hat kein Passwort: `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` leer anlegen.
+2. Den privaten Schlüssel sicher aufbewahren (Passwortmanager, verschlüsselt auf dem NAS). Geht er verloren, können bestehende Installationen keine Updates mehr bekommen und müssen einmal von Hand neu installiert werden.
+
+## Release auslösen
+
+Version in allen drei Dateien gleich setzen: `package.json`, `Cargo.toml` (`[workspace.package]`), `src-tauri/tauri.conf.json`.
+
+```bash
+git commit -am "v0.1.1"
+git tag v0.1.1
+git push && git push --tags
+```
+
+## Pflicht-Update
+
+Nur wenn sich **Bericht, Ordnerstruktur oder eine Schnittstelle** ändern: in `MINDESTVERSION` die neue Version eintragen. Der Release-Workflow schreibt sie als `mindestVersion` in `latest.json`. Ältere Apps zeigen dann „Pflicht-Update“ und lassen keine neue Karte mehr beginnen. Ein laufender Kopiervorgang wird nie unterbrochen; installiert wird erst danach.
