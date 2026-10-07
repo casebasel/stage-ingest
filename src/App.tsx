@@ -54,6 +54,20 @@ function merken(schluessel: string, wert: unknown) {
   }
 }
 
+// Vorschau des Projekt-Kurznamens wie im Kern (struktur::kurzname): A–Z, 0–9, _.
+const kurz = (p: string) =>
+  p
+    .trim()
+    .replace(/[äÄ]/g, "AE")
+    .replace(/[öÖ]/g, "OE")
+    .replace(/[üÜ]/g, "UE")
+    .replace(/ß/g, "SS")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "") || "OHNE_PROJEKT";
+
 const trenner = (pfad: string) => (pfad.includes("\\") ? "\\" : "/");
 const name = (pfad: string) => pfad.split(/[\\/]/).filter(Boolean).pop() ?? pfad;
 
@@ -301,7 +315,7 @@ export function App() {
             <span className="k-leise k-klein">
               {dreh ? (
                 <span className="mono">
-                  {dreh.projekt}/{dreh.datum}_{dreh.name}/01_KAMERA/…
+                  {kurz(dreh.projekt)}/{dreh.datum}_{dreh.name}/01_KAMERA/…
                 </span>
               ) : (
                 "Ohne Projekt und Dreh kommt die Karte direkt in den Zielordner."

@@ -382,7 +382,7 @@ async fn soll_von_stage(adresse: String) -> Result<Vec<SollClip>, String> {
     .map_err(|e| e.to_string())?
 }
 
-/// Kartenziele zu den gewählten Zielordnern: mit Drehstruktur `<Ziel>/<Produktion>/<Datum>_<Dreh>/01_KAMERA/<Karte>`,
+/// Kartenziele zu den gewählten Zielordnern: mit Drehstruktur `<Ziel>/<KURZNAME>/<Datum>_<Dreh>/01_KAMERA/<Karte>`,
 /// sonst `<Ziel>/<Karte>`. Der Kartenname ist bei einer Windows-Laufwerkswurzel der Volume-Name.
 #[tauri::command]
 fn kartenziele(quelle: PathBuf, basis: Vec<PathBuf>, dreh: Option<Dreh>) -> Vec<PathBuf> {

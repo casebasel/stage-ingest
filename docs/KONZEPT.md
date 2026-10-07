@@ -38,7 +38,7 @@ Vorbilder zum Anschauen (nur lesen, nichts ungeprüft übernehmen): Sluice (MIT,
 Kamera-Originale **1:1 wie auf der Karte**, mit ASC MHL. Plates verweisen auf Clips, Clips werden nie doppelt abgelegt.
 
 ```
-<Projekt>/<Datum>_<Dreh>/
+<KURZNAME>/<Datum>_<Dreh>/
   01_KAMERA/<Reel>/          Karte 1:1 + ascmhl/
   02_PLATES/P003_Name/       plate.json (Verweise auf Clips), Referenzfotos, HDRI
   03_TON/
@@ -46,7 +46,7 @@ Kamera-Originale **1:1 wie auf der Karte**, mit ASC MHL. Plates verweisen auf Cl
   05_METADATEN/              ALE pro Karte, Bewegungs-/Objektivdaten pro Clip (ART CMD)
 ```
 
-Die Struktur ist von Marlon bestätigt (07.10.2026) und gebaut (`kern/src/struktur.rs`); ohne Projekt und Dreh kommt die Karte direkt in den Zielordner. **NAS-Ziel:** ein eigenes Footage-Dataset auf den Festplatten, z. B. `Footage/<Projekt>/<Datum>_<Dreh>/` (ohne Kunde). Projekte kommen aus der gemeinsamen Supabase und sind in allen drei Apps verwaltbar (Systemkarte 58963fa). Der genaue Pool-Pfad steht in der lokalen Einstellung.
+Die Struktur ist von Marlon bestätigt (07.10.2026) und gebaut (`kern/src/struktur.rs`); ohne Projekt und Dreh kommt die Karte direkt in den Zielordner. **NAS-Ziel:** ein eigenes Footage-Dataset auf den Festplatten, z. B. `Footage/<KURZNAME>/<Datum>_<Dreh>/` (ohne Kunde). Projekte kommen aus der gemeinsamen Supabase und sind in allen drei Apps verwaltbar (Systemkarte 58963fa). Der genaue Pool-Pfad steht in der lokalen Einstellung.
 
 ## 6. Zuordnung Clip ↔ Take
 

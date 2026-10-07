@@ -2,7 +2,7 @@
 //! Filmprojekt aus der gemeinsamen Supabase, Systemkarte 58963fa):
 //!
 //! ```text
-//! <Projekt>/<Datum>_<Dreh>/
+//! <KURZNAME>/<Datum>_<Dreh>/          Kurzname des Projekts, z. B. HAPPY_END
 //!   01_KAMERA/<Karte>/      Karte 1:1 + ascmhl/
 //!   02_PLATES/              Verweise auf Clips, Referenzfotos, HDRI (Phase 2)
 //!   03_TON/
@@ -48,9 +48,47 @@ pub fn ordnername(s: &str) -> String {
     }
 }
 
-/// Ordner des Drehs: `<basis>/<Projekt>/<Datum>_<Dreh>`.
+/// Kurzname eines Projekts für den Ordner: nur `A–Z`, `0–9` und `_` (Systemkarte 3e1050f), z. B.
+/// „Happy End“ → `HAPPY_END`, „Mövenpick“ → `MOEVENPICK`. Die verbindliche Regel kommt mit dem Paket
+/// `casebasel/stage-projekt`; solange das Projekt nur als Text vorliegt, bildet der Ingest ihn so.
+pub fn kurzname(projekt: &str) -> String {
+    let mut aus = String::new();
+    for c in projekt.trim().chars() {
+        let teil = match c {
+            'ä' | 'Ä' => "AE".to_string(),
+            'ö' | 'Ö' => "OE".to_string(),
+            'ü' | 'Ü' => "UE".to_string(),
+            'ß' => "SS".to_string(),
+            c if c.is_ascii_alphanumeric() => c.to_ascii_uppercase().to_string(),
+            c => match c {
+                'à' | 'á' | 'â' | 'À' | 'Á' | 'Â' => "A".into(),
+                'è' | 'é' | 'ê' | 'È' | 'É' | 'Ê' => "E".into(),
+                'ì' | 'í' | 'î' | 'Ì' | 'Í' | 'Î' => "I".into(),
+                'ò' | 'ó' | 'ô' | 'Ò' | 'Ó' | 'Ô' => "O".into(),
+                'ù' | 'ú' | 'û' | 'Ù' | 'Ú' | 'Û' => "U".into(),
+                'ç' | 'Ç' => "C".into(),
+                _ => "_".into(),
+            },
+        };
+        aus += &teil;
+    }
+    let mut kurz = String::new();
+    for c in aus.chars() {
+        if !(c == '_' && (kurz.is_empty() || kurz.ends_with('_'))) {
+            kurz.push(c);
+        }
+    }
+    let kurz = kurz.trim_end_matches('_').to_string();
+    if kurz.is_empty() {
+        "OHNE_PROJEKT".into()
+    } else {
+        kurz
+    }
+}
+
+/// Ordner des Drehs: `<basis>/<KURZNAME>/<Datum>_<Dreh>`.
 pub fn drehordner(basis: &Path, dreh: &Dreh) -> PathBuf {
-    basis.join(ordnername(&dreh.projekt)).join(format!("{}_{}", ordnername(&dreh.datum), ordnername(&dreh.name)))
+    basis.join(kurzname(&dreh.projekt)).join(format!("{}_{}", ordnername(&dreh.datum), ordnername(&dreh.name)))
 }
 
 /// Zielordner einer Karte im Dreh: `<Dreh>/01_KAMERA/<Karte>`.
@@ -103,12 +141,20 @@ mod tests {
     }
 
     #[test]
+    fn kurznamen() {
+        assert_eq!(kurzname("Happy End"), "HAPPY_END");
+        assert_eq!(kurzname("  Mövenpick – Spot 2 "), "MOEVENPICK_SPOT_2");
+        assert_eq!(kurzname("Café Größe"), "CAFE_GROESSE");
+        assert_eq!(kurzname("???"), "OHNE_PROJEKT");
+    }
+
+    #[test]
     fn struktur_und_bericht() {
         let d = Dreh { projekt: "Happy End".into(), datum: "2026-10-28".into(), name: "Rheinufer".into() };
         let z = kartenziel(Path::new("/nas/Footage"), &d, "A001R132");
-        assert_eq!(z, Path::new("/nas/Footage/Happy End/2026-10-28_Rheinufer/01_KAMERA/A001R132"));
-        assert_eq!(berichtordner(&z), Path::new("/nas/Footage/Happy End/2026-10-28_Rheinufer/04_BERICHTE"));
-        assert_eq!(metadatenordner(&z), Path::new("/nas/Footage/Happy End/2026-10-28_Rheinufer/05_METADATEN"));
+        assert_eq!(z, Path::new("/nas/Footage/HAPPY_END/2026-10-28_Rheinufer/01_KAMERA/A001R132"));
+        assert_eq!(berichtordner(&z), Path::new("/nas/Footage/HAPPY_END/2026-10-28_Rheinufer/04_BERICHTE"));
+        assert_eq!(metadatenordner(&z), Path::new("/nas/Footage/HAPPY_END/2026-10-28_Rheinufer/05_METADATEN"));
         // Ohne Struktur bleibt der Bericht neben dem Kartenordner.
         assert_eq!(berichtordner(Path::new("/ssd/A001R132")), Path::new("/ssd"));
     }

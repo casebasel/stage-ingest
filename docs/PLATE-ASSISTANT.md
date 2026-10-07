@@ -56,3 +56,5 @@ Gewünscht: Karte freigegeben (wann), Speicherort, `aus_clip` je Take, HDRI-Zust
 - Tabelle `projekt` in der gemeinsamen Supabase (bisher `supabase-plate-assistant`, künftig `supabase-stage`); Projekte sind in allen drei Apps anleg-, änder- und auswählbar.
 - Der Ingest **schreibt auf `projekt` nur über `aenderungen_anwenden`** mit einem eigenen Benutzer (legt Marlon an), nicht über `ingest_writer`. Rückmeldungen bleiben in den eigenen Tabellen des Ingest.
 - Schema und Formular kommen aus dem gemeinsamen Paket `casebasel/stage-projekt` (öffentlich, Stage pflegt den Inhalt).
+- Schema steht (Plate Assistant, Migration 0009/0010, Systemkarte 3e1050f; genau: plate-assistant `docs/ABGLEICH.md`). Ordner mit dem **Kurznamen** (`A–Z`, `0–9`, `_`, z. B. `HAPPY_END`).
+- **Zugang des Ingest:** eigener Benutzer mit `app_metadata.app = "ingest"` (legt Marlon an). Liest `dreh`, `plate`, `take`, `foto`, `projekt` und den Bucket `fotos`; schreibt über `aenderungen_anwenden` nur `projekt`. `ingest_meldung`, HDRI-Bucket und Jobs kommen später mit eigenen Migrationen.
