@@ -62,4 +62,19 @@ jobs:
       - name: Oberfläche bauen
         run: npm run build
       - name: App übersetzen
+        if: github.event_name != 'push'
         run: cargo check -p stage-ingest
+      # Auf main: fertige Installer zum Testen (ohne Update-Signatur; signierte Releases macht release.yml).
+      - name: Installer bauen
+        if: github.event_name == 'push'
+        shell: bash
+        run: npx tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}' --bundles ${{ matrix.os == 'windows-2025' && 'nsis' || 'dmg' }}
+      - name: Installer hochladen
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-ingest-${{ matrix.os == 'windows-2025' && 'windows' || 'mac' }}
+          path: |
+            target/release/bundle/dmg/*.dmg
+            target/release/bundle/nsis/*.exe
+          retention-days: 14
