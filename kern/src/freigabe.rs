@@ -28,6 +28,8 @@ pub struct Freigabe {
 pub struct Umfang {
     pub dateien: usize,
     pub ganze_karte: bool,
+    /// Dateien, in denen die Karte von ihrer eigenen ASC-MHL-Historie abweicht oder die dort fehlen.
+    pub historie_abweichungen: usize,
 }
 
 /// Beurteilt die Karte. `kennungen[i]` gehört zu `urteile[i]`.
@@ -43,9 +45,14 @@ pub fn beurteilen(urteile: &[Urteil], kennungen: &[Kennung], mindest_kopien: usi
     let kennung_unsicher = unbewiesene > 0;
     let schlechte = urteile.len() - gute.len();
     let genug = unabhaengige_kopien >= mindest_kopien.max(1);
-    let sicher = genug && umfang.dateien > 0 && umfang.ganze_karte;
+    let sicher = genug && umfang.dateien > 0 && umfang.ganze_karte && umfang.historie_abweichungen == 0;
     let grund = if umfang.dateien == 0 {
         "Keine Datei kopiert: falscher Ordner oder Karte nicht eingehängt".to_string()
+    } else if umfang.historie_abweichungen > 0 {
+        format!(
+            "Die Karte weicht in {} Datei(en) von ihrer eigenen ASC-MHL-Historie ab: Daten haben sich seit dem Versiegeln verändert",
+            umfang.historie_abweichungen
+        )
     } else if !umfang.ganze_karte {
         format!(
             "Nur ein Ordner der Karte gesichert ({unabhaengige_kopien} Kopien); alles andere auf der Karte ginge beim Formatieren verloren"
@@ -90,14 +97,15 @@ mod tests {
             kopierfehler: None,
         }
     }
-    const KARTE: Umfang = Umfang { dateien: 3, ganze_karte: true };
+    const KARTE: Umfang = Umfang { dateien: 3, ganze_karte: true, historie_abweichungen: 0 };
 
     #[test]
     fn leere_karte_oder_nur_ein_ordner_wird_nie_freigegeben() {
         let z = [urteil(true), urteil(true)];
         let k = [platte("A"), platte("B")];
-        assert!(!beurteilen(&z, &k, 2, Umfang { dateien: 0, ganze_karte: true }).sicher);
-        assert!(!beurteilen(&z, &k, 2, Umfang { dateien: 3, ganze_karte: false }).sicher);
+        assert!(!beurteilen(&z, &k, 2, Umfang { dateien: 0, ganze_karte: true, historie_abweichungen: 0 }).sicher);
+        assert!(!beurteilen(&z, &k, 2, Umfang { dateien: 3, ganze_karte: false, historie_abweichungen: 0 }).sicher);
+        assert!(!beurteilen(&z, &k, 2, Umfang { dateien: 3, ganze_karte: true, historie_abweichungen: 1 }).sicher);
     }
 
     fn platte(w: &str) -> Kennung {

@@ -87,27 +87,38 @@ pub fn zurueckpruefen(
                 urteil.geprueft += 1;
             }
             let erwartet: BTreeSet<&str> = kopie.dateien.iter().map(|d| d.pfad.as_str()).collect();
-            for pfad in zusaetzliche(&ziel.ordner, &erwartet) {
-                urteil.abweichungen.push(Abweichung::Zusaetzlich { pfad });
-            }
+            urteil.abweichungen.extend(zusaetzliche(&ziel.ordner, &erwartet));
         }
         urteile.push(urteil);
     }
     Ok(urteile)
 }
 
-/// Dateien im Ziel, die nicht von der Karte stammen (ohne die eigenen Ordner des Ingest).
-fn zusaetzliche(ordner: &Path, erwartet: &BTreeSet<&str>) -> Vec<String> {
-    walkdir::WalkDir::new(ordner)
+/// Dateien im Ziel, die nicht von der Karte stammen (ohne die eigenen Ordner des Ingest). Ein unlesbarer
+/// Ordner im Ziel ist selbst eine Abweichung: er könnte fremde Dateien verstecken.
+fn zusaetzliche(ordner: &Path, erwartet: &BTreeSet<&str>) -> Vec<Abweichung> {
+    let mut aus = Vec::new();
+    let gang = walkdir::WalkDir::new(ordner)
         .min_depth(1)
         .sort_by_file_name()
         .into_iter()
-        .filter_entry(|e| e.depth() != 1 || !EIGENE_ORDNER.contains(&e.file_name().to_string_lossy().as_ref()))
-        .filter_map(Result::ok)
-        .filter(|e| e.file_type().is_file())
-        .map(|e| relativ(ordner, e.path()))
-        .filter(|p| !erwartet.contains(p.as_str()) || p.ends_with(TEIL_ENDUNG))
-        .collect()
+        .filter_entry(|e| e.depth() != 1 || !EIGENE_ORDNER.contains(&e.file_name().to_string_lossy().as_ref()));
+    for e in gang {
+        match e {
+            Err(f) => aus.push(Abweichung::Unlesbar {
+                pfad: f.path().map(|p| relativ(ordner, p)).unwrap_or_default(),
+                fehler: f.to_string(),
+            }),
+            Ok(e) if e.file_type().is_dir() => {}
+            Ok(e) => {
+                let p = relativ(ordner, e.path());
+                if !erwartet.contains(p.as_str()) || p.ends_with(TEIL_ENDUNG) {
+                    aus.push(Abweichung::Zusaetzlich { pfad: p });
+                }
+            }
+        }
+    }
+    aus
 }
 
 /// Liest die Karte ein zweites Mal ohne Cache und vergleicht mit dem ersten Lesen. Erkennt einen

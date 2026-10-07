@@ -170,15 +170,23 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
         let _ = app.emit(FORTSCHRITT, Fortschritt::Kopieren { meldung });
     })
     .map_err(|e| e.to_string())?;
+    // Abbruch oder Fehler nach dem Kopieren: die Zielordner hat dieser Lauf neu angelegt (vorher leer oder
+    // nicht vorhanden); ungeprüft sind sie wertlos und würden den nächsten Versuch blockieren.
+    let wegraeumen = |e: String| {
+        for z in &auftrag.ziele {
+            let _ = std::fs::remove_dir_all(z);
+        }
+        e
+    };
     let mut urteile = pruefen::zurueckpruefen(&kopie, auftrag.mit_md5, abbruch, |ziel, pfad| {
         let _ = app.emit(FORTSCHRITT, Fortschritt::Pruefen { ziel, pfad: pfad.to_string() });
     })
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| wegraeumen(e.to_string()))?;
     if auftrag.zweimal_lesen {
         let anders = pruefen::quelle_nachlesen(&kopie, auftrag.mit_md5, abbruch, |pfad| {
             let _ = app.emit(FORTSCHRITT, Fortschritt::Nachlesen { pfad: pfad.to_string() });
         })
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| wegraeumen(e.to_string()))?;
         if !anders.is_empty() {
             // Dann sind alle Kopien fraglich, auch wenn sie unter sich übereinstimmen.
             let text = format!(
@@ -212,11 +220,19 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
             }
         })
         .collect();
+    // Bringt die Karte eine eigene ASC-MHL-Historie mit, muss sie dazu passen. Unlesbar zählt als Abweichung.
+    let historie_abweichungen = mhl::historie_abgleichen(&kopie).map(|a| a.len()).unwrap_or(1);
     let umfang = freigabe::Umfang {
         dateien: kopie.dateien.len(),
         ganze_karte: geraet::ist_volume_wurzel(&auftrag.quelle).unwrap_or(false),
+        historie_abweichungen,
     };
-    let freigabe = freigabe::beurteilen(&urteile, &kennungen, auftrag.mindest_kopien, umfang);
+    let mut freigabe = freigabe::beurteilen(&urteile, &kennungen, auftrag.mindest_kopien, umfang);
+    if !kopie.ausgelassen.is_empty() {
+        freigabe
+            .hinweise
+            .push(format!("Nicht kopiert (Verknüpfung oder Sonderdatei): {}", kopie.ausgelassen.join(", ")));
+    }
 
     // Bericht auf jedes Ziel, auch auf fehlerhafte (dort belegt er den Fehler), soweit schreibbar.
     let version = app.package_info().version.to_string();

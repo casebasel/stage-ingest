@@ -73,6 +73,13 @@ pub struct Angaben {
 
 /// Schreibt die nächste Generation in `<ziel>/ascmhl/`. Gibt den Pfad der neuen `.mhl` zurück.
 pub fn schreiben(ziel: &Path, kopie: &Kopie, angaben: &Angaben) -> io::Result<PathBuf> {
+    // XML 1.0 kann Steuerzeichen nicht darstellen, auch nicht als Zeichenreferenz.
+    if let Some(d) = kopie.dateien.iter().find(|d| d.pfad.chars().any(|c| c.is_control())) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Dateiname mit Steuerzeichen ist im ASC MHL nicht darstellbar: {:?}", d.pfad),
+        ));
+    }
     let ordner = ziel.join(ORDNER);
     std::fs::create_dir_all(&ordner)?;
     let historie = historie_lesen(&ordner)?;
@@ -254,6 +261,9 @@ pub fn nachpruefen(
             Verfahren::Md5 => e.1 = Some(h),
         }
     }
+    if soll.is_empty() {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "ASC-MHL-Historie enthält keine Datei"));
+    }
     let vorhanden: BTreeSet<String> = walkdir::WalkDir::new(ordner)
         .min_depth(1)
         .into_iter()
@@ -294,6 +304,32 @@ pub fn nachpruefen(
         abweichungen.push(Abweichung::Zusaetzlich { pfad: pfad.clone() });
     }
     Ok(Nachpruefung { ordner: ordner.into(), generation, geprueft, abweichungen })
+}
+
+/// Vergleicht die Karte mit ihrer eigenen, mitgebrachten ASC-MHL-Historie (falls vorhanden): Dateien, die
+/// sich seit dem Versiegeln verändert haben oder fehlen. Leer, wenn die Karte keine Historie hat.
+pub fn historie_abgleichen(kopie: &Kopie) -> io::Result<Vec<crate::pruefen::Abweichung>> {
+    use crate::pruefen::Abweichung;
+    let historie = historie_lesen(&kopie.quelle.join(ORDNER))?;
+    let ist: HashMap<&str, &crate::kopie::Datei> = kopie.dateien.iter().map(|d| (d.pfad.as_str(), d)).collect();
+    let mut aus = Vec::new();
+    let mut gesehen = BTreeSet::new();
+    for ((pfad, v), alt) in &historie.hashes {
+        let Some(d) = ist.get(pfad.as_str()) else {
+            if gesehen.insert(pfad.clone()) {
+                aus.push(Abweichung::Fehlt { pfad: pfad.clone() });
+            }
+            continue;
+        };
+        let neu = match v {
+            Verfahren::Xxh128 => Some(d.pruefsumme.xxh128_hex()),
+            Verfahren::Md5 => d.pruefsumme.md5_hex(),
+        };
+        if neu.as_ref().is_some_and(|n| n != alt) && gesehen.insert(pfad.clone()) {
+            aus.push(Abweichung::Pruefsumme { pfad: pfad.clone(), soll: alt.clone(), ist: neu.unwrap_or_default() });
+        }
+    }
+    Ok(aus)
 }
 
 /// Was eine mitgebrachte Historie schon enthält.
@@ -463,6 +499,7 @@ mod tests {
                 datei("Sidecar.txt", b"abc"),
             ],
             ordner: vec!["Clips".into(), "LEER".into()],
+            ausgelassen: vec![],
             ziele: vec![],
             beginn: Utc::now(),
             ende: Utc::now(),

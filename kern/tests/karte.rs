@@ -60,7 +60,15 @@ fn karte_an_zwei_ziele_kopieren_und_freigeben() {
 
     let urteile = zurueckpruefen(&kopie, true, &AtomicBool::new(false), |_, _| {}).unwrap();
     assert!(urteile.iter().all(|u| u.gut()), "{urteile:?}");
-    assert!(beurteilen(&urteile, &platten(2), 2, Umfang { dateien: kopie.dateien.len(), ganze_karte: true }).sicher);
+    assert!(
+        beurteilen(
+            &urteile,
+            &platten(2),
+            2,
+            Umfang { dateien: kopie.dateien.len(), ganze_karte: true, historie_abweichungen: 0 }
+        )
+        .sicher
+    );
 }
 
 #[test]
@@ -87,7 +95,15 @@ fn verfaelschtes_byte_und_fremde_datei_werden_gefunden() {
         .any(|a| matches!(a, Abweichung::Pruefsumme { pfad, .. } if pfad.ends_with("C001_261007_R132.mov"))));
     assert!(b.iter().any(|a| matches!(a, Abweichung::Zusaetzlich { pfad } if pfad == "fremd.txt")));
     assert_eq!(b.len(), 2, "ascmhl/ gehört dem Ingest und zählt nicht: {b:?}");
-    assert!(!beurteilen(&urteile, &platten(2), 2, Umfang { dateien: kopie.dateien.len(), ganze_karte: true }).sicher);
+    assert!(
+        !beurteilen(
+            &urteile,
+            &platten(2),
+            2,
+            Umfang { dateien: kopie.dateien.len(), ganze_karte: true, historie_abweichungen: 0 }
+        )
+        .sicher
+    );
 }
 
 #[test]

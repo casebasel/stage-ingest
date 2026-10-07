@@ -40,8 +40,14 @@ pub fn vorpruefen(auftrag: &Auftrag, bytes: u64) -> Vec<Befund> {
     if auftrag.ziele.is_empty() {
         befunde.push(fehler("Kein Ziel gewählt".into()));
     }
-    if bytes == 0 && crate::kopie::groesse_und_zahl(&quelle).map(|(_, n)| n == 0).unwrap_or(true) {
-        befunde.push(fehler("Keine Datei auf der Karte: falscher Ordner oder Karte nicht fertig eingehängt".into()));
+    match crate::kopie::ueberblick(&quelle) {
+        Ok(u) if u.dateien == 0 => {
+            befunde.push(fehler("Keine Datei auf der Karte: falscher Ordner oder Karte nicht fertig eingehängt".into()))
+        }
+        Ok(u) if !u.ausgelassen.is_empty() => befunde
+            .push(warnung(format!("Wird nicht kopiert (Verknüpfung oder Sonderdatei): {}", u.ausgelassen.join(", ")))),
+        Ok(_) => {}
+        Err(e) => befunde.push(fehler(format!("Karte nicht vollständig lesbar: {e}"))),
     }
     if !geraet::ist_volume_wurzel(&quelle).unwrap_or(false) {
         befunde.push(warnung(
@@ -54,6 +60,13 @@ pub fn vorpruefen(auftrag: &Auftrag, bytes: u64) -> Vec<Befund> {
     let karte_geraet = geraet::kennung(&quelle).ok().filter(|k| k.sicher).map(|k| k.wert);
 
     let mut kennungen: HashMap<String, Vec<&Path>> = HashMap::new();
+    // Mehrere Ziele auf einem Volume brauchen zusammen Platz.
+    let mut je_volume: HashMap<String, u64> = HashMap::new();
+    for ziel in &auftrag.ziele {
+        if let Ok(v) = geraet::volume_kennung(ziel.parent().unwrap_or(ziel)) {
+            *je_volume.entry(v).or_default() += bytes;
+        }
+    }
     for ziel in &auftrag.ziele {
         // Der Kartenordner selbst entsteht erst beim Kopieren; geprüft wird der Ordner darüber.
         let ort = ziel.parent().unwrap_or(ziel);
@@ -70,12 +83,13 @@ pub fn vorpruefen(auftrag: &Auftrag, bytes: u64) -> Vec<Befund> {
         if ziel.exists() && std::fs::read_dir(ziel).map(|mut d| d.next().is_some()).unwrap_or(true) {
             befunde.push(fehler(format!("Zielordner existiert schon und ist nicht leer: {}", ziel.display())));
         }
+        let noetig = geraet::volume_kennung(&ort_echt).ok().and_then(|v| je_volume.get(&v).copied()).unwrap_or(bytes);
         match frei(&ort_echt) {
-            Some(f) if f < bytes => befunde.push(fehler(format!(
+            Some(f) if f < noetig => befunde.push(fehler(format!(
                 "Zu wenig Platz auf {}: {} frei, {} nötig",
                 ort.display(),
                 gb(f),
-                gb(bytes)
+                gb(noetig)
             ))),
             _ => {}
         }

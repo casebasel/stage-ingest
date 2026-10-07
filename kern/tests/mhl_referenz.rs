@@ -119,3 +119,20 @@ fn nachpruefen_einer_fremden_kopie_mit_referenz_mhl() {
     let n = mhl::nachpruefen(&ordner, &AtomicBool::new(false), |_| {}).unwrap();
     assert!(n.gut() && n.geprueft == 3, "{n:?}");
 }
+
+#[test]
+fn karte_die_von_ihrer_eigenen_historie_abweicht_wird_erkannt() {
+    let Some(r) = referenz() else { return };
+    let ascmhl = Path::new(&r).with_file_name(if cfg!(windows) { "ascmhl.exe" } else { "ascmhl" });
+    let t = tempfile::tempdir().unwrap();
+    let karte_pfad = t.path().join("A001R132");
+    karte(&karte_pfad);
+    assert!(Command::new(&ascmhl).args(["create", "-h", "xxh128"]).arg(&karte_pfad).status().unwrap().success());
+    // Nach dem Versiegeln verändert sich eine Datei auf der Karte, eine andere verschwindet.
+    fs::write(karte_pfad.join("A001R132.ale"), b"Heading anders\n").unwrap();
+    fs::remove_file(karte_pfad.join("Clips/Ä Umlaut & Sonderzeichen.txt")).unwrap();
+    let a = Auftrag { quelle: karte_pfad, ziele: vec![t.path().join("ziel/A001R132")], mit_md5: false };
+    let kopie = kopieren(&a, &AtomicBool::new(false), |_| {}).unwrap();
+    let abw = mhl::historie_abgleichen(&kopie).unwrap();
+    assert_eq!(abw.len(), 2, "{abw:?}");
+}

@@ -55,6 +55,10 @@ pub struct Kopie {
     pub dateien: Vec<Datei>,
     /// Leere Ordner und Ordner der Karte, relativ, mit `/`.
     pub ordner: Vec<String>,
+    /// Nicht kopiert, weil weder Datei noch Ordner (Verknüpfungen, Sonderdateien). Auf Kamerakarten nicht zu
+    /// erwarten; steht im Ergebnis, damit nichts still verloren geht.
+    #[serde(default)]
+    pub ausgelassen: Vec<String>,
     pub ziele: Vec<Ziel>,
     pub beginn: DateTime<Utc>,
     pub ende: DateTime<Utc>,
@@ -135,7 +139,7 @@ pub fn kopieren(auftrag: &Auftrag, abbruch: &AtomicBool, mut melden: impl FnMut(
         ziel_vorbereiten(ziel)?;
     }
     let beginn = Utc::now();
-    let (ordner, eintraege) = inhalt(&auftrag.quelle)?;
+    let (ordner, eintraege, ausgelassen) = inhalt(&auftrag.quelle)?;
     let bytes_gesamt = eintraege.iter().map(|(_, g)| g).sum();
     melden(Meldung::Begonnen { dateien: eintraege.len(), bytes: bytes_gesamt });
 
@@ -286,18 +290,25 @@ pub fn kopieren(auftrag: &Auftrag, abbruch: &AtomicBool, mut melden: impl FnMut(
         .zip(&zustaende)
         .map(|(o, z)| Ziel { ordner: o.clone(), fehler: z.lock().expect("Zustand").clone() })
         .collect();
-    Ok(Kopie { quelle: auftrag.quelle.clone(), dateien, ordner, ziele, beginn, ende: Utc::now() })
+    Ok(Kopie { quelle: auftrag.quelle.clone(), dateien, ordner, ausgelassen, ziele, beginn, ende: Utc::now() })
 }
 
 /// Grösse aller Dateien der Quelle, die kopiert würden (für die Vorab-Prüfung).
 pub fn groesse(quelle: &Path) -> Ergebnis<u64> {
-    Ok(groesse_und_zahl(quelle)?.0)
+    Ok(ueberblick(quelle)?.bytes)
 }
 
-/// Grösse und Zahl der Dateien, die kopiert würden.
-pub fn groesse_und_zahl(quelle: &Path) -> Ergebnis<(u64, usize)> {
-    let (_, dateien) = inhalt(quelle)?;
-    Ok((dateien.iter().map(|(_, g)| g).sum(), dateien.len()))
+/// Was beim Kopieren der Quelle herauskäme, ohne zu kopieren.
+#[derive(Debug, Clone)]
+pub struct Ueberblick {
+    pub bytes: u64,
+    pub dateien: usize,
+    pub ausgelassen: Vec<String>,
+}
+
+pub fn ueberblick(quelle: &Path) -> Ergebnis<Ueberblick> {
+    let (_, dateien, ausgelassen) = inhalt(quelle)?;
+    Ok(Ueberblick { bytes: dateien.iter().map(|(_, g)| g).sum(), dateien: dateien.len(), ausgelassen })
 }
 
 /// Legt den Zielordner an. Ein bestehender, nicht leerer Ordner wird nie überschrieben.
@@ -314,13 +325,14 @@ fn ziel_vorbereiten(ziel: &Path) -> Ergebnis<()> {
     std::fs::create_dir_all(ziel).map_err(|e| Fehler::ZielSchreiben { pfad: ziel.into(), quelle: e })
 }
 
-/// Ordner der Quelle und Dateien mit Grösse, relativ.
-type Inhalt = (Vec<String>, Vec<(String, u64)>);
+/// Ordner der Quelle, Dateien mit Grösse und Ausgelassenes, relativ.
+type Inhalt = (Vec<String>, Vec<(String, u64)>, Vec<String>);
 
 /// Alle Ordner und Dateien der Quelle, sortiert, ohne das, was das Betriebssystem anlegt.
 fn inhalt(quelle: &Path) -> Ergebnis<Inhalt> {
     let mut ordner = Vec::new();
     let mut dateien = Vec::new();
+    let mut ausgelassen = Vec::new();
     let gang =
         walkdir::WalkDir::new(quelle).min_depth(1).follow_links(false).sort_by_file_name().into_iter().filter_entry(
             |e| {
@@ -342,10 +354,12 @@ fn inhalt(quelle: &Path) -> Ergebnis<Inhalt> {
                 .map_err(|e| Fehler::QuelleLesen { pfad: eintrag.path().into(), quelle: e.into() })?
                 .len();
             dateien.push((rel, groesse));
+        } else {
+            // Verknüpfungen und Sonderdateien werden nicht verfolgt, aber gemeldet.
+            ausgelassen.push(rel);
         }
-        // Verknüpfungen gibt es auf Kamerakarten nicht; sie werden bewusst nicht verfolgt.
     }
-    Ok((ordner, dateien))
+    Ok((ordner, dateien, ausgelassen))
 }
 
 pub(crate) fn relativ(wurzel: &Path, pfad: &Path) -> String {
