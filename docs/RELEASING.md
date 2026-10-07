@@ -6,7 +6,7 @@ Wie Syncomat: GitHub Actions baut die App für Mac (Apple Silicon) und Windows, 
 
 Der öffentliche Schlüssel steht in `src-tauri/tauri.conf.json` (`plugins.updater.pubkey`). Der private Schlüssel liegt **nie** im Repo.
 
-1. Den privaten Schlüssel als Repository-Secret `TAURI_SIGNING_PRIVATE_KEY` anlegen (Repo → Settings → Secrets and variables → Actions). Er hat kein Passwort: `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` leer anlegen.
+1. Den privaten Schlüssel als Repository-Secret `TAURI_SIGNING_PRIVATE_KEY` anlegen (Repo → Settings → Secrets and variables → Actions). Er hat kein Passwort; das leere Passwort setzt `release.yml` selbst (ein Secret mit einem Leerzeichen bricht das Signieren).
 2. Den privaten Schlüssel sicher aufbewahren (Passwortmanager, verschlüsselt auf dem NAS). Geht er verloren, können bestehende Installationen keine Updates mehr bekommen und müssen einmal von Hand neu installiert werden.
 
 ## Release auslösen
