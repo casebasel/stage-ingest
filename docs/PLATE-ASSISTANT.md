@@ -66,4 +66,4 @@ Gewünscht: Karte freigegeben (wann), Speicherort, `aus_clip` je Take, HDRI-Zust
 - `hdri_frame`: position, yaw/pitch/roll_grad (nur Startwert, ±1–2°), **lage_quaternion [w,x,y,z]**: Kamera → Welt, v_welt = q · v_kamera; Kamera x = rechts, y = oben, Blick = −z; Welt x = rechts von Yaw 0, y = Yaw 0 waagrecht, z = oben. belichtung_s, iso, ev, zeit, pfad, geloescht (wiederholte Position).
 - **Gruppieren nach Frames** (hdri_id, position, nicht gelöscht), nicht positionen × Stufen rechnen.
 - Storage: Bucket `hdri`, `<hdri_id>/<frame_id>.dng|.heic`, `vorschau.jpg`, `metadata.json` (`format_version: 1`). DNG unverändert mit Metadaten und OpcodeLists. TUS-Upload.
-- Löschrichtlinie für den Ingest-Benutzer: eigene Migration 0014, getrennt freizugeben (Marlon).
+- Löschen: Marlon hat entschieden (Systemkarte 3ee75ff), dass der Ingest die Rohdaten im Bucket `hdri` löscht, **erst nach geprüfter Ablage und Bericht ok**. Das Recht kommt als eigene Migration des Plate Assistant.
