@@ -74,3 +74,4 @@ Gewünscht: Karte freigegeben (wann), Speicherort, `aus_clip` je Take, HDRI-Zust
 - Stage Ingest meldet sich mit dem **persönlichen Konto** an wie das iPhone; der Technik-Benutzer `ingest` entfällt.
 - **HDRI löschen und `ingest_meldung` schreiben** darf nur ein Konto mit `app_metadata.ingest = true` (setzt Marlon pro Person, der Server prüft). Ohne das Kennzeichen: lesen und Projekte anlegen; die App zeigt „Löschen nicht freigegeben“.
 - Adresse und Anon-Key setzt der Release-Build aus den Repository-Variablen `SUPABASE_ADRESSE` und `SUPABASE_ANON_KEY` ein (`docs/RELEASING.md`).
+- Persönliches Konto = volle Rechte eines iPhones; der Ingest hält sich an BESITZ.md (schreibt nur `projekt`, später eigene Meldungen) und meldet sich als Gerät „Stage Ingest (Mac|Windows)“. Passwort vergessen: über die iPhone-App. Löschen mit `app_metadata.ingest = true` (JSON-Wert) erst ab Migration 0015; gelöschte Dateien in der Antwort einzeln prüfen.

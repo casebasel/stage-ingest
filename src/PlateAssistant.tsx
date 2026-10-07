@@ -165,6 +165,7 @@ export function PlateAssistant(p: {
               </button>
             )}
           </div>
+          <span className="k-leise k-klein">Dasselbe Konto wie im Plate Assistant. Passwort vergessen: in der iPhone-App zurücksetzen.</span>
         </>
       )}
       {konto && (

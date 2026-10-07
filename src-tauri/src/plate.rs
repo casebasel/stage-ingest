@@ -217,7 +217,8 @@ impl Plate {
         let id = format!("projekt-{}", kurzname.to_lowercase());
         let jetzt = chrono::Utc::now();
         let body = json!({
-            "p_geraet": "Stage Ingest",
+            // Eigener Gerätename, damit der Verlauf im Plate Assistant lesbar bleibt.
+            "p_geraet": if cfg!(target_os = "macos") { "Stage Ingest (Mac)" } else if cfg!(windows) { "Stage Ingest (Windows)" } else { "Stage Ingest" },
             "p_aenderungen": [{
                 "id": ulid_aehnlich(),
                 "tabelle": "projekt",
