@@ -62,13 +62,55 @@ fn netz(server: &str, quelle: &str) -> Kennung {
     let server = server.trim_start_matches('/').trim_start_matches('\\');
     let server = server.rsplit('@').next().unwrap_or(server); // Benutzer weglassen
     let server = server.split(['/', '\\']).next().unwrap_or(server).to_lowercase();
+    let server = server.split(':').next().unwrap_or(&server).to_owned(); // NFS „host:/pfad“
+                                                                         // Derselbe NAS unter zwei Namen (Name, IP, Bonjour) darf nicht als zwei Geräte zählen: nach IP vergleichen.
+    use std::net::ToSocketAddrs;
+    let ip = (server.as_str(), 445).to_socket_addrs().ok().and_then(|mut a| a.next()).map(|a| a.ip());
+    // Eine Freigabe auf den eigenen Rechner ist kein eigenes Gerät.
+    let lokal = ip.is_some_and(|ip| ip.is_loopback()) || server == "localhost";
     Kennung {
-        wert: format!("netz:{server}"),
-        sicher: true,
+        wert: format!("netz:{}", ip.map(|i| i.to_string()).unwrap_or(server.clone())),
+        sicher: !lokal,
         art: Art::Netz,
         seriennummer: None,
         beschreibung: format!("Netzlaufwerk {quelle}"),
     }
+}
+
+/// Ist `pfad` die Wurzel eines Volumes (die ganze Karte) und nicht nur ein Ordner darauf?
+pub fn ist_volume_wurzel(pfad: &Path) -> std::io::Result<bool> {
+    let p = std::fs::canonicalize(pfad)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let Some(eltern) = p.parent() else { return Ok(true) };
+        Ok(std::fs::metadata(&p)?.dev() != std::fs::metadata(eltern)?.dev())
+    }
+    #[cfg(windows)]
+    {
+        Ok(plattform::volume_wurzel(&p).is_some_and(|w| {
+            w.trim_end_matches('\\')
+                .eq_ignore_ascii_case(p.to_string_lossy().trim_start_matches(r"\\?\").trim_end_matches('\\'))
+        }))
+    }
+}
+
+/// Name der Karte für den Zielordner: Ordnername, bei einer Windows-Laufwerkswurzel der Volume-Name.
+pub fn kartenname(pfad: &Path) -> String {
+    let name = pfad.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    if !name.is_empty() && !name.contains(':') {
+        return name;
+    }
+    #[cfg(windows)]
+    if let Some(n) = plattform::volume_name(pfad) {
+        return n;
+    }
+    "Karte".into()
+}
+
+/// Kennung des Volumes, auf dem `pfad` liegt (zum Vergleich mit der Karte).
+pub fn volume_kennung(pfad: &Path) -> std::io::Result<String> {
+    Ok(volume(pfad, "")?.wert)
 }
 
 #[cfg(target_os = "macos")]
@@ -168,9 +210,14 @@ mod plattform {
             speicher.unwrap_or_else(|| v.get("DeviceIdentifier").and_then(|s| s.as_string()).unwrap_or("").to_owned());
         let p = info(&teil)?;
         let platte = p.get("ParentWholeDisk").and_then(|s| s.as_string())?.to_owned();
-        let modell = info(&platte)
-            .and_then(|d| d.get("MediaName").and_then(|s| s.as_string()).map(str::to_owned))
-            .unwrap_or_default();
+        let ganz = info(&platte)?;
+        // Disk-Images (DMG, Sparsebundle) liegen auf einer anderen Platte: nie als eigenes Gerät zählen.
+        let virtuell = ganz.get("VirtualOrPhysical").and_then(|s| s.as_string()) == Some("Virtual")
+            || ganz.get("BusProtocol").and_then(|s| s.as_string()) == Some("Disk Image");
+        if virtuell {
+            return None;
+        }
+        let modell = ganz.get("MediaName").and_then(|s| s.as_string()).unwrap_or_default().to_owned();
         Some((platte, modell))
     }
 }
@@ -241,6 +288,38 @@ mod plattform {
         (ok != 0).then_some(n as usize)
     }
 
+    /// Wurzel des Volumes (z. B. `E:\`) zu einem Pfad.
+    pub fn volume_wurzel(pfad: &Path) -> Option<String> {
+        let mut wurzel = [0u16; 261];
+        let p = breit(pfad.as_os_str());
+        // SAFETY: Puffer mit angegebener Länge.
+        (unsafe { GetVolumePathNameW(p.as_ptr(), wurzel.as_mut_ptr(), wurzel.len() as u32) } != 0)
+            .then(|| aus_breit(&wurzel).trim_start_matches(r"\\?\").to_owned())
+    }
+
+    /// Volume-Name (Bezeichnung) einer Laufwerkswurzel, z. B. „A001R132“.
+    pub fn volume_name(pfad: &Path) -> Option<String> {
+        use windows_sys::Win32::Storage::FileSystem::GetVolumeInformationW;
+        let wurzel = volume_wurzel(&std::fs::canonicalize(pfad).ok()?)?;
+        let w = breit(std::ffi::OsStr::new(&wurzel));
+        let mut name = [0u16; 261];
+        // SAFETY: Puffer mit angegebener Länge, übrige Ausgaben nicht gebraucht.
+        let ok = unsafe {
+            GetVolumeInformationW(
+                w.as_ptr(),
+                name.as_mut_ptr(),
+                name.len() as u32,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        let n = aus_breit(&name);
+        (ok != 0 && !n.trim().is_empty()).then_some(n)
+    }
+
     pub fn kennung(pfad: &Path) -> std::io::Result<Kennung> {
         let voll = std::fs::canonicalize(pfad)?;
         let text = voll.to_string_lossy().trim_start_matches(r"\\?\").to_owned();
@@ -278,7 +357,7 @@ mod plattform {
         }
         let platte = u32::from_le_bytes(nummer[4..8].try_into().expect("4 Bytes"));
 
-        let (seriennummer, modell) = oeffnen(&format!(r"\\.\PhysicalDrive{platte}"))
+        let (seriennummer, modell, bus) = oeffnen(&format!(r"\\.\PhysicalDrive{platte}"))
             .and_then(|g| {
                 // STORAGE_PROPERTY_QUERY { PropertyId = StorageDeviceProperty (0), QueryType = Standard (0) }
                 let anfrage = [0u8; 12];
@@ -293,15 +372,18 @@ mod plattform {
                     let s = String::from_utf8_lossy(&aus[o..ende]).trim().to_owned();
                     (!s.is_empty()).then_some(s)
                 };
-                // STORAGE_DEVICE_DESCRIPTOR: VendorIdOffset 12, ProductIdOffset 16, SerialNumberOffset 24
+                // STORAGE_DEVICE_DESCRIPTOR: VendorIdOffset 12, ProductIdOffset 16, SerialNumberOffset 24, BusType 28
                 let modell = [feld(12), feld(16)].into_iter().flatten().collect::<Vec<_>>().join(" ");
-                Some((feld(24), modell))
+                let bus = u32::from_le_bytes(aus.get(28..32)?.try_into().ok()?);
+                Some((feld(24), modell, bus))
             })
-            .unwrap_or((None, String::new()));
+            .unwrap_or((None, String::new(), 0));
+        // BusTypeVirtual (14), BusTypeFileBackedVirtual (15): VHD/VHDX liegen auf einer anderen Platte.
+        let virtuell = bus == 14 || bus == 15;
 
         Ok(Kennung {
             wert: format!("platte:{platte}"),
-            sicher: true,
+            sicher: !virtuell,
             art: Art::Platte,
             seriennummer,
             beschreibung: modell,

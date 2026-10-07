@@ -212,7 +212,11 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
             }
         })
         .collect();
-    let freigabe = freigabe::beurteilen(&urteile, &kennungen, auftrag.mindest_kopien);
+    let umfang = freigabe::Umfang {
+        dateien: kopie.dateien.len(),
+        ganze_karte: geraet::ist_volume_wurzel(&auftrag.quelle).unwrap_or(false),
+    };
+    let freigabe = freigabe::beurteilen(&urteile, &kennungen, auftrag.mindest_kopien, umfang);
 
     // Bericht auf jedes Ziel, auch auf fehlerhafte (dort belegt er den Fehler), soweit schreibbar.
     let version = app.package_info().version.to_string();
@@ -257,6 +261,12 @@ async fn ziel_nachpruefen(
     ergebnis
 }
 
+/// Name des Kartenordners auf den Zielen (bei einer Windows-Laufwerkswurzel der Volume-Name).
+#[tauri::command]
+fn kartenname(quelle: PathBuf) -> String {
+    geraet::kartenname(&quelle)
+}
+
 /// Bricht auf ausdrücklichen Wunsch ab. Nie automatisch, auch nicht für ein Update.
 #[tauri::command]
 fn abbrechen(laufend: State<'_, Laufend>) {
@@ -288,10 +298,20 @@ pub fn run() {
             vorab_pruefen,
             karte_einlesen,
             ziel_nachpruefen,
+            kartenname,
             abbrechen,
             laeuft,
             verlauf
         ])
-        .run(tauri::generate_context!())
-        .expect("Stage Ingest konnte nicht starten");
+        .build(tauri::generate_context!())
+        .expect("Stage Ingest konnte nicht starten")
+        .run(|app, ereignis| {
+            // Auch Cmd+Q bzw. Beenden aus dem Menü nicht während eines Kopiervorgangs.
+            if let tauri::RunEvent::ExitRequested { api, .. } = ereignis {
+                if app.state::<Laufend>().aktiv.load(Ordering::SeqCst) {
+                    api.prevent_exit();
+                    let _ = app.emit("ingest://schliessen-gesperrt", ());
+                }
+            }
+        });
 }

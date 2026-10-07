@@ -216,7 +216,13 @@ pub fn kopieren(auftrag: &Auftrag, abbruch: &AtomicBool, mut melden: impl FnMut(
 
 /// Grösse aller Dateien der Quelle, die kopiert würden (für die Vorab-Prüfung).
 pub fn groesse(quelle: &Path) -> Ergebnis<u64> {
-    Ok(inhalt(quelle)?.1.iter().map(|(_, g)| g).sum())
+    Ok(groesse_und_zahl(quelle)?.0)
+}
+
+/// Grösse und Zahl der Dateien, die kopiert würden.
+pub fn groesse_und_zahl(quelle: &Path) -> Ergebnis<(u64, usize)> {
+    let (_, dateien) = inhalt(quelle)?;
+    Ok((dateien.iter().map(|(_, g)| g).sum(), dateien.len()))
 }
 
 /// Legt den Zielordner an. Ein bestehender, nicht leerer Ordner wird nie überschrieben.

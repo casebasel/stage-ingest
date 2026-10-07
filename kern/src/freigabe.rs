@@ -23,23 +23,41 @@ pub struct Freigabe {
     pub hinweise: Vec<String>,
 }
 
+/// Was kopiert wurde: Zahl der Dateien und ob es die ganze Karte war (Wurzel des Volumes).
+#[derive(Debug, Clone, Copy)]
+pub struct Umfang {
+    pub dateien: usize,
+    pub ganze_karte: bool,
+}
+
 /// Beurteilt die Karte. `kennungen[i]` gehört zu `urteile[i]`.
-pub fn beurteilen(urteile: &[Urteil], kennungen: &[Kennung], mindest_kopien: usize) -> Freigabe {
+///
+/// Gezählt werden nur gute Ziele auf **bewiesen** verschiedenen Geräten. Ein Ziel, dessen Gerät nicht
+/// bestimmbar ist, zählt nie zur Mindestzahl: es könnte auf derselben Platte liegen wie ein anderes.
+pub fn beurteilen(urteile: &[Urteil], kennungen: &[Kennung], mindest_kopien: usize, umfang: Umfang) -> Freigabe {
     assert_eq!(urteile.len(), kennungen.len(), "eine Kennung pro Ziel");
     let gute: Vec<&Kennung> = urteile.iter().zip(kennungen).filter(|(u, _)| u.gut()).map(|(_, k)| k).collect();
-    // Unbewiesene Ziele zählen zusammen höchstens als eins (Grundsatz in geraet.rs).
-    let platten: BTreeSet<&str> = gute.iter().map(|k| if k.sicher { k.wert.as_str() } else { "unbewiesen" }).collect();
+    let platten: BTreeSet<&str> = gute.iter().filter(|k| k.sicher).map(|k| k.wert.as_str()).collect();
     let unabhaengige_kopien = platten.len();
-    let kennung_unsicher = gute.iter().any(|k| !k.sicher);
+    let unbewiesene = gute.iter().filter(|k| !k.sicher).count();
+    let kennung_unsicher = unbewiesene > 0;
     let schlechte = urteile.len() - gute.len();
-    let sicher = unabhaengige_kopien >= mindest_kopien.max(1);
-    let grund = if sicher {
-        format!("{unabhaengige_kopien} unabhängige Kopien geprüft")
-    } else if gute.len() > unabhaengige_kopien {
+    let genug = unabhaengige_kopien >= mindest_kopien.max(1);
+    let sicher = genug && umfang.dateien > 0 && umfang.ganze_karte;
+    let grund = if umfang.dateien == 0 {
+        "Keine Datei kopiert: falscher Ordner oder Karte nicht eingehängt".to_string()
+    } else if !umfang.ganze_karte {
         format!(
-            "nur {unabhaengige_kopien} von {mindest_kopien} unabhängigen Kopien: {} Ziele liegen auf derselben Platte",
-            gute.len()
+            "Nur ein Ordner der Karte gesichert ({unabhaengige_kopien} Kopien); alles andere auf der Karte ginge beim Formatieren verloren"
         )
+    } else if sicher {
+        format!("{unabhaengige_kopien} unabhängige Kopien geprüft")
+    } else if gute.len() - unbewiesene > unabhaengige_kopien {
+        format!(
+            "nur {unabhaengige_kopien} von {mindest_kopien} unabhängigen Kopien: mehrere Ziele liegen auf derselben Platte"
+        )
+    } else if unbewiesene > 0 {
+        format!("nur {unabhaengige_kopien} von {mindest_kopien} Kopien bewiesen: bei {unbewiesene} Ziel(en) ist die Platte nicht bestimmbar")
     } else if schlechte > 0 {
         format!("nur {unabhaengige_kopien} von {mindest_kopien} Kopien geprüft, {schlechte} Ziel(e) fehlerhaft")
     } else {
@@ -53,7 +71,7 @@ pub fn beurteilen(urteile: &[Urteil], kennungen: &[Kennung], mindest_kopien: usi
     }
     if kennung_unsicher {
         hinweise.push(
-            "Mindestens ein Ziel ist nur über das Volume erkannt; solche Ziele zählen zusammen als eine Kopie.".into(),
+            "Bei mindestens einem Ziel ist die Platte nicht bestimmbar; es zählt nicht als unabhängige Kopie.".into(),
         );
     }
     Freigabe { sicher, unabhaengige_kopien, mindest_kopien, kennung_unsicher, grund, hinweise }
@@ -72,12 +90,22 @@ mod tests {
             kopierfehler: None,
         }
     }
+    const KARTE: Umfang = Umfang { dateien: 3, ganze_karte: true };
+
+    #[test]
+    fn leere_karte_oder_nur_ein_ordner_wird_nie_freigegeben() {
+        let z = [urteil(true), urteil(true)];
+        let k = [platte("A"), platte("B")];
+        assert!(!beurteilen(&z, &k, 2, Umfang { dateien: 0, ganze_karte: true }).sicher);
+        assert!(!beurteilen(&z, &k, 2, Umfang { dateien: 3, ganze_karte: false }).sicher);
+    }
+
     fn platte(w: &str) -> Kennung {
         Kennung { wert: w.into(), sicher: true, art: Art::Platte, seriennummer: None, beschreibung: String::new() }
     }
 
     #[test]
-    fn unbewiesene_ziele_zaehlen_zusammen_als_eins() {
+    fn unbewiesene_ziele_zaehlen_nie() {
         let v = |w: &str| Kennung {
             wert: w.into(),
             sicher: false,
@@ -85,28 +113,30 @@ mod tests {
             seriennummer: None,
             beschreibung: String::new(),
         };
-        let f = beurteilen(&[urteil(true), urteil(true)], &[v("volume:1"), v("volume:2")], 2);
+        let f = beurteilen(&[urteil(true), urteil(true)], &[v("volume:1"), v("volume:2")], 2, KARTE);
         assert!(!f.sicher);
-        let f = beurteilen(&[urteil(true), urteil(true)], &[platte("A"), v("volume:2")], 2);
-        assert!(f.sicher);
+        // Ein unbestimmtes Ziel könnte auf Platte A liegen: zählt nicht (Fund K2 der Code-Prüfung).
+        let f = beurteilen(&[urteil(true), urteil(true)], &[platte("A"), v("volume:2")], 2, KARTE);
+        assert!(!f.sicher);
+        assert_eq!(f.unabhaengige_kopien, 1);
     }
 
     #[test]
     fn zwei_platten_reichen() {
-        let f = beurteilen(&[urteil(true), urteil(true)], &[platte("A"), platte("B")], 2);
+        let f = beurteilen(&[urteil(true), urteil(true)], &[platte("A"), platte("B")], 2, KARTE);
         assert!(f.sicher);
     }
 
     #[test]
     fn zwei_ziele_auf_einer_platte_zaehlen_als_eins() {
-        let f = beurteilen(&[urteil(true), urteil(true)], &[platte("A"), platte("A")], 2);
+        let f = beurteilen(&[urteil(true), urteil(true)], &[platte("A"), platte("A")], 2, KARTE);
         assert!(!f.sicher);
         assert_eq!(f.unabhaengige_kopien, 1);
     }
 
     #[test]
     fn fehlerhaftes_ziel_zaehlt_nicht() {
-        let f = beurteilen(&[urteil(true), urteil(false)], &[platte("A"), platte("B")], 2);
+        let f = beurteilen(&[urteil(true), urteil(false)], &[platte("A"), platte("B")], 2, KARTE);
         assert!(!f.sicher);
     }
 }

@@ -7,6 +7,7 @@ import {
   aufFortschritt,
   bytesText,
   karteEinlesen,
+  kartenname,
   vorabPruefen,
   zielNachpruefen,
   type Befund,
@@ -104,7 +105,12 @@ export function App() {
 
   const laeuft = phase === "kopieren" || phase === "pruefen" || phase === "nachlesen" || phase === "nachpruefen";
   // Jede Karte kommt in einen eigenen Ordner mit ihrem Namen (z. B. A001R132) unter dem gewählten Ziel.
-  const ziele = quelle ? zielOrdner.map((z) => z.replace(/[\\/]+$/, "") + trenner(z) + name(quelle)) : [];
+  // Den Namen bestimmt der Kern: bei einer Windows-Laufwerkswurzel ist es der Volume-Name, nicht „E:“.
+  const [karte, setKarte] = useState("");
+  useEffect(() => {
+    if (quelle) kartenname(quelle).then(setKarte).catch(() => setKarte(name(quelle)));
+  }, [quelle]);
+  const ziele = quelle && karte ? zielOrdner.map((z) => z.replace(/[\\/]+$/, "") + trenner(z) + karte) : [];
 
   // Vorab-Prüfung bei jeder Änderung von Karte, Zielen oder Einstellungen.
   const zieleSchluessel = ziele.join("|");

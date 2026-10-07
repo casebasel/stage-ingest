@@ -40,6 +40,18 @@ pub fn vorpruefen(auftrag: &Auftrag, bytes: u64) -> Vec<Befund> {
     if auftrag.ziele.is_empty() {
         befunde.push(fehler("Kein Ziel gewählt".into()));
     }
+    if bytes == 0 && crate::kopie::groesse_und_zahl(&quelle).map(|(_, n)| n == 0).unwrap_or(true) {
+        befunde.push(fehler("Keine Datei auf der Karte: falscher Ordner oder Karte nicht fertig eingehängt".into()));
+    }
+    if !geraet::ist_volume_wurzel(&quelle).unwrap_or(false) {
+        befunde.push(warnung(
+            "Gewählt ist ein Ordner, nicht die ganze Karte: er wird gesichert, die Karte aber nicht zum Formatieren freigegeben"
+                .into(),
+        ));
+    }
+    // Ein Ziel auf der Karte selbst (oder auf derselben Platte) würde mitformatiert.
+    let karte_volume = geraet::volume_kennung(&quelle).ok();
+    let karte_geraet = geraet::kennung(&quelle).ok().filter(|k| k.sicher).map(|k| k.wert);
 
     let mut kennungen: HashMap<String, Vec<&Path>> = HashMap::new();
     for ziel in &auftrag.ziele {
@@ -67,7 +79,13 @@ pub fn vorpruefen(auftrag: &Auftrag, bytes: u64) -> Vec<Befund> {
             ))),
             _ => {}
         }
+        if karte_volume.is_some() && geraet::volume_kennung(&ort_echt).ok() == karte_volume {
+            befunde.push(fehler(format!("Ziel liegt auf der Karte selbst: {}", ziel.display())));
+        }
         match geraet::kennung(&ort_echt) {
+            Ok(k) if k.sicher && Some(&k.wert) == karte_geraet.as_ref() => {
+                befunde.push(fehler(format!("Ziel liegt auf derselben Platte wie die Karte: {}", ziel.display())))
+            }
             Ok(k) if k.sicher => kennungen.entry(k.wert).or_default().push(ziel),
             Ok(_) => befunde.push(warnung(format!(
                 "Platte von {} nicht bestimmbar; zählt nur zusammen mit anderen unbestimmten Zielen als eine Kopie",
@@ -137,6 +155,15 @@ mod tests {
     }
 
     #[test]
+    fn leere_karte_ist_ein_fehler() {
+        let t = tempfile::tempdir().unwrap();
+        fs::create_dir_all(t.path().join("A001")).unwrap();
+        fs::write(t.path().join("A001/.DS_Store"), b"x").unwrap();
+        let b = vorpruefen(&auftrag(&t.path().join("A001"), &[&t.path().join("z/A001")]), 0);
+        assert!(b.iter().any(|b| b.text.contains("Keine Datei")), "{b:?}");
+    }
+
+    #[test]
     fn zu_wenig_platz_ist_ein_fehler() {
         let t = tempfile::tempdir().unwrap();
         fs::create_dir_all(t.path().join("A001")).unwrap();
@@ -146,13 +173,15 @@ mod tests {
     }
 
     #[test]
-    fn gute_auftraege_haben_keine_fehler() {
+    fn ziel_auf_demselben_volume_wie_die_karte_ist_ein_fehler() {
         let t = tempfile::tempdir().unwrap();
         fs::create_dir_all(t.path().join("A001")).unwrap();
         fs::write(t.path().join("A001/a.mov"), b"x").unwrap();
         fs::create_dir_all(t.path().join("ziel")).unwrap();
         let b = vorpruefen(&auftrag(&t.path().join("A001"), &[&t.path().join("ziel/A001")]), 1);
-        assert!(b.iter().all(|b| b.stufe != Stufe::Fehler), "{b:?}");
+        // Im Test liegen Karte und Ziel im selben Temp-Ordner, also auf demselben Volume: genau das muss auffallen.
+        assert!(b.iter().any(|b| b.stufe == Stufe::Fehler && b.text.contains("auf der Karte selbst")), "{b:?}");
+        assert!(b.iter().all(|b| b.stufe != Stufe::Fehler || b.text.contains("auf der Karte selbst")), "{b:?}");
     }
 
     #[test]

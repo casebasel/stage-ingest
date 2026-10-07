@@ -2,7 +2,7 @@ use std::fs;
 use std::sync::atomic::AtomicBool;
 
 use ingest_bericht::{pdf, Angaben};
-use ingest_kern::freigabe::beurteilen;
+use ingest_kern::freigabe::{beurteilen, Umfang};
 use ingest_kern::geraet::{Art, Kennung};
 use ingest_kern::kopie::{kopieren, Auftrag};
 use ingest_kern::pruefen::zurueckpruefen;
@@ -39,7 +39,7 @@ fn bericht_wird_gesetzt() {
             beschreibung: "Samsung PSSD T7".into(),
         },
     ];
-    let freigabe = beurteilen(&urteile, &kennungen, 2);
+    let freigabe = beurteilen(&urteile, &kennungen, 2, Umfang { dateien: kopie.dateien.len(), ganze_karte: true });
     let pdf = pdf(&kopie, &urteile, &kennungen, &freigabe, 1, &Angaben { version: "0.1.0", mit_md5: true }).unwrap();
     assert!(pdf.starts_with(b"%PDF"));
     if let Ok(ziel) = std::env::var("BERICHT_PROBE") {
