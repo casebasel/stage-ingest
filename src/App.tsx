@@ -21,6 +21,7 @@ import {
 } from "./kern";
 import { Aktualisierung, useAktualisierung } from "./Aktualisierung";
 import { Verlauf } from "./Verlauf";
+import { PlateAssistant, gemerkterZugang, plateSoll, type DrehKurz, type Projekt } from "./PlateAssistant";
 
 type Phase = "bereit" | "kopieren" | "pruefen" | "nachlesen" | "nachpruefen" | "fertig" | "fehler";
 
@@ -61,12 +62,14 @@ const kurz = (p: string) =>
     .replace(/[äÄ]/g, "AE")
     .replace(/[öÖ]/g, "OE")
     .replace(/[üÜ]/g, "UE")
-    .replace(/ß/g, "SS")
+    .replace(/[ßẞ]/g, "SS")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toUpperCase()
     .replace(/[^A-Z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "") || "OHNE_PROJEKT";
+    .replace(/^_+/, "")
+    .slice(0, 24)
+    .replace(/_+$/, "") || "OHNE_PROJEKT";
 
 const trenner = (pfad: string) => (pfad.includes("\\") ? "\\" : "/");
 const name = (pfad: string) => pfad.split(/[\\/]/).filter(Boolean).pop() ?? pfad;
@@ -149,9 +152,14 @@ export function App() {
   const [drehDatum, setDrehDatum] = useState<string>(() => new Date().toLocaleDateString("sv-SE"));
   useEffect(() => merken("projekt", projekt), [projekt]);
   useEffect(() => merken("drehName", drehName), [drehName]);
+  // Aus dem Plate Assistant gewählt: Projekt mit festem Kurznamen, Drehort mit Takes als Soll-Liste.
+  const [paProjekt, setPaProjekt] = useState<Projekt | null>(null);
+  const [paDreh, setPaDreh] = useState<DrehKurz | null>(null);
   const dreh: Dreh | null =
-    projekt.trim() && drehName.trim() ? { projekt: projekt.trim(), datum: drehDatum, name: drehName.trim() } : null;
-  const drehSchluessel = dreh ? `${dreh.projekt}|${dreh.datum}|${dreh.name}` : "";
+    projekt.trim() && drehName.trim()
+      ? { projekt: projekt.trim(), kurzname: paProjekt?.kurzname ?? null, datum: drehDatum, name: drehName.trim() }
+      : null;
+  const drehSchluessel = dreh ? `${dreh.projekt}|${dreh.kurzname}|${dreh.datum}|${dreh.name}` : "";
 
   // Die Kartenziele berechnet der Kern (Kartenname bei Laufwerkswurzel, taugliche Ordnernamen).
   const [ziele, setZiele] = useState<string[]>([]);
@@ -206,7 +214,17 @@ export function App() {
     try {
       setNachpruefung(null);
       // Soll-Liste frisch holen; ist die Stage nicht erreichbar, wird trotzdem kopiert (Hinweis links).
-      const sollListe = await sollLaden();
+      const sollStage = await sollLaden();
+      // Draussen: Takes des gewählten Drehorts aus dem Plate Assistant (fehlt der Zugang, nur ein Hinweis).
+      let sollPlate: SollClip[] = [];
+      if (paDreh) {
+        try {
+          sollPlate = await plateSoll(gemerkterZugang(), paDreh.id);
+        } catch (e) {
+          setSoll({ liste: sollStage, fehler: `Plate Assistant: ${e}`, zeit: Date.now() });
+        }
+      }
+      const sollListe = [...sollStage, ...sollPlate];
       setErgebnis(await karteEinlesen({
           quelle,
           ziele,
@@ -288,6 +306,23 @@ export function App() {
             </div>
           </section>
 
+          <PlateAssistant
+            gesperrt={laeuft}
+            projekt={paProjekt}
+            dreh={paDreh}
+            onProjekt={(p) => {
+              setPaProjekt(p);
+              if (p) setProjekt(p.name);
+            }}
+            onDreh={(d) => {
+              setPaDreh(d);
+              if (d) {
+                setDrehName(d.name);
+                setDrehDatum(d.datum);
+              }
+            }}
+          />
+
           <section className="k-gruppe">
             <h2>Dreh</h2>
             <input
@@ -295,7 +330,10 @@ export function App() {
               placeholder="Projekt"
               value={projekt}
               disabled={laeuft}
-              onChange={(e) => setProjekt(e.target.value)}
+              onChange={(e) => {
+                setProjekt(e.target.value);
+                setPaProjekt(null); // getippt statt gewählt: Kurzname wird vorgeschlagen
+              }}
             />
             <div className="i-zweier">
               <input
@@ -316,7 +354,7 @@ export function App() {
             <span className="k-leise k-klein">
               {dreh ? (
                 <span className="mono">
-                  {kurz(dreh.projekt)}/{dreh.datum}_{dreh.name}/01_KAMERA/…
+                  {dreh.kurzname ?? kurz(dreh.projekt)}/{dreh.datum}_{dreh.name}/01_KAMERA/…
                 </span>
               ) : (
                 "Ohne Projekt und Dreh kommt die Karte direkt in den Zielordner."

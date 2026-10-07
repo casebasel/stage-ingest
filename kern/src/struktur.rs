@@ -25,6 +25,9 @@ pub const METADATEN: &str = "05_METADATEN";
 pub struct Dreh {
     /// Filmprojekt (z. B. „Happy End“).
     pub projekt: String,
+    /// Fester Kurzname eines angelegten Projekts (gemeinsame Supabase). Fehlt er, wird er aus `projekt` vorgeschlagen.
+    #[serde(default)]
+    pub kurzname: Option<String>,
     /// `JJJJ-MM-TT`
     pub datum: String,
     pub name: String,
@@ -48,47 +51,51 @@ pub fn ordnername(s: &str) -> String {
     }
 }
 
-/// Kurzname eines Projekts für den Ordner: nur `A–Z`, `0–9` und `_` (Systemkarte 3e1050f), z. B.
-/// „Happy End“ → `HAPPY_END`, „Mövenpick“ → `MOEVENPICK`. Die verbindliche Regel kommt mit dem Paket
-/// `casebasel/stage-projekt`; solange das Projekt nur als Text vorliegt, bildet der Ingest ihn so.
-pub fn kurzname(projekt: &str) -> String {
-    let mut aus = String::new();
-    for c in projekt.trim().chars() {
-        let teil = match c {
-            'ä' | 'Ä' => "AE".to_string(),
-            'ö' | 'Ö' => "OE".to_string(),
-            'ü' | 'Ü' => "UE".to_string(),
-            'ß' => "SS".to_string(),
-            c if c.is_ascii_alphanumeric() => c.to_ascii_uppercase().to_string(),
-            c => match c {
-                'à' | 'á' | 'â' | 'À' | 'Á' | 'Â' => "A".into(),
-                'è' | 'é' | 'ê' | 'È' | 'É' | 'Ê' => "E".into(),
-                'ì' | 'í' | 'î' | 'Ì' | 'Í' | 'Î' => "I".into(),
-                'ò' | 'ó' | 'ô' | 'Ò' | 'Ó' | 'Ô' => "O".into(),
-                'ù' | 'ú' | 'û' | 'Ù' | 'Ú' | 'Û' => "U".into(),
-                'ç' | 'Ç' => "C".into(),
-                _ => "_".into(),
-            },
-        };
-        aus += &teil;
-    }
+/// Kurzname-Vorschlag aus dem Projektnamen, gemeinsame Regel von Plate Assistant und Paket `stage-projekt`
+/// (Systemkarte 3e1050f): 1. ä ö ü Ä Ö Ü ß ẞ → ae oe ue AE OE UE ss SS, 2. NFD, Akzente (Mn) weg,
+/// 3. Grossbuchstaben, 4. jede Folge anderer Zeichen als A–Z/0–9 → ein `_`, vorn/hinten keins,
+/// 5. höchstens 24 Zeichen, danach kein `_` am Ende, 6. unter 2 Zeichen: kein Vorschlag (`None`).
+/// Ein angelegtes Projekt hat seinen festen Kurznamen; dieser Vorschlag gilt nur für Text ohne Projekt.
+pub fn kurzname_vorschlag(name: &str) -> Option<String> {
+    use unicode_normalization::char::is_combining_mark;
+    use unicode_normalization::UnicodeNormalization;
+    let ersetzt: String = name
+        .chars()
+        .map(|c| match c {
+            'ä' => "ae".into(),
+            'ö' => "oe".into(),
+            'ü' => "ue".into(),
+            'Ä' => "AE".into(),
+            'Ö' => "OE".into(),
+            'Ü' => "UE".into(),
+            'ß' => "ss".into(),
+            'ẞ' => "SS".into(),
+            c => c.to_string(),
+        })
+        .collect();
+    let gross: String = ersetzt.nfd().filter(|c| !is_combining_mark(*c)).collect::<String>().to_uppercase();
     let mut kurz = String::new();
-    for c in aus.chars() {
-        if !(c == '_' && (kurz.is_empty() || kurz.ends_with('_'))) {
+    for c in gross.chars() {
+        if c.is_ascii_uppercase() || c.is_ascii_digit() {
             kurz.push(c);
+        } else if !kurz.is_empty() && !kurz.ends_with('_') {
+            kurz.push('_');
         }
     }
+    let kurz: String = kurz.chars().take(24).collect();
     let kurz = kurz.trim_end_matches('_').to_string();
-    if kurz.is_empty() {
-        "OHNE_PROJEKT".into()
-    } else {
-        kurz
-    }
+    (kurz.len() >= 2).then_some(kurz)
+}
+
+/// Ordnername des Projekts aus Text (solange kein angelegtes Projekt gewählt ist).
+pub fn kurzname(projekt: &str) -> String {
+    kurzname_vorschlag(projekt).unwrap_or_else(|| "OHNE_PROJEKT".into())
 }
 
 /// Ordner des Drehs: `<basis>/<KURZNAME>/<Datum>_<Dreh>`.
 pub fn drehordner(basis: &Path, dreh: &Dreh) -> PathBuf {
-    basis.join(kurzname(&dreh.projekt)).join(format!("{}_{}", ordnername(&dreh.datum), ordnername(&dreh.name)))
+    let kurz = dreh.kurzname.clone().filter(|k| !k.is_empty()).unwrap_or_else(|| kurzname(&dreh.projekt));
+    basis.join(ordnername(&kurz)).join(format!("{}_{}", ordnername(&dreh.datum), ordnername(&dreh.name)))
 }
 
 /// Zielordner einer Karte im Dreh: `<Dreh>/01_KAMERA/<Karte>`.
@@ -145,12 +152,21 @@ mod tests {
         assert_eq!(kurzname("Happy End"), "HAPPY_END");
         assert_eq!(kurzname("  Mövenpick – Spot 2 "), "MOEVENPICK_SPOT_2");
         assert_eq!(kurzname("Café Größe"), "CAFE_GROESSE");
+        assert_eq!(kurzname("Ñandú Señor"), "NANDU_SENOR");
         assert_eq!(kurzname("???"), "OHNE_PROJEKT");
+        assert_eq!(kurzname_vorschlag("X"), None);
+        assert_eq!(
+            kurzname_vorschlag("Die unendliche Geschichte der Stadt").as_deref(),
+            Some("DIE_UNENDLICHE_GESCHICHT")
+        );
+        // 24. Zeichen wäre „_“: wird abgeschnitten
+        assert_eq!(kurzname_vorschlag("Abc defghijklmnopqrstuv w").as_deref(), Some("ABC_DEFGHIJKLMNOPQRSTUV"));
     }
 
     #[test]
     fn struktur_und_bericht() {
-        let d = Dreh { projekt: "Happy End".into(), datum: "2026-10-28".into(), name: "Rheinufer".into() };
+        let d =
+            Dreh { projekt: "Happy End".into(), kurzname: None, datum: "2026-10-28".into(), name: "Rheinufer".into() };
         let z = kartenziel(Path::new("/nas/Footage"), &d, "A001R132");
         assert_eq!(z, Path::new("/nas/Footage/HAPPY_END/2026-10-28_Rheinufer/01_KAMERA/A001R132"));
         assert_eq!(berichtordner(&z), Path::new("/nas/Footage/HAPPY_END/2026-10-28_Rheinufer/04_BERICHTE"));

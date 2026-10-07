@@ -1,5 +1,6 @@
 //! Tauri-Hülle um den Kern: Befehle für die Oberfläche, Fortschritt als Ereignisse.
 
+mod plate;
 mod stage;
 
 use std::path::{Path, PathBuf};
@@ -112,7 +113,9 @@ fn stage_daten(
     let mut daten = json!({
         "karte": karte.chars().take(40).collect::<String>(),
         // Schema der Stage: Kurzname höchstens 24 Zeichen.
-        "projekt": auftrag.dreh.as_ref().map(|d| struktur::kurzname(&d.projekt).chars().take(24).collect::<String>()),
+        "projekt": auftrag.dreh.as_ref().map(|d| {
+            d.kurzname.clone().unwrap_or_else(|| struktur::kurzname(&d.projekt)).chars().take(24).collect::<String>()
+        }),
         "freigegeben": freigabe.sicher,
         "version": version,
         "beginn": kopie.beginn.to_rfc3339(),
@@ -477,6 +480,74 @@ async fn soll_von_stage(adresse: String) -> Result<Vec<SollClip>, String> {
     .map_err(|e| e.to_string())?
 }
 
+// --- Plate Assistant (gemeinsame Supabase) ---------------------------------------------------------
+
+async fn im_hintergrund<T: Send + 'static>(
+    f: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(f).await.map_err(|e| e.to_string())?
+}
+
+/// Zugang prüfen und das Passwort im Schlüsselbund ablegen.
+#[tauri::command]
+async fn plate_anmelden(
+    plate: State<'_, Arc<plate::Plate>>,
+    zugang: plate::Zugang,
+    passwort: String,
+) -> Result<(), String> {
+    let p = Arc::clone(&plate);
+    im_hintergrund(move || {
+        plate::passwort_merken(&zugang.email, &passwort)?;
+        p.anmelden_pruefen(&zugang)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn plate_projekte(
+    plate: State<'_, Arc<plate::Plate>>,
+    zugang: plate::Zugang,
+) -> Result<Vec<plate::Projekt>, String> {
+    let p = Arc::clone(&plate);
+    im_hintergrund(move || p.projekte(&zugang)).await
+}
+
+#[tauri::command]
+async fn plate_drehs(
+    plate: State<'_, Arc<plate::Plate>>,
+    zugang: plate::Zugang,
+) -> Result<Vec<plate::DrehKurz>, String> {
+    let p = Arc::clone(&plate);
+    im_hintergrund(move || p.drehs(&zugang, 60)).await
+}
+
+#[tauri::command]
+async fn plate_soll(
+    plate: State<'_, Arc<plate::Plate>>,
+    zugang: plate::Zugang,
+    dreh_id: String,
+) -> Result<Vec<SollClip>, String> {
+    let p = Arc::clone(&plate);
+    im_hintergrund(move || p.soll(&zugang, &dreh_id)).await
+}
+
+#[tauri::command]
+async fn plate_projekt_anlegen(
+    plate: State<'_, Arc<plate::Plate>>,
+    zugang: plate::Zugang,
+    name: String,
+    kurzname: String,
+) -> Result<String, String> {
+    let p = Arc::clone(&plate);
+    im_hintergrund(move || p.projekt_anlegen(&zugang, &name, &kurzname)).await
+}
+
+/// Kurzname-Vorschlag nach der gemeinsamen Regel (für das Formular „Neues Projekt“).
+#[tauri::command]
+fn kurzname_vorschlag(name: String) -> Option<String> {
+    struktur::kurzname_vorschlag(&name)
+}
+
 /// Kartenziele zu den gewählten Zielordnern: mit Drehstruktur `<Ziel>/<KURZNAME>/<Datum>_<Dreh>/01_KAMERA/<Karte>`,
 /// sonst `<Ziel>/<Karte>`. Der Kartenname ist bei einer Windows-Laufwerkswurzel der Volume-Name.
 #[tauri::command]
@@ -510,6 +581,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(Laufend::default())
+        .manage(Arc::new(plate::Plate::default()))
         .on_window_event(|fenster, ereignis| {
             if let WindowEvent::CloseRequested { api, .. } = ereignis {
                 if fenster.state::<Laufend>().aktiv.load(Ordering::SeqCst) {
@@ -524,6 +596,12 @@ pub fn run() {
             ziel_nachpruefen,
             kartenziele,
             soll_von_stage,
+            plate_anmelden,
+            plate_projekte,
+            plate_drehs,
+            plate_soll,
+            plate_projekt_anlegen,
+            kurzname_vorschlag,
             abbrechen,
             laeuft,
             verlauf

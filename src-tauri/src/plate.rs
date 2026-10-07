@@ -1,0 +1,390 @@
+//! Zugang zur gemeinsamen Supabase des Plate Assistant (Vertrag: plate-assistant `docs/ABGLEICH.md`,
+//! Systemkarte 3e1050f). Eigener Benutzer mit `app_metadata.app = "ingest"`: liest dreh, plate, take, projekt;
+//! schreibt nur `projekt`, und nur über `aenderungen_anwenden`.
+//!
+//! Adresse, Anon-Key und E-Mail stehen in den lokalen Einstellungen der App, das Passwort im Schlüsselbund
+//! des Systems. Nichts davon kommt ins Repo.
+
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
+use ingest_kern::soll::{ohne_endung, SollClip};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+
+const SCHLUESSELBUND_DIENST: &str = "ch.filmstudiobasel.stage-ingest.plate-assistant";
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Zugang {
+    /// z. B. `https://<supabase>`
+    pub adresse: String,
+    pub anon_key: String,
+    pub email: String,
+}
+
+struct Sitzung {
+    zugang_email: String,
+    access: String,
+    refresh: String,
+    bis: Instant,
+}
+
+#[derive(Default)]
+pub struct Plate {
+    sitzung: Mutex<Option<Sitzung>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Projekt {
+    pub id: String,
+    pub name: String,
+    pub kurzname: String,
+    pub aktiv: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DrehKurz {
+    pub id: String,
+    pub name: String,
+    pub datum: String,
+    /// `projekt_id` (ab Migration 0009), sonst `None`.
+    pub projekt_id: Option<String>,
+    /// Alter Projektname als Text (bleibt, bis alle umgestellt sind).
+    pub produktion: String,
+}
+
+/// Passwort im Schlüsselbund ablegen (überschreibt ein altes).
+pub fn passwort_merken(email: &str, passwort: &str) -> Result<(), String> {
+    keyring::Entry::new(SCHLUESSELBUND_DIENST, email)
+        .and_then(|e| e.set_password(passwort))
+        .map_err(|e| format!("Schlüsselbund: {e}"))
+}
+
+fn passwort(email: &str) -> Result<String, String> {
+    keyring::Entry::new(SCHLUESSELBUND_DIENST, email)
+        .and_then(|e| e.get_password())
+        .map_err(|_| "Kein Passwort für den Plate Assistant hinterlegt".to_string())
+}
+
+fn agent() -> ureq::Agent {
+    ureq::AgentBuilder::new().timeout(Duration::from_secs(15)).build()
+}
+
+fn fehler(e: ureq::Error) -> String {
+    match e {
+        ureq::Error::Status(code, antwort) => {
+            let text = antwort.into_string().unwrap_or_default();
+            format!("Plate Assistant antwortet {code}: {}", text.chars().take(300).collect::<String>())
+        }
+        e => format!("Plate Assistant nicht erreichbar: {e}"),
+    }
+}
+
+impl Plate {
+    /// Gültiges Zugriffs-Token: vorhandenes, erneuertes oder neu angemeldet.
+    fn token(&self, z: &Zugang, neu: bool) -> Result<String, String> {
+        let mut s = self.sitzung.lock().expect("Sitzung");
+        if let Some(akt) = s.as_ref().filter(|a| a.zugang_email == z.email) {
+            if !neu && akt.bis > Instant::now() + Duration::from_secs(60) {
+                return Ok(akt.access.clone());
+            }
+            if let Ok(n) = anmelden(z, json!({"refresh_token": akt.refresh}), "refresh_token") {
+                let t = n.access.clone();
+                *s = Some(n);
+                return Ok(t);
+            }
+        }
+        let n = anmelden(z, json!({"email": z.email, "password": passwort(&z.email)?}), "password")?;
+        let t = n.access.clone();
+        *s = Some(n);
+        Ok(t)
+    }
+
+    /// GET auf PostgREST; bei 401 einmal neu anmelden.
+    fn lesen(&self, z: &Zugang, pfad_und_abfrage: &str) -> Result<Value, String> {
+        let url = format!("{}/rest/v1/{pfad_und_abfrage}", z.adresse.trim_end_matches('/'));
+        for neu in [false, true] {
+            let token = self.token(z, neu)?;
+            match agent().get(&url).set("apikey", &z.anon_key).set("Authorization", &format!("Bearer {token}")).call() {
+                Ok(a) => return a.into_json().map_err(|e| e.to_string()),
+                Err(ureq::Error::Status(401, _)) if !neu => continue,
+                Err(e) => return Err(fehler(e)),
+            }
+        }
+        Err("Anmeldung beim Plate Assistant abgelehnt".into())
+    }
+
+    pub fn anmelden_pruefen(&self, z: &Zugang) -> Result<(), String> {
+        self.token(z, true).map(|_| ())
+    }
+
+    /// Projekte (ohne gelöschte). Gibt es die Tabelle noch nicht (vor Migration 0009), ist die Liste leer.
+    pub fn projekte(&self, z: &Zugang) -> Result<Vec<Projekt>, String> {
+        match self.lesen(z, "projekt?select=id,name,kurzname,aktiv&geloescht=eq.false&order=name.asc") {
+            Ok(v) => Ok(projekte_aus(&v)),
+            Err(e) if e.contains(" 404") || e.contains("PGRST205") || e.contains("does not exist") => Ok(vec![]),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Drehorte der letzten `tage` Tage (ohne gelöschte), neueste zuerst. Ohne `projekt_id` (vor 0009) geht es trotzdem.
+    pub fn drehs(&self, z: &Zugang, tage: i64) -> Result<Vec<DrehKurz>, String> {
+        let ab = (chrono::Utc::now() - chrono::Duration::days(tage)).format("%Y-%m-%d");
+        let basis = format!("dreh?geloescht=eq.false&datum=gte.{ab}&order=datum.desc,name.asc");
+        let v = self
+            .lesen(z, &format!("{basis}&select=id,name,datum,produktion,projekt_id"))
+            .or_else(|_| self.lesen(z, &format!("{basis}&select=id,name,datum,produktion")))?;
+        Ok(drehs_aus(&v))
+    }
+
+    /// Takes eines Drehorts als Soll-Liste (mit Plates; Gelöschtes auf allen Ebenen ausgefiltert).
+    pub fn soll(&self, z: &Zugang, dreh_id: &str) -> Result<Vec<SollClip>, String> {
+        let v = self.lesen(
+            z,
+            &format!(
+                "dreh?id=eq.{}&select=id,geloescht,plate(id,nummer,name,szene,buchstabe,geloescht,take(*))",
+                url_teil(dreh_id)
+            ),
+        )?;
+        Ok(soll_aus(&v))
+    }
+
+    /// Legt ein Projekt an (oder führt es zusammen, wenn es das schon gibt). Gibt die ID zurück.
+    pub fn projekt_anlegen(&self, z: &Zugang, name: &str, kurzname: &str) -> Result<String, String> {
+        let id = format!("projekt-{}", kurzname.to_lowercase());
+        let jetzt = chrono::Utc::now();
+        let body = json!({
+            "p_geraet": "Stage Ingest",
+            "p_aenderungen": [{
+                "id": ulid_aehnlich(),
+                "tabelle": "projekt",
+                "datensatz": id,
+                "feld": "_anlegen",
+                "wert": { "name": name, "kurzname": kurzname, "aktiv": true, "geloescht": false,
+                          "erstellt_am": jetzt.to_rfc3339_opts(chrono::SecondsFormat::Millis, true) },
+                "zeit": jetzt.timestamp_micros(),
+            }]
+        });
+        let url = format!("{}/rest/v1/rpc/aenderungen_anwenden", z.adresse.trim_end_matches('/'));
+        for neu in [false, true] {
+            let token = self.token(z, neu)?;
+            match agent()
+                .post(&url)
+                .set("apikey", &z.anon_key)
+                .set("Authorization", &format!("Bearer {token}"))
+                .send_json(body.clone())
+            {
+                Ok(a) => {
+                    let v: Value = a.into_json().map_err(|e| e.to_string())?;
+                    let ergebnis = v[0]["ergebnis"].as_str().unwrap_or("");
+                    return match ergebnis {
+                        "uebernommen" | "aelter" | "doppelt" => Ok(id),
+                        _ => Err(format!("Projekt nicht angelegt: {}", v[0]["grund"].as_str().unwrap_or(ergebnis))),
+                    };
+                }
+                Err(ureq::Error::Status(401, _)) if !neu => continue,
+                Err(e) => return Err(fehler(e)),
+            }
+        }
+        Err("Anmeldung beim Plate Assistant abgelehnt".into())
+    }
+}
+
+fn anmelden(z: &Zugang, body: Value, art: &str) -> Result<Sitzung, String> {
+    let url = format!("{}/auth/v1/token?grant_type={art}", z.adresse.trim_end_matches('/'));
+    let v: Value = agent()
+        .post(&url)
+        .set("apikey", &z.anon_key)
+        .send_json(body)
+        .map_err(fehler)?
+        .into_json()
+        .map_err(|e| e.to_string())?;
+    if v["user"]["app_metadata"]["app"] != "ingest" {
+        return Err("Dieser Benutzer ist nicht der Zugang „ingest“".into());
+    }
+    Ok(Sitzung {
+        zugang_email: z.email.clone(),
+        access: v["access_token"].as_str().ok_or("Anmeldung ohne Token")?.to_owned(),
+        refresh: v["refresh_token"].as_str().unwrap_or_default().to_owned(),
+        bis: Instant::now() + Duration::from_secs(v["expires_in"].as_u64().unwrap_or(3600)),
+    })
+}
+
+fn text(v: &Value) -> String {
+    v.as_str().unwrap_or_default().trim().to_owned()
+}
+
+fn projekte_aus(v: &Value) -> Vec<Projekt> {
+    v.as_array()
+        .into_iter()
+        .flatten()
+        .map(|p| Projekt {
+            id: text(&p["id"]),
+            name: text(&p["name"]),
+            kurzname: text(&p["kurzname"]),
+            aktiv: p["aktiv"].as_bool().unwrap_or(true),
+        })
+        .collect()
+}
+
+fn drehs_aus(v: &Value) -> Vec<DrehKurz> {
+    v.as_array()
+        .into_iter()
+        .flatten()
+        .map(|d| DrehKurz {
+            id: text(&d["id"]),
+            name: text(&d["name"]),
+            datum: text(&d["datum"]),
+            projekt_id: d["projekt_id"].as_str().map(str::to_owned),
+            produktion: text(&d["produktion"]),
+        })
+        .collect()
+}
+
+/// Takes → Soll-Liste. Ein Take zählt nur, wenn Take, Plate und Drehort nicht gelöscht sind.
+/// Clipname: von der Kamera (`clip.name`), sonst von Hand (`clip_name`); ohne Endung, gross.
+fn soll_aus(v: &Value) -> Vec<SollClip> {
+    let mut aus = Vec::new();
+    for dreh in v.as_array().into_iter().flatten().filter(|d| d["geloescht"] != true) {
+        for plate in dreh["plate"].as_array().into_iter().flatten().filter(|p| p["geloescht"] != true) {
+            let slate = format!("{}{}", text(&plate["szene"]), text(&plate["buchstabe"]));
+            let szene = if !slate.is_empty() {
+                slate
+            } else if !text(&plate["name"]).is_empty() {
+                text(&plate["name"])
+            } else {
+                format!("Plate {}", plate["nummer"].as_i64().unwrap_or(0))
+            };
+            for take in plate["take"].as_array().into_iter().flatten().filter(|t| t["geloescht"] != true) {
+                let clip = [&take["clip"]["name"], &take["clip_name"]]
+                    .into_iter()
+                    .map(text)
+                    .find(|c| !c.is_empty())
+                    .map(|c| ohne_endung(&c).to_uppercase())
+                    .unwrap_or_default();
+                let art = take["art"].as_str().unwrap_or("take");
+                let bewertung = match take["bewertung"].as_str() {
+                    Some("circle") => "Favorit",
+                    Some("gut") => "Gut",
+                    Some("schlecht") => "Schlecht",
+                    _ => "",
+                };
+                aus.push(SollClip {
+                    clip,
+                    szene: match art {
+                        "graukugel" => format!("{szene} · Graukugel"),
+                        "chromkugel" => format!("{szene} · Chromkugel"),
+                        "cleanplate" => format!("{szene} · Cleanplate"),
+                        _ => szene.clone(),
+                    },
+                    take: take["nummer"].as_i64().map(|n| n.to_string()).unwrap_or_default(),
+                    start_tc: text(&take["start_tc"]).to_owned().or_leer(text(&take["clip"]["startTc"])),
+                    end_tc: text(&take["end_tc"]),
+                    bewertung: bewertung.into(),
+                    quelle: "plate".into(),
+                    take_id: text(&take["id"]),
+                });
+            }
+        }
+    }
+    aus
+}
+
+trait OderLeer {
+    fn or_leer(self, sonst: String) -> String;
+}
+
+impl OderLeer for String {
+    fn or_leer(self, sonst: String) -> String {
+        if self.is_empty() {
+            sonst
+        } else {
+            self
+        }
+    }
+}
+
+/// ID je Änderung (10–40 Zeichen, eindeutig): Zeit in Millisekunden + Zufall, Crockford-Base32 wie ULID.
+fn ulid_aehnlich() -> String {
+    const Z: &[u8] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+    let mut n = (chrono::Utc::now().timestamp_millis() as u128) << 80;
+    let zufall = {
+        use std::collections::hash_map::RandomState;
+        use std::hash::{BuildHasher, Hasher};
+        let mut h = RandomState::new().build_hasher();
+        h.write_u128(n);
+        ((h.finish() as u128) << 16) ^ (RandomState::new().build_hasher().finish() as u128 & 0xffff)
+    };
+    n |= zufall & ((1u128 << 80) - 1);
+    (0..26).rev().map(|i| Z[((n >> (i * 5)) & 31) as usize] as char).collect()
+}
+
+fn url_teil(s: &str) -> String {
+    s.bytes()
+        .map(|b| {
+            if b.is_ascii_alphanumeric() || b"-._~".contains(&b) {
+                (b as char).to_string()
+            } else {
+                format!("%{b:02X}")
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Form wie PostgREST mit Embedding (Vertrag plate-assistant docs/ABGLEICH.md), Werte erfunden.
+    fn dreh() -> Value {
+        json!([{
+            "id": "01DREH", "geloescht": false,
+            "plate": [
+                { "id": "01P1", "nummer": 3, "name": "Rheinufer", "szene": "42", "buchstabe": "A", "geloescht": false,
+                  "take": [
+                    { "id": "01T1", "nummer": 1, "art": "take", "clip": null, "clip_name": "a001c003_261028_r1ab.mov",
+                      "start_tc": null, "end_tc": null, "bewertung": "circle", "geloescht": false },
+                    { "id": "01T2", "nummer": 2, "art": "graukugel", "clip": {"name": "A001C004_261028_R1AB", "startTc": "10:45:10:12"},
+                      "clip_name": null, "start_tc": null, "end_tc": null, "bewertung": null, "geloescht": false },
+                    { "id": "01T3", "nummer": 3, "art": "take", "clip": null, "clip_name": null,
+                      "start_tc": "10:46:00:00", "end_tc": "10:46:20:00", "bewertung": "gut", "geloescht": false },
+                    { "id": "01T4", "nummer": 4, "art": "take", "clip_name": "A001C009_261028_R1AB", "geloescht": true }
+                  ]},
+                { "id": "01P2", "nummer": 4, "name": "", "szene": "", "buchstabe": "", "geloescht": true,
+                  "take": [{ "id": "01T9", "nummer": 1, "clip_name": "A001C010_261028_R1AB", "geloescht": false }] }
+            ]
+        }])
+    }
+
+    #[test]
+    fn takes_werden_soll_liste() {
+        let s = soll_aus(&dreh());
+        assert_eq!(s.len(), 3, "gelöschter Take und Take einer gelöschten Plate fallen weg: {s:?}");
+        assert_eq!(s[0].clip, "A001C003_261028_R1AB");
+        assert_eq!((s[0].szene.as_str(), s[0].take.as_str(), s[0].bewertung.as_str()), ("42A", "1", "Favorit"));
+        assert_eq!(s[1].szene, "42A · Graukugel");
+        assert_eq!(s[1].start_tc, "10:45:10:12");
+        assert!(s[2].clip.is_empty() && s[2].end_tc == "10:46:20:00", "ohne Clipnamen: Zuordnung über den Timecode");
+        assert_eq!(s[2].take_id, "01T3");
+    }
+
+    #[test]
+    fn projekte_und_drehs() {
+        let p =
+            projekte_aus(&json!([{"id":"projekt-happy_end","name":"Happy End","kurzname":"HAPPY_END","aktiv":true}]));
+        assert_eq!(p[0].kurzname, "HAPPY_END");
+        let d = drehs_aus(&json!([{"id":"01D","name":"Rheinufer","datum":"2026-10-28","produktion":"Happy End"}]));
+        assert_eq!(d[0].projekt_id, None);
+        assert_eq!(d[0].produktion, "Happy End");
+    }
+
+    #[test]
+    fn ids_fuer_aenderungen() {
+        let a = ulid_aehnlich();
+        assert_eq!(a.len(), 26);
+        assert_ne!(a, ulid_aehnlich());
+    }
+}

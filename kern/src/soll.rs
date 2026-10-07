@@ -25,6 +25,9 @@ pub struct SollClip {
     pub bewertung: String,
     /// `stage` oder `plate`.
     pub quelle: String,
+    /// Take-ID der Quelle (Plate Assistant: ULID), für Rückmeldungen; leer bei der Stage-CSV.
+    #[serde(default)]
+    pub take_id: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -170,6 +173,7 @@ pub fn stage_csv(text: &str) -> Result<Vec<SollClip>, String> {
             end_tc: feld(&z, tc_ende),
             bewertung: feld(&z, bew),
             quelle: "stage".into(),
+            take_id: String::new(),
         });
     }
     Ok(aus)
@@ -265,6 +269,7 @@ mod timecode_tests {
             end_tc: bis.into(),
             bewertung: String::new(),
             quelle: "plate".into(),
+            take_id: String::new(),
         }
     }
 
