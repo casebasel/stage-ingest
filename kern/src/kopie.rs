@@ -68,7 +68,7 @@ pub struct Kopie {
 #[serde(tag = "art", rename_all = "camelCase")]
 pub enum Meldung {
     Begonnen { dateien: usize, bytes: u64 },
-    Datei { nummer: usize, pfad: String },
+    Datei { nummer: usize, pfad: String, groesse: u64 },
     Bytes { gelesen: u64 },
     ZielAusgefallen { ordner: PathBuf, fehler: String },
 }
@@ -184,7 +184,7 @@ pub fn kopieren(auftrag: &Auftrag, abbruch: &AtomicBool, mut melden: impl FnMut(
         if ergebnis.is_err() {
             break;
         }
-        melden(Meldung::Datei { nummer, pfad: rel.clone() });
+        melden(Meldung::Datei { nummer, pfad: rel.clone(), groesse: *groesse });
         let pfad = auftrag.quelle.join(rel);
         let mut quelle = match ohne_cache::zum_lesen(&pfad) {
             Ok(d) => d,

@@ -35,6 +35,9 @@ export type Stand = {
   ausfaelle: { ordner: string; fehler: string }[];
   /** Zahl der Ziele beim Start (die Auswahl kann sich danach ändern). */
   zielZahl: number;
+  /** Dateien in der Reihenfolge des Kopierens; `geprueft` = Zahl der Ziele, die sie schon zurückgelesen haben
+   *  (die Ziele werden nacheinander geprüft). */
+  liste: { pfad: string; groesse: number; geprueft: number }[];
 };
 
 const LEER: Stand = {
@@ -49,6 +52,7 @@ const LEER: Stand = {
   beginn: 0,
   ausfaelle: [],
   zielZahl: 0,
+  liste: [],
 };
 
 /** Quelle: Pfad, und wenn aus der Liste der eingesteckten Laufwerke gewählt, dessen Angaben (für Auswerfen). */
@@ -162,6 +166,7 @@ function useLaufHalten() {
         if (f.phase === "pruefen")
           return {
             ...s,
+            liste: s.liste.map((d) => (d.pfad === f.pfad ? { ...d, geprueft: Math.max(d.geprueft, f.ziel + 1) } : d)),
             pruefNummer: f.ziel === s.pruefZiel ? s.pruefNummer + 1 : 1,
             pruefZiel: f.ziel,
             pruefPfad: f.pfad,
@@ -172,7 +177,12 @@ function useLaufHalten() {
           case "begonnen":
             return { ...s, dateien: m.dateien, bytes: m.bytes };
           case "datei":
-            return { ...s, datei: m.pfad, dateiNummer: m.nummer };
+            return {
+              ...s,
+              datei: m.pfad,
+              dateiNummer: m.nummer + 1,
+              liste: [...s.liste, { pfad: m.pfad, groesse: m.groesse ?? 0, geprueft: 0 }],
+            };
           case "bytes":
             return { ...s, gelesen: m.gelesen };
           case "zielAusgefallen":

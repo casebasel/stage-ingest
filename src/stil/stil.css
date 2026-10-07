@@ -1158,6 +1158,15 @@ input[type="checkbox"][role="switch"]:checked::before {
   border-spacing: 0;
   overflow: hidden;
 }
+.dateiliste {
+  display: flex;
+  flex-direction: column;
+  min-height: 160px;
+}
+.dateiliste-rumpf {
+  max-height: 340px;
+  overflow-y: auto;
+}
 .lauf-fuss {
   display: flex;
   align-items: center;

@@ -42,7 +42,16 @@ jobs:
         # Nur ob gesetzt, nie den Wert; als Hinweis sichtbar auch ohne Anmeldung (Annotation).
         run: |
           if [ -n "$A" ] && [ -n "$K" ]; then echo "::notice::Anmeldung vorbelegt (SUPABASE_ADRESSE und SUPABASE_ANON_KEY gesetzt)"
-          else echo "::warning::Anmeldung NICHT vorbelegt: Repository-Variablen SUPABASE_ADRESSE/SUPABASE_ANON_KEY fehlen"; fi
+          else echo "::warning::Anmeldung NICHT vorbelegt: Repository-Variablen SUPABASE_ADRESSE/SUPABASE_ANON_KEY fehlen"; exit 0; fi
+          # Nimmt der Server den Schlüssel an? Nur Statuscode und die Rolle im Schlüssel, nie der Wert.
+          K=$(printf '%s' "$K" | tr -d ' \r\n"'"'"'')
+          K=${K#ANON_KEY=}
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "${A%/}/auth/v1/settings" -H "apikey: $K" || echo "keine Verbindung")
+          ROLLE=$(printf '%s' "$K" | cut -d. -f2 | tr '_-' '/+' | base64 -d 2>/dev/null | grep -o '"role":"[a-z_]*"' || echo "nicht lesbar")
+          case "$CODE" in
+            200) echo "::notice::Server nimmt den Anon-Key an (HTTP 200, Rolle $ROLLE)";;
+            *) echo "::warning::Server lehnt den Anon-Key ab oder ist nicht erreichbar (HTTP $CODE, Rolle $ROLLE). Variable SUPABASE_ANON_KEY prüfen.";;
+          esac
       - name: Bauen, signieren, ins Release laden
         uses: tauri-apps/tauri-action@v0
         env:

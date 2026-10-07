@@ -664,6 +664,8 @@ function Fortschritt() {
     ...(lauf.ergebnis === null && phase === "nachlesen" ? [{ id: "nachlesen", text: "Karte nochmals lesen" }] : []),
   ];
   const jetzt = schritte.findIndex((s) => s.id === phase);
+  // Nach dem Zurücklesen meldet der Kern auch Bewegungsdaten und Plates als „nachlesen“.
+  const abschluss = phase === "nachlesen" && /^(ART CMD|Plates)/.test(stand.pruefPfad);
   const ausgefallen = (ordner: string) => stand.ausfaelle.find((a) => ordner.startsWith(ohneEnde(a.ordner)) || a.ordner.startsWith(ordner));
 
   return (
@@ -675,7 +677,9 @@ function Fortschritt() {
               ? "Kopiert an alle Ziele"
               : phase === "pruefen"
                 ? `Liest Ziel ${stand.pruefZiel + 1} von ${stand.zielZahl} zurück`
-                : "Liest die Karte ein zweites Mal"}
+                : abschluss
+                  ? "Schliesst ab"
+                  : "Liest die Karte ein zweites Mal"}
           </h1>
           <p className="leise">
             {lauf.quelle?.name} · {stand.dateien} Dateien · {bytesText(stand.bytes)} · Karte nicht entfernen
@@ -768,6 +772,8 @@ function Fortschritt() {
           })}
         </tbody>
       </table>
+
+      <Dateiliste />
 
       <div className="lauf-fuss">
         <span className="leise">
@@ -1126,5 +1132,67 @@ function Metadaten({ ergebnis }: { ergebnis: KartenErgebnis }) {
         <p className="leer-zeile">Keine Bewegungsdaten. Dafür ARRI ART CMD in der Einrichtung eintragen.</p>
       )}
     </div>
+  );
+}
+
+/** Dateien in der Reihenfolge des Kopierens, mit dem Stand pro Ziel (wie die Jobliste in Silverstack). */
+function Dateiliste() {
+  const { stand, phase, ziele } = useLauf();
+  const zahlZiele = stand.zielZahl;
+  // Sehr volle Karten: nur die letzten Einträge zeichnen, die Zahl steht im Kopf.
+  const GRENZE = 400;
+  const sichtbar = stand.liste.length > GRENZE ? stand.liste.slice(-GRENZE) : stand.liste;
+  const zuletzt = stand.liste.length - 1;
+  if (stand.liste.length === 0) return null;
+  return (
+    <section className="block dateiliste" aria-labelledby="t-dateien">
+      <div className="block-kopf">
+        <h2 id="t-dateien">Dateien</h2>
+        <span className="leise zahl">
+          {stand.liste.length} von {stand.dateien}
+          {stand.liste.length > GRENZE && ` · die letzten ${GRENZE} gezeigt`}
+        </span>
+      </div>
+      <div className="dateiliste-rumpf">
+        <table className="tabelle">
+          <thead>
+            <tr>
+              <th>Datei</th>
+              <th className="rechts">Grösse</th>
+              {ziele.slice(0, zahlZiele).map((z, i) => (
+                <th key={z} title={z}>
+                  Ziel {i + 1}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {sichtbar.map((d, k) => {
+              const index = stand.liste.length - sichtbar.length + k;
+              const schreibt = phase === "kopieren" && index === zuletzt;
+              return (
+                <tr key={d.pfad}>
+                  <td className="zahl">{d.pfad}</td>
+                  <td className="rechts zahl">{d.groesse ? bytesText(d.groesse) : "–"}</td>
+                  {Array.from({ length: zahlZiele }, (_, t) => (
+                    <td key={t}>
+                      {schreibt ? (
+                        <Status ton="laeuft">Schreibt</Status>
+                      ) : d.geprueft > t ? (
+                        <Status ton="ok">Geprüft</Status>
+                      ) : phase === "pruefen" && stand.pruefZiel === t && stand.pruefPfad === d.pfad ? (
+                        <Status ton="laeuft">Liest zurück</Status>
+                      ) : (
+                        <Status ton="leise">Geschrieben</Status>
+                      )}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }

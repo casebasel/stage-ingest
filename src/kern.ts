@@ -48,7 +48,7 @@ export type KartenErgebnis = {
 
 export type Meldung =
   | { art: "begonnen"; dateien: number; bytes: number }
-  | { art: "datei"; nummer: number; pfad: string }
+  | { art: "datei"; nummer: number; pfad: string; groesse?: number }
   | { art: "bytes"; gelesen: number }
   | { art: "zielAusgefallen"; ordner: string; fehler: string };
 

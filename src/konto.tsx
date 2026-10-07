@@ -44,10 +44,31 @@ export const VORGABE_ANON = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | 
 export type Verbindung = "aus" | "verbindet" | "verbunden" | "fehler";
 
 function useKontoHalten() {
-  const [zugang, setZugang] = useState<Zugang>(() => {
-    const z = gemerkt("zugang", { adresse: "", anonKey: "", email: "" });
-    return { adresse: z.adresse || VORGABE_ADRESSE, anonKey: z.anonKey || VORGABE_ANON, email: z.email };
+  // Adresse und Schlüssel: der eingebaute Satz gilt, ausser jemand hat unter „Andere Adresse …“ bewusst einen
+  // eigenen gespeichert (eigene: true). Ältere Einträge ohne dieses Zeichen (z. B. von Hand in 0.1.5) werden
+  // ignoriert, sonst würde ein alter, falscher Schlüssel den richtigen eingebauten für immer verdecken.
+  const [zugang, setZugangRoh] = useState<Zugang>(() => {
+    const z = gemerkt<Zugang & { eigene?: boolean }>("zugang", { adresse: "", anonKey: "", email: "" });
+    const eigene = z.eigene === true || !VORGABE_ADRESSE || !VORGABE_ANON;
+    return {
+      adresse: (eigene && z.adresse) || VORGABE_ADRESSE,
+      anonKey: (eigene && z.anonKey) || VORGABE_ANON,
+      email: z.email,
+    };
   });
+  const [eigenerZugang, setEigenerZugang] = useState(
+    () => gemerkt<{ eigene?: boolean }>("zugang", {}).eigene === true && !!VORGABE_ADRESSE && !!VORGABE_ANON,
+  );
+  /** Adresse/Schlüssel von Hand geändert: ab jetzt gilt der eigene Satz (bis „Eingebaute Adresse verwenden“). */
+  function setZugang(z: Zugang) {
+    if (z.adresse !== zugang.adresse || z.anonKey !== zugang.anonKey) setEigenerZugang(true);
+    setZugangRoh(z);
+  }
+  function eingebautVerwenden() {
+    setEigenerZugang(false);
+    setZugangRoh({ adresse: VORGABE_ADRESSE, anonKey: VORGABE_ANON, email: zugang.email });
+    merken("zugang", { email: zugang.email });
+  }
   const [konto, setKonto] = useState<{ email: string; ingestRecht: boolean } | null>(null);
   const [verbindung, setVerbindung] = useState<Verbindung>("aus");
   const [meldung, setMeldung] = useState<string | null>(null);
@@ -84,7 +105,8 @@ function useKontoHalten() {
   }, []);
 
   async function anmelden(passwort: string) {
-    merken("zugang", zugang);
+    // Ohne eigenen Satz nur die E-Mail merken; Adresse und Schlüssel kommen dann immer aus dem Build.
+    merken("zugang", eigenerZugang ? { ...zugang, eigene: true } : { email: zugang.email });
     setVerbindung("verbindet");
     setMeldung(null);
     try {
@@ -107,6 +129,8 @@ function useKontoHalten() {
   return {
     zugang,
     setZugang,
+    eigenerZugang,
+    eingebautVerwenden,
     vollstaendig,
     konto,
     verbindung,

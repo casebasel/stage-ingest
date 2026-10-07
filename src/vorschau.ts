@@ -94,10 +94,13 @@ function ergebnis(ziele: string[]) {
 async function kopierenNachspielen(ziele: string[]) {
   const gesamt = 27_400_000_000;
   await emit("ingest://fortschritt", { phase: "kopieren", meldung: { art: "begonnen", dateien: 15, bytes: gesamt } });
-  for (let i = 1; i <= 20; i++) {
-    await warte(180);
-    await emit("ingest://fortschritt", { phase: "kopieren", meldung: { art: "datei", nummer: i % 15, pfad: clips[i % 14] } });
-    await emit("ingest://fortschritt", { phase: "kopieren", meldung: { art: "bytes", gelesen: (gesamt * i) / 20 } });
+  const alle = [...clips, "A001R132.ale"];
+  for (let i = 1; i <= alle.length; i++) {
+    await warte(240);
+    const pfad = alle[i - 1];
+    const groesse = pfad.endsWith(".ale") ? 4812 : Math.round((27_400_000_000 - 4812) / 14);
+    await emit("ingest://fortschritt", { phase: "kopieren", meldung: { art: "datei", nummer: i - 1, pfad, groesse } });
+    await emit("ingest://fortschritt", { phase: "kopieren", meldung: { art: "bytes", gelesen: (gesamt * i) / alle.length } });
   }
   for (let z = 0; z < ziele.length; z++)
     for (let i = 0; i < 6; i++) {

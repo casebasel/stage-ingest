@@ -1,12 +1,12 @@
 # Roadmap Stage Ingest
 
-Stand 07.10.2026. Nur diese App; app-übergreifende Abhängigkeiten stehen in der Systemkarte (`casebasel/stage-system`). Phasen wie in `docs/KONZEPT.md`, Kapitel 11.
+Stand 07.10.2026 (Release 0.1.7). Nur diese App; app-übergreifende Abhängigkeiten stehen in der Systemkarte (`casebasel/stage-system`). Phasen wie in `docs/KONZEPT.md`, Kapitel 11.
 
 ## Jetzt: Phase 1 abschliessen (Ziel: Plate-Dreh mit der ALEXA Mini, Ende Oktober 2026)
 
 Gebaut ist der Kern (siehe KONZEPT Kapitel 14). Offen, in dieser Reihenfolge:
 
-1. ~~Releases 0.1.1~~ (Update-Banner getestet); 0.1.2 mit allen Funden der Code-Prüfung als Pflicht-Update.
+1. ~~Releases 0.1.1~~ (Update-Banner getestet); 0.1.2 mit allen Funden der Code-Prüfung als Pflicht-Update; ~~0.1.7 neue Oberfläche~~ (Kategorie-Standard wie Silverstack/ShotPut/Resolve, Seiten Einlesen · Projekt · Prüfen · Einrichtung, eingesteckte Karten erkennen und anbieten, Karte auswerfen).
 2. **Sicherheit nachschärfen**
    - ~~Optional: Karte ein zweites Mal lesen~~ gebaut
    - ~~„Ziel nachprüfen“ gegen ASC MHL~~ gebaut
@@ -16,7 +16,15 @@ Gebaut ist der Kern (siehe KONZEPT Kapitel 14). Offen, in dieser Reihenfolge:
    - Mac: echte Karte über den Kartenleser auf zwei externe Platten und aufs NAS
    - Windows: auf Ada mit `A001R132`
    - Bericht und Gerätekennung kontrollieren
+   - Kartenerkennung und Auswerfen mit einer echten ALEXA-Karte
+   - Echter ALEXA-Clip: Codec und Auflösung bestätigen, Sensor-fps und Sensormodus lesbar?
 4. Erst danach: Stage Ingest am Dreh einsetzen, die ersten Tage parallel zum bisherigen Werkzeug.
+
+## Laufend, ohne fremde Abhängigkeit
+
+- ~~Clips gegen die Kameraeinstellungen des Projekts (fps, Codec, Auflösung `BxH`), nur Warnung~~ gebaut (Systemkarte 0d270db); aktiv, sobald der Plate Assistant Migration 0016 liefert. Sensor-fps/-modus nach dem Test an echtem Clip.
+- Kopieransicht: Dateiliste mit Stand pro Ziel (wie Silverstack)
+- Mehrere Karten nacheinander (Warteschlange): noch nicht entschieden
 
 ## Phase 0: Prüfungen (laufen nebenher)
 
@@ -52,6 +60,7 @@ Neigung/Rollen aus dem SDI-Signal.
 
 ## Entscheidungen, die Marlon noch treffen muss
 
-- Farbwelt: Stage-Design behalten oder an den Plate Assistant angleichen
+- ~~Farbwelt~~ entschieden: Kategorie-Standard (PRODUCT.md, DESIGN.md)
+- Warteschlange für mehrere Karten: ja oder nein
 - Rolle `ingest_writer` in der Plate-Assistant-Supabase anlegen (Phase 2)
 - Zugang von VM 170 zu Ada für Windows-Tests (oder Tests von Hand)

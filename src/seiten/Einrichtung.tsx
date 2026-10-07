@@ -164,7 +164,7 @@ function Konto() {
   const k = useKonto();
   const lauf = useLauf();
   const [passwort, setPasswort] = useState("");
-  const [erweitert, setErweitert] = useState(!VORGABE_ADRESSE || !VORGABE_ANON);
+  const [erweitert, setErweitert] = useState(!VORGABE_ADRESSE || !VORGABE_ANON || k.eigenerZugang);
   const gesperrt = lauf.laeuft;
   const ton = k.verbindung === "verbunden" ? "ok" : k.verbindung === "fehler" ? "fehler" : k.verbindung === "verbindet" ? "laeuft" : "leise";
   const text =
@@ -246,7 +246,12 @@ function Konto() {
               onChange={(ev) => setPasswort(ev.target.value)}
             />
           </Feld>
-          {k.meldung && <p className="feld-meldung text-fehler">{k.meldung}</p>}
+          {k.meldung && (
+            <p className="feld-meldung text-fehler">
+              {k.meldung}
+              {k.eigenerZugang && " Verwendet wird eine von Hand eingetragene Adresse, nicht die eingebaute."}
+            </p>
+          )}
           <div className="knopfreihe">
             <button
               type="submit"
@@ -258,6 +263,18 @@ function Konto() {
             {!erweitert && (
               <button type="button" className="knopf" onClick={() => setErweitert(true)}>
                 Andere Adresse …
+              </button>
+            )}
+            {k.eigenerZugang && (
+              <button
+                type="button"
+                className="knopf"
+                onClick={() => {
+                  k.eingebautVerwenden();
+                  setErweitert(false);
+                }}
+              >
+                Eingebaute Adresse verwenden
               </button>
             )}
           </div>

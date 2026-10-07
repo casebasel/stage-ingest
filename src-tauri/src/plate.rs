@@ -305,9 +305,10 @@ fn anmelden(z: &Zugang, body: Value, art: &str) -> Result<Sitzung, String> {
     let v: Value = match antwort {
         Ok(a) => a.into_json().map_err(|e| e.to_string())?,
         // Klartext statt Servertext: 401 = Schlüssel falsch, 400 invalid_grant = E-Mail/Passwort falsch.
-        Err(ureq::Error::Status(401, _)) => {
-            return Err("Zugangsschlüssel (Anon-Key) ungültig: die App ist mit dem falschen Schlüssel gebaut oder er ist falsch eingetragen. Unter „Andere Adresse …“ prüfen.".into())
-        }
+        Err(ureq::Error::Status(401, _)) => return Err(
+            "Der Server lehnt den Zugangsschlüssel (Anon-Key) ab. E-Mail und Passwort wurden noch gar nicht geprüft."
+                .into(),
+        ),
         Err(ureq::Error::Status(400, a)) => {
             let t = a.into_string().unwrap_or_default();
             return Err(if t.contains("invalid_grant") || t.contains("Invalid login") {
