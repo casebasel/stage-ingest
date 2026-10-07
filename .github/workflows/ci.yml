@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+# Ein neuer Push bricht den älteren Lauf desselben Zweigs ab.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   kern:
     # Der Kern muss auf allen drei Systemen bestehen: das Lesen ohne Cache ist pro System anders gebaut.
