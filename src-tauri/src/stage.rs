@@ -49,8 +49,8 @@ pub fn karte_melden(adresse: &str, daten: Value) -> Result<Value, String> {
     Err("Stage hat nicht geantwortet".into())
 }
 
-/// Aktives Filmprojekt der Stage (Ereignis `sitzung.projekt {id, name, kurzname}`, Systemkarte c215147).
-/// Der Server schickt nach dem Verbinden seine Ereignisse; nach 3 s ohne dieses Ereignis: keines.
+/// Aktives Filmprojekt der Stage: Feld `projekt {id, name, kurzname}` im Ereignis `sitzung` (Systemkarte c215147,
+/// am echten Server nachgesehen). Der Server schickt `sitzung` gleich nach dem Verbinden; nach 3 s ohne: keines.
 pub fn aktives_projekt(adresse: &str) -> Result<Option<Value>, String> {
     let rechner = gethostname::gethostname().to_string_lossy().into_owned();
     let basis = adresse.trim().trim_end_matches('/').replacen("https://", "wss://", 1).replacen("http://", "ws://", 1);
@@ -63,8 +63,8 @@ pub fn aktives_projekt(adresse: &str) -> Result<Option<Value>, String> {
         match ws.read() {
             Ok(Message::Text(t)) => {
                 let Ok(v) = serde_json::from_str::<Value>(t.as_str()) else { continue };
-                if v["art"] == "ereignis" && v["typ"] == "sitzung.projekt" {
-                    gefunden = Some(v["daten"].clone()).filter(|d| d["kurzname"].is_string());
+                if v["art"] == "ereignis" && v["typ"] == "sitzung" {
+                    gefunden = Some(v["daten"]["projekt"].clone()).filter(|p| p["kurzname"].is_string());
                     break;
                 }
             }
