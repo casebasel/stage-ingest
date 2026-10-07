@@ -36,6 +36,7 @@ export type KartenErgebnis = {
   urteile: Urteil[];
   kennungen: Kennung[];
   mhl: (string | null)[];
+  abgleich: Abgleich | null;
   berichte: ({ Ok: string } | { Err: string })[];
   freigabe: Freigabe;
 };
@@ -58,7 +59,12 @@ export type KartenAuftrag = {
   mitMd5: boolean;
   mindestKopien: number;
   zweimalLesen?: boolean;
+  soll?: SollClip[];
 };
+
+export type SollClip = { clip: string; szene: string; take: string; startTc: string; bewertung: string; quelle: string };
+export type Abgleich = { gefunden: [SollClip, string][]; fehlt: SollClip[]; unerwartet: string[] };
+export const sollVonStage = (adresse: string) => invoke<SollClip[]>("soll_von_stage", { adresse });
 
 export type Befund = { stufe: "fehler" | "warnung"; text: string };
 export const vorabPruefen = (auftrag: KartenAuftrag) => invoke<Befund[]>("vorab_pruefen", { auftrag });

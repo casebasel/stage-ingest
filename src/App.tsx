@@ -8,10 +8,12 @@ import {
   bytesText,
   karteEinlesen,
   kartenname,
+  sollVonStage,
   vorabPruefen,
   zielNachpruefen,
   type Befund,
   type Nachpruefung,
+  type SollClip,
   type Fortschritt,
   type KartenErgebnis,
   type Abweichung,
@@ -65,6 +67,24 @@ export function App() {
   const [zweimalLesen, setZweimalLesen] = useState<boolean>(() => gemerkt("zweimalLesen", false));
   useEffect(() => merken("zweimalLesen", zweimalLesen), [zweimalLesen]);
   const [nachpruefung, setNachpruefung] = useState<Nachpruefung | null>(null);
+  // Soll-Liste: Adresse des Stage-Servers pro Rechner (nie im Repo). Leer = ohne Soll-Liste.
+  const [stageAdresse, setStageAdresse] = useState<string>(() => gemerkt("stageAdresse", ""));
+  useEffect(() => merken("stageAdresse", stageAdresse), [stageAdresse]);
+  const [soll, setSoll] = useState<{ liste: SollClip[]; fehler: string | null; zeit: number } | null>(null);
+  async function sollLaden(): Promise<SollClip[]> {
+    if (!stageAdresse.trim()) {
+      setSoll(null);
+      return [];
+    }
+    try {
+      const liste = await sollVonStage(stageAdresse.trim());
+      setSoll({ liste, fehler: null, zeit: Date.now() });
+      return liste;
+    } catch (e) {
+      setSoll({ liste: [], fehler: String(e), zeit: Date.now() });
+      return [];
+    }
+  }
   const [phase, setPhase] = useState<Phase>("bereit");
   const [stand, setStand] = useState<Stand>(LEERER_STAND);
   const [ergebnis, setErgebnis] = useState<KartenErgebnis | null>(null);
@@ -151,7 +171,9 @@ export function App() {
     setPhase("kopieren");
     try {
       setNachpruefung(null);
-      setErgebnis(await karteEinlesen({ quelle, ziele, mitMd5, mindestKopien, zweimalLesen }));
+      // Soll-Liste frisch holen; ist die Stage nicht erreichbar, wird trotzdem kopiert (Hinweis links).
+      const sollListe = await sollLaden();
+      setErgebnis(await karteEinlesen({ quelle, ziele, mitMd5, mindestKopien, zweimalLesen, soll: sollListe }));
       setPhase("fertig");
     } catch (e) {
       setFehler(String(e));
@@ -281,6 +303,26 @@ export function App() {
             <div className="k-zeile">
               <span className="k-zeile-name">Zurücklesen</span>
               <span className="k-zeile-wert">jedes Ziel, ohne Cache</span>
+            </div>
+          </section>
+
+          <section className="k-gruppe">
+            <h2>Soll-Liste</h2>
+            <span className="k-leise k-klein">Gedrehte Takes von der Stage; fehlende Clips werden vor dem Formatieren gemeldet.</span>
+            <input
+              className="i-eingabe mono"
+              placeholder="http://stage-server:4400"
+              value={stageAdresse}
+              disabled={laeuft}
+              onChange={(e) => setStageAdresse(e.target.value)}
+              spellCheck={false}
+            />
+            <div className="i-knopfreihe">
+              <button className="k-taste k-taste-klein" onClick={sollLaden} disabled={laeuft || !stageAdresse.trim()}>
+                Laden
+              </button>
+              {soll && !soll.fehler && <span className="k-lampe k-lampe-ok"><i /> {soll.liste.length} Takes</span>}
+              {soll?.fehler && <span className="k-lampe k-lampe-warn"><i /> nicht erreichbar</span>}
             </div>
           </section>
 
@@ -496,12 +538,42 @@ function abweichungText(a: Abweichung) {
   }
 }
 
+function AbgleichAnzeige({ a }: { a: NonNullable<KartenErgebnis["abgleich"]> }) {
+  return (
+    <section className="i-abschnitt">
+      <h2>
+        Abgleich mit der Stage{" "}
+        <span className="k-leise mono">
+          · {a.gefunden.length} gefunden · {a.fehlt.length} fehlen · {a.unerwartet.length} ohne Take
+        </span>
+      </h2>
+      {a.fehlt.map((s) => (
+        <span key={s.clip} className="k-lampe k-lampe-warn">
+          <i /> Fehlt auf der Karte: <span className="mono">{s.clip}</span> · {s.szene} Take {s.take}
+          {s.bewertung && ` · ${s.bewertung}`}
+        </span>
+      ))}
+      {a.unerwartet.map((p) => (
+        <span key={p} className="k-lampe k-lampe-leise">
+          <i /> Ohne Take (Klärungsliste): <span className="mono">{p}</span>
+        </span>
+      ))}
+      {a.fehlt.length === 0 && a.unerwartet.length === 0 && (
+        <span className="k-lampe k-lampe-ok">
+          <i /> Alle gedrehten Takes dieser Karte sind da
+        </span>
+      )}
+    </section>
+  );
+}
+
 function Ergebnis({ ergebnis }: { ergebnis: KartenErgebnis }) {
   const { kopie, urteile, kennungen } = ergebnis;
 
   const summe = kopie.dateien.reduce((s, d) => s + d.groesse, 0);
   return (
     <>
+      {ergebnis.abgleich && <AbgleichAnzeige a={ergebnis.abgleich} />}
       <section className="i-abschnitt">
         <h2>Ziele</h2>
         {urteile.map((u, i) => {

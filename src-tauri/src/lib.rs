@@ -9,6 +9,7 @@ use ingest_kern::geraet::{self, Kennung};
 use ingest_kern::kopie::{self, Auftrag, Kopie, Meldung};
 use ingest_kern::mhl;
 use ingest_kern::pruefen::{self, Urteil};
+use ingest_kern::soll::{self, Abgleich, SollClip};
 use ingest_kern::vorpruefen::{self, Befund, Stufe};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
@@ -30,6 +31,9 @@ struct KartenAuftrag {
     /// Karte nach dem Kopieren ein zweites Mal lesen (erkennt einen unzuverlässigen Kartenleser).
     #[serde(default)]
     zweimal_lesen: bool,
+    /// Soll-Liste (vor dem Start von der Stage geladen); leer, wenn keine Quelle eingestellt ist.
+    #[serde(default)]
+    soll: Vec<SollClip>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -49,6 +53,8 @@ struct KartenErgebnis {
     kennungen: Vec<Kennung>,
     /// Pfad der neuen `.mhl` je Ziel, `None` bei einem fehlerhaften Ziel.
     mhl: Vec<Option<PathBuf>>,
+    /// Abgleich mit der Soll-Liste (`None` ohne Soll-Liste).
+    abgleich: Option<Abgleich>,
     /// PDF-Bericht je Ziel: Pfad oder Fehlertext.
     berichte: Vec<Result<PathBuf, String>>,
     freigabe: Freigabe,
@@ -228,6 +234,12 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
         historie_abweichungen,
     };
     let mut freigabe = freigabe::beurteilen(&urteile, &kennungen, auftrag.mindest_kopien, umfang);
+    let abgleich = (!auftrag.soll.is_empty()).then(|| soll::abgleichen(&kopie, &auftrag.soll));
+    if let Some(a) = abgleich.as_ref().filter(|a| !a.fehlt.is_empty()) {
+        // Zusätzliche Warnung; die Freigabe hängt weiter an den geprüften Kopien (Konzept 6a).
+        let liste = a.fehlt.iter().map(|s| format!("{} ({} Take {})", s.clip, s.szene, s.take)).collect::<Vec<_>>();
+        freigabe.hinweise.push(format!("Gedreht, aber nicht auf der Karte: {}", liste.join(", ")));
+    }
     if !kopie.ausgelassen.is_empty() {
         freigabe
             .hinweise
@@ -244,7 +256,7 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
             ingest_bericht::schreiben(&urteile[i].ordner, &pdf, &kopie.beginn).map_err(|e| e.to_string())
         })
         .collect();
-    let ergebnis = KartenErgebnis { kopie, urteile, kennungen, mhl, berichte, freigabe };
+    let ergebnis = KartenErgebnis { kopie, urteile, kennungen, mhl, abgleich, berichte, freigabe };
     if let Err(e) = verlauf_anhaengen(app, &ergebnis) {
         eprintln!("Verlauf nicht geschrieben: {e}"); // die Karte ist trotzdem kopiert und belegt
     }
@@ -275,6 +287,27 @@ async fn ziel_nachpruefen(
     .and_then(|r| r);
     aktiv.store(false, Ordering::SeqCst);
     ergebnis
+}
+
+/// Soll-Liste vom Stage-Server laden (CSV-Export, nur lesen). `adresse` aus den lokalen Einstellungen,
+/// z. B. `http://<stage-server>:4400`.
+#[tauri::command]
+async fn soll_von_stage(adresse: String) -> Result<Vec<SollClip>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let rechner = gethostname::gethostname().to_string_lossy().into_owned();
+        let url = format!("{}/export/takes.csv", adresse.trim_end_matches('/'));
+        let text = ureq::get(&url)
+            .query("quelle", "stage-ingest")
+            .query("geraet", &rechner)
+            .timeout(std::time::Duration::from_secs(5))
+            .call()
+            .map_err(|e| format!("Stage nicht erreichbar: {e}"))?
+            .into_string()
+            .map_err(|e| e.to_string())?;
+        soll::stage_csv(&text)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Name des Kartenordners auf den Zielen (bei einer Windows-Laufwerkswurzel der Volume-Name).
@@ -315,6 +348,7 @@ pub fn run() {
             karte_einlesen,
             ziel_nachpruefen,
             kartenname,
+            soll_von_stage,
             abbrechen,
             laeuft,
             verlauf

@@ -6,12 +6,12 @@ Stand 07.10.2026. Nur diese App; app-übergreifende Abhängigkeiten stehen in de
 
 Gebaut ist der Kern (siehe KONZEPT Kapitel 14). Offen, in dieser Reihenfolge:
 
-1. **Releases** 0.1.1 (Tag/Nacht, ad-hoc Signatur Mac) und 0.1.2 (drei Stufen, Kontraste); Update-Banner einmal echt testen.
+1. ~~Releases 0.1.1~~ (Update-Banner getestet); 0.1.2 mit allen Funden der Code-Prüfung als Pflicht-Update.
 2. **Sicherheit nachschärfen**
-   - Optional: Karte ein zweites Mal lesen (erkennt einen fehlerhaften Kartenleser)
-   - „Ziel nachprüfen“: eine Kopie jederzeit gegen ihr ASC MHL prüfen
-   - Seriennummer der Platte auch am Mac (IORegistry)
-   - Unabhängige Code-Prüfung des Kerns
+   - ~~Optional: Karte ein zweites Mal lesen~~ gebaut
+   - ~~„Ziel nachprüfen“ gegen ASC MHL~~ gebaut
+   - ~~Seriennummer der Platte auch am Mac~~ gebaut (system_profiler)
+   - ~~Unabhängige Code-Prüfung des Kerns~~ gemacht, alle Funde behoben (5 kritische, 7 mittlere)
 3. **Test mit echter Hardware** (Marlon)
    - Mac: echte Karte über den Kartenleser auf zwei externe Platten und aufs NAS
    - Windows: auf Ada mit `A001R132`
@@ -32,7 +32,7 @@ Gebaut ist der Kern (siehe KONZEPT Kapitel 14). Offen, in dieser Reihenfolge:
 - Produktion → Kunde/Projekt der Stage beim ersten Import zuordnen und merken
 - Plate Assistant lesen (Dreh, Plate, Take, Fotos); Rückmeldung über eigene Tabellen (`ingest_meldung`, Rolle `ingest_writer`, legt Marlon an)
 - Clip ↔ Take: Info 1 → `clip_name` → Timecode → Zeitfenster; Klärungsliste
-- Soll-Liste: Studio-Takes von der Stage (WebSocket), Plate-Takes vom Plate Assistant; fehlende Clips vor der Freigabe melden
+- ~~Soll-Liste Studio~~ gebaut (07.10.2026): Stage-CSV-Export, Abgleich nach Kamera+Reel, fehlende Clips als Hinweis vor der Freigabe; offen: Plate-Takes vom Plate Assistant als zweite Quelle
 - ART CMD: Neigung, Rollen, Objektiv pro Bild nach `05_METADATEN`, `aus_clip` an den Plate Assistant
 - ALE pro Karte (von der Karte oder erzeugt) an den Stage-Server
 - Referenz-Takes (Grau-/Chromkugel, Cleanplate) zur Plate verweisen
