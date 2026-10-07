@@ -197,7 +197,9 @@ mod tests {
         let b = vorpruefen(&auftrag(&t.path().join("A001"), &[&t.path().join("ziel/A001")]), 1);
         // Im Test liegen Karte und Ziel im selben Temp-Ordner, also auf demselben Volume: genau das muss auffallen.
         assert!(b.iter().any(|b| b.stufe == Stufe::Fehler && b.text.contains("auf der Karte selbst")), "{b:?}");
-        assert!(b.iter().all(|b| b.stufe != Stufe::Fehler || b.text.contains("auf der Karte selbst")), "{b:?}");
+        // Auf Mac und Windows ist zusätzlich die Platte bestimmbar: dann auch „derselben Platte wie die Karte“.
+        let erwartet = |t: &str| t.contains("auf der Karte selbst") || t.contains("derselben Platte wie die Karte");
+        assert!(b.iter().all(|b| b.stufe != Stufe::Fehler || erwartet(&b.text)), "{b:?}");
     }
 
     #[test]
