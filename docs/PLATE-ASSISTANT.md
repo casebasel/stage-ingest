@@ -14,7 +14,7 @@ Schreiben nur über die Funktion `aenderungen_anwenden` (pro Feld gewinnt die j�
 | `foto` | `id`, `plate_id`, `art`, `pfad`, `zeit` (noch nicht gebaut) |
 | `hdri`, `hdri_frame` | noch kein Modell; Vorschlag siehe unten |
 
-Referenz-Takes (Grau-/Chromkugel, Cleanplate) sind echte Clips der Hauptkamera, zählen in der Take-Nummer mit und gehören in `02_PLATES/<Plate>/` als Referenz, nicht als Plate-Take.
+Referenz-Takes (`take.art` = graukugel, chromkugel, cleanplate) sind echte Clips der Hauptkamera, zählen in der Take-Nummer mit und werden in `02_PLATES/<Plate>/` als Referenz verwiesen, nicht als Plate-Take (Systemkarte 04118cf). Der Clip selbst bleibt wie alle Clips 1:1 in `01_KAMERA/`.
 
 Klappe: QR mit `PA:<take.id>`.
 
@@ -31,7 +31,7 @@ Klappe: QR mit `PA:<take.id>`.
 
 Offen: ob die Info-Felder in den Clip-Metadaten (ProRes/ALE) ankommen; an einem echten Clip der Mini prüfen (Phase 0). Feldlängen laut CAP 1.19 (von der Stage geprüft): Scene 0x0096 höchstens 16, Take 0x0097 höchstens **8**, User Info 1/2 (0x0098/0x0099) je 128 Zeichen, beschreibbar ab SUP 5.3 (an der Kamera noch nicht live getestet); zusätzlich Location 0x0095 (64) und Production 0x0090 (32). Nur ASCII. `3-12` passt; Take-Text über 8 Zeichen wird abgeschnitten, deshalb höchstens `999-999`. Testclip mit beschriebenen Info-Feldern: Plate Assistant beim Mini-Test um den 20.10.
 
-Migrationen des Plate Assistant: 0006 Szene/VFX-Notiz/Take-Art (nicht angewendet), 0007/0008 Fotos, danach HDRI – alle erst auf Marlons Wort.
+Migrationen des Plate Assistant: 0006 (`dreh.szene`, `plate.szene`, `plate.buchstabe`, `take.art`) ist angewendet (Systemkarte 04118cf), 0007/0008 Fotos, danach HDRI – alle erst auf Marlons Wort.
 
 Rückfälle: `clip_name` → Timecode-Überlappung → Zeitfenster der Plate → Klärungsliste.
 
