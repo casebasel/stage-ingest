@@ -13,6 +13,8 @@ pub enum Fehler {
     ZielLesen { pfad: PathBuf, quelle: std::io::Error },
     #[error("Quelle hat sich während des Kopierens verändert: {0}")]
     QuelleVeraendert(PathBuf),
+    #[error("Alle Ziele ausgefallen: {0}")]
+    AlleZieleAusgefallen(String),
     #[error("Kein Ziel angegeben")]
     KeinZiel,
     #[error("Abgebrochen")]

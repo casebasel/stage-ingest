@@ -131,6 +131,23 @@ fn ausgefallenes_ziel_haelt_die_anderen_nicht_auf() {
 }
 
 #[cfg(unix)]
+#[test]
+fn alle_ziele_ausgefallen_ist_ein_fehler() {
+    use std::os::unix::fs::PermissionsExt;
+    if unsafe { libc_geteuid() } == 0 {
+        return;
+    }
+    let t = tempfile::tempdir().unwrap();
+    karte(&t.path().join("karte"));
+    let gesperrt = t.path().join("gesperrt");
+    fs::create_dir_all(&gesperrt).unwrap();
+    fs::set_permissions(&gesperrt, fs::Permissions::from_mode(0o555)).unwrap();
+    let auftrag = Auftrag { quelle: t.path().join("karte"), ziele: vec![gesperrt], mit_md5: false };
+    let r = kopieren(&auftrag, &AtomicBool::new(false), |_| {});
+    assert!(matches!(r, Err(Fehler::AlleZieleAusgefallen(_))), "{r:?}");
+}
+
+#[cfg(unix)]
 extern "C" {
     #[link_name = "geteuid"]
     fn libc_geteuid() -> u32;

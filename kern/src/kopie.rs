@@ -184,7 +184,10 @@ pub fn kopieren(auftrag: &Auftrag, abbruch: &AtomicBool, mut melden: impl FnMut(
             pruefsumme: rechner.fertig(),
         });
         if zustaende.iter().all(|z| z.lock().expect("Zustand").is_some()) {
-            break; // alle Ziele ausgefallen, weiterlesen bringt nichts
+            // Weiterlesen bringt nichts; eine halbe Dateiliste darf nicht wie eine ganze Karte aussehen.
+            let gruende = zustaende.iter().filter_map(|z| z.lock().expect("Zustand").clone()).collect::<Vec<_>>();
+            ergebnis = Err(Fehler::AlleZieleAusgefallen(gruende.join("; ")));
+            break;
         }
     }
 
