@@ -309,3 +309,10 @@ body {
   color: var(--text-3);
   font-size: 12px;
 }
+
+/* Pfade werden vorne gekürzt (direction: rtl). Unsichtbare Links-nach-rechts-Marken halten Schrägstriche am richtigen
+   Ende: sonst wird aus „/Volumes/A001R132“ „Volumes/A001R132/“. */
+.i-pfad::before,
+.i-pfad::after {
+  content: "\200E";
+}

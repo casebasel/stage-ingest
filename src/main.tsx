@@ -8,6 +8,11 @@ import "./stil/ingest.css";
 import { App } from "./App";
 import { gemerkteWahl, thema } from "./thema";
 
+// Im normalen Browser (ohne Tauri): Vorschau mit Beispieldaten statt des Rust-Kerns.
+if (!("__TAURI_INTERNALS__" in window)) {
+  (await import("./vorschau")).einrichten();
+}
+
 // Vor dem ersten Bild setzen, damit nichts aufblitzt.
 document.documentElement.dataset.thema = thema(gemerkteWahl());
 

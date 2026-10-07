@@ -36,9 +36,11 @@ type Stand = {
   pruefPfad: string;
   beginn: number;
   ausfaelle: string[];
+  /** Zahl der Ziele beim Start (die Auswahl kann sich danach ändern). */
+  zielZahl: number;
 };
 
-const LEERER_STAND: Stand = { dateien: 0, bytes: 0, gelesen: 0, datei: "", pruefZiel: 0, pruefPfad: "", beginn: 0, ausfaelle: [] };
+const LEERER_STAND: Stand = { dateien: 0, bytes: 0, gelesen: 0, datei: "", pruefZiel: 0, pruefPfad: "", beginn: 0, ausfaelle: [], zielZahl: 0 };
 
 // Ziele und Einstellungen pro Rechner merken. Nur Bequemlichkeit: fehlt der Speicher, gilt der Standard.
 function gemerkt<T>(schluessel: string, standard: T): T {
@@ -131,16 +133,13 @@ export function App() {
   const [befunde, setBefunde] = useState<Befund[]>([]);
 
   useEffect(() => {
-    const weg = aufFortschritt((f: Fortschritt) =>
+    // Phase ausserhalb des Zustands-Updaters setzen: React darf Updater mehrfach und spät ausführen, ein setPhase
+    // darin könnte „prüft“ nach dem fertigen Ergebnis wieder setzen.
+    const weg = aufFortschritt((f: Fortschritt) => {
+      if (f.phase !== "kopieren") setPhase(f.phase);
       setStand((s) => {
-        if (f.phase === "pruefen") {
-          setPhase("pruefen");
-          return { ...s, pruefZiel: f.ziel, pruefPfad: f.pfad };
-        }
-        if (f.phase === "nachlesen" || f.phase === "nachpruefen") {
-          setPhase(f.phase);
-          return { ...s, pruefPfad: f.pfad };
-        }
+        if (f.phase === "pruefen") return { ...s, pruefZiel: f.ziel, pruefPfad: f.pfad };
+        if (f.phase === "nachlesen" || f.phase === "nachpruefen") return { ...s, pruefPfad: f.pfad };
         const m = f.meldung;
         switch (m.art) {
           case "begonnen":
@@ -152,8 +151,8 @@ export function App() {
           case "zielAusgefallen":
             return { ...s, ausfaelle: [...s.ausfaelle, `${m.ordner}: ${m.fehler}`] };
         }
-      }),
-    );
+      });
+    });
     return () => {
       weg.then((f) => f());
     };
@@ -231,7 +230,7 @@ export function App() {
     if (!quelle || ziele.length === 0) return;
     setFehler(null);
     setErgebnis(null);
-    setStand({ ...LEERER_STAND, beginn: Date.now() });
+    setStand({ ...LEERER_STAND, beginn: Date.now(), zielZahl: ziele.length });
     setPhase("kopieren");
     try {
       setNachpruefung(null);
@@ -666,7 +665,7 @@ function Zustand(p: {
           {phase === "kopieren"
             ? "Kopiert an alle Ziele"
             : phase === "pruefen"
-              ? `Liest Ziel ${stand.pruefZiel + 1} von ${p.ziele.length} zurück`
+              ? `Liest Ziel ${stand.pruefZiel + 1} von ${stand.zielZahl} zurück`
               : phase === "nachlesen"
                 ? "Liest die Karte ein zweites Mal"
                 : "Prüft die Kopie gegen ihr ASC MHL"}
