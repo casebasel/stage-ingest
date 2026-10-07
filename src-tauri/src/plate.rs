@@ -425,3 +425,51 @@ mod tests {
         assert_ne!(a, ulid_aehnlich());
     }
 }
+
+#[cfg(test)]
+mod echter_test {
+    //! Nur lesend gegen die echte Supabase, nur auf Aufruf:
+    //! `cargo test -p stage-ingest echter_test -- --ignored --nocapture`
+    //! Zugangsdaten aus `~/.config/stage-ingest/plate-test.env` (SUPABASE_ADRESSE, ANON_KEY, EMAIL, PASSWORT),
+    //! nie aus dem Repo.
+    use super::*;
+
+    fn zugang() -> (Zugang, String) {
+        let pfad = std::path::Path::new(&std::env::var("HOME").unwrap()).join(".config/stage-ingest/plate-test.env");
+        let text = std::fs::read_to_string(&pfad).expect("plate-test.env fehlt");
+        let wert = |k: &str| {
+            text.lines()
+                .find_map(|z| z.strip_prefix(&format!("{k}=")))
+                .map(|v| v.trim().trim_matches('"').to_owned())
+                .unwrap_or_else(|| panic!("{k} fehlt in plate-test.env"))
+        };
+        (
+            Zugang { adresse: wert("SUPABASE_ADRESSE"), anon_key: wert("ANON_KEY"), email: wert("EMAIL") },
+            wert("PASSWORT"),
+        )
+    }
+
+    #[test]
+    #[ignore]
+    fn lesen_gegen_supabase_stage() {
+        let (z, passwort) = zugang();
+        // Anmelden direkt (ohne Schlüsselbund, den gibt es auf der VM nicht).
+        let s = anmelden(&z, json!({"email": z.email, "password": passwort}), "password").expect("Anmeldung");
+        let p = Plate::default();
+        *p.sitzung.lock().unwrap() = Some(s);
+        let projekte = p.projekte(&z).expect("Projekte");
+        println!("Projekte: {:?}", projekte.iter().map(|x| &x.kurzname).collect::<Vec<_>>());
+        let drehs = p.drehs(&z, 365).expect("Drehorte");
+        println!("Drehorte: {}", drehs.len());
+        for d in drehs.iter().take(3) {
+            let soll = p.soll(&z, &d.id).expect("Soll-Liste");
+            println!("{} {} ({:?}/{}): {} Takes", d.datum, d.name, d.projekt_id, d.produktion, soll.len());
+            for s in soll.iter().take(3) {
+                println!(
+                    "   {} Take {} clip={:?} start={} bis={}",
+                    s.szene, s.take, s.clip, s.start_zeit, s.fenster_bis
+                );
+            }
+        }
+    }
+}
