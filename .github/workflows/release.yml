@@ -34,6 +34,15 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: swatinem/rust-cache@v2
       - run: npm ci
+      - name: Vorbelegung der Anmeldung prüfen
+        shell: bash
+        env:
+          A: ${{ vars.SUPABASE_ADRESSE }}
+          K: ${{ vars.SUPABASE_ANON_KEY }}
+        # Nur ob gesetzt, nie den Wert; als Hinweis sichtbar auch ohne Anmeldung (Annotation).
+        run: |
+          if [ -n "$A" ] && [ -n "$K" ]; then echo "::notice::Anmeldung vorbelegt (SUPABASE_ADRESSE und SUPABASE_ANON_KEY gesetzt)"
+          else echo "::warning::Anmeldung NICHT vorbelegt: Repository-Variablen SUPABASE_ADRESSE/SUPABASE_ANON_KEY fehlen"; fi
       - name: Bauen, signieren, ins Release laden
         uses: tauri-apps/tauri-action@v0
         env:
