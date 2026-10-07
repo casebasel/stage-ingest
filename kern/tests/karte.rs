@@ -5,7 +5,7 @@ use std::path::Path;
 use std::sync::atomic::AtomicBool;
 
 use ingest_kern::freigabe::beurteilen;
-use ingest_kern::geraet::Kennung;
+use ingest_kern::geraet::{Art, Kennung};
 use ingest_kern::kopie::{kopieren, Auftrag, Meldung};
 use ingest_kern::pruefen::{zurueckpruefen, Abweichung};
 use ingest_kern::Fehler;
@@ -25,7 +25,15 @@ fn karte(wurzel: &Path) {
 }
 
 fn platten(n: usize) -> Vec<Kennung> {
-    (0..n).map(|i| Kennung { wert: format!("platte{i}"), sicher: true }).collect()
+    (0..n)
+        .map(|i| Kennung {
+            wert: format!("platte{i}"),
+            sicher: true,
+            art: Art::Platte,
+            seriennummer: None,
+            beschreibung: String::new(),
+        })
+        .collect()
 }
 
 #[test]

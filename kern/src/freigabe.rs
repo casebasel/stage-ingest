@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 
 use serde::Serialize;
 
-use crate::geraet::Kennung;
+use crate::geraet::{Art, Kennung};
 use crate::pruefen::Urteil;
 
 /// Standard, pro Produktion einstellbar (`docs/KONZEPT.md`, Kapitel 4).
@@ -19,13 +19,16 @@ pub struct Freigabe {
     /// Mindestens eine gezählte Kopie ist nur über das Volume erkannt, nicht über die Seriennummer.
     pub kennung_unsicher: bool,
     pub grund: String,
+    /// Zusätzliche Hinweise für Oberfläche und Bericht (z. B. NAS-Cache).
+    pub hinweise: Vec<String>,
 }
 
 /// Beurteilt die Karte. `kennungen[i]` gehört zu `urteile[i]`.
 pub fn beurteilen(urteile: &[Urteil], kennungen: &[Kennung], mindest_kopien: usize) -> Freigabe {
     assert_eq!(urteile.len(), kennungen.len(), "eine Kennung pro Ziel");
     let gute: Vec<&Kennung> = urteile.iter().zip(kennungen).filter(|(u, _)| u.gut()).map(|(_, k)| k).collect();
-    let platten: BTreeSet<&str> = gute.iter().map(|k| k.wert.as_str()).collect();
+    // Unbewiesene Ziele zählen zusammen höchstens als eins (Grundsatz in geraet.rs).
+    let platten: BTreeSet<&str> = gute.iter().map(|k| if k.sicher { k.wert.as_str() } else { "unbewiesen" }).collect();
     let unabhaengige_kopien = platten.len();
     let kennung_unsicher = gute.iter().any(|k| !k.sicher);
     let schlechte = urteile.len() - gute.len();
@@ -42,7 +45,18 @@ pub fn beurteilen(urteile: &[Urteil], kennungen: &[Kennung], mindest_kopien: usi
     } else {
         format!("nur {unabhaengige_kopien} von {mindest_kopien} Kopien")
     };
-    Freigabe { sicher, unabhaengige_kopien, mindest_kopien, kennung_unsicher, grund }
+    let mut hinweise = Vec::new();
+    if gute.iter().any(|k| k.art == Art::Netz) {
+        hinweise.push(
+            "Netzlaufwerk über das Netz zurückgelesen; den Zwischenspeicher des NAS kann keine App umgehen.".into(),
+        );
+    }
+    if kennung_unsicher {
+        hinweise.push(
+            "Mindestens ein Ziel ist nur über das Volume erkannt; solche Ziele zählen zusammen als eine Kopie.".into(),
+        );
+    }
+    Freigabe { sicher, unabhaengige_kopien, mindest_kopien, kennung_unsicher, grund, hinweise }
 }
 
 #[cfg(test)]
@@ -59,7 +73,22 @@ mod tests {
         }
     }
     fn platte(w: &str) -> Kennung {
-        Kennung { wert: w.into(), sicher: true }
+        Kennung { wert: w.into(), sicher: true, art: Art::Platte, seriennummer: None, beschreibung: String::new() }
+    }
+
+    #[test]
+    fn unbewiesene_ziele_zaehlen_zusammen_als_eins() {
+        let v = |w: &str| Kennung {
+            wert: w.into(),
+            sicher: false,
+            art: Art::Volume,
+            seriennummer: None,
+            beschreibung: String::new(),
+        };
+        let f = beurteilen(&[urteil(true), urteil(true)], &[v("volume:1"), v("volume:2")], 2);
+        assert!(!f.sicher);
+        let f = beurteilen(&[urteil(true), urteil(true)], &[platte("A"), v("volume:2")], 2);
+        assert!(f.sicher);
     }
 
     #[test]

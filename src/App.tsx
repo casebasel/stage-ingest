@@ -295,11 +295,11 @@ function Zustand(p: {
             <i /> {ergebnis.freigabe.sicher ? "Sicher zum Formatieren" : "Nicht freigegeben"}
           </span>
           <span className="i-zustand-grund">{ergebnis.freigabe.grund}</span>
-          {ergebnis.freigabe.kennung_unsicher && (
-            <span className="k-lampe k-lampe-warn">
-              <i /> Platten nur über das Volume erkannt, Seriennummer noch nicht geprüft
+          {ergebnis.freigabe.hinweise.map((h) => (
+            <span key={h} className="k-lampe k-lampe-warn">
+              <i /> {h}
             </span>
-          )}
+          ))}
         </>
       ) : phase === "fehler" ? (
         <>
@@ -356,7 +356,10 @@ function Ergebnis({ ergebnis }: { ergebnis: KartenErgebnis }) {
               <span className="i-pfad mono" title={u.ordner}>
                 {u.ordner}
               </span>
-              <span className="k-leise mono">{kennungen[i]?.wert}</span>
+              <span className="k-leise">
+                {kennungen[i]?.beschreibung || kennungen[i]?.wert}
+                {kennungen[i]?.seriennummer && <span className="mono"> · SN {kennungen[i]?.seriennummer}</span>}
+              </span>
               {ergebnis.mhl[i] && <span className="k-leise">ASC MHL: <span className="mono">{name(ergebnis.mhl[i]!)}</span></span>}
               {u.kopierfehler && <span className="i-abweichung">Kopieren: {u.kopierfehler}</span>}
               {u.abweichungen.map((a) => (

@@ -1787,6 +1787,7 @@ dependencies = [
  "gethostname",
  "libc",
  "md-5",
+ "plist",
  "quick-xml 0.37.5",
  "serde",
  "sha2",

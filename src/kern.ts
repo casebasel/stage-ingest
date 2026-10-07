@@ -16,13 +16,20 @@ export type Abweichung =
   | { art: "zusaetzlich"; pfad: string };
 
 export type Urteil = { ordner: string; geprueft: number; abweichungen: Abweichung[]; kopierfehler: string | null };
-export type Kennung = { wert: string; sicher: boolean };
+export type Kennung = {
+  wert: string;
+  sicher: boolean;
+  art: "platte" | "netz" | "volume";
+  seriennummer: string | null;
+  beschreibung: string;
+};
 export type Freigabe = {
   sicher: boolean;
   unabhaengige_kopien: number;
   mindest_kopien: number;
   kennung_unsicher: boolean;
   grund: string;
+  hinweise: string[];
 };
 export type KartenErgebnis = { kopie: Kopie; urteile: Urteil[]; kennungen: Kennung[]; mhl: (string | null)[]; freigabe: Freigabe };
 
