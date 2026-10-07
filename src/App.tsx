@@ -80,10 +80,12 @@ export function App() {
   const [quelle, setQuelle] = useState<string | null>(null);
   const [zielOrdner, setZielOrdner] = useState<string[]>(() => gemerkt("ziele", []));
   const [mitMd5, setMitMd5] = useState<boolean>(() => gemerkt("mitMd5", false));
-  const [mindestKopien, setMindestKopien] = useState<number>(() => gemerkt("mindestKopien", 2));
+  // Nie unter 2 gemerkt: eine abgesenkte Schwelle gilt nur für diese Sitzung und nur nach Bestätigung.
+  const [mindestKopien, setMindestKopien] = useState<number>(() => Math.max(2, gemerkt("mindestKopien", 2)));
+  const [schwelleFrage, setSchwelleFrage] = useState(false);
   useEffect(() => merken("ziele", zielOrdner), [zielOrdner]);
   useEffect(() => merken("mitMd5", mitMd5), [mitMd5]);
-  useEffect(() => merken("mindestKopien", mindestKopien), [mindestKopien]);
+  useEffect(() => merken("mindestKopien", Math.max(2, mindestKopien)), [mindestKopien]);
   const [zweimalLesen, setZweimalLesen] = useState<boolean>(() => gemerkt("zweimalLesen", false));
   useEffect(() => merken("zweimalLesen", zweimalLesen), [zweimalLesen]);
   const [nachpruefung, setNachpruefung] = useState<Nachpruefung | null>(null);
@@ -161,10 +163,17 @@ export function App() {
   // Drehstruktur: mit Projekt und Dreh kommt jede Karte nach <Ziel>/<Projekt>/<Datum>_<Dreh>/01_KAMERA/<Karte>.
   // Projekt ist vorerst Text; es wird zur Auswahl aus der gemeinsamen Supabase (Paket casebasel/stage-projekt).
   const [projekt, setProjekt] = useState<string>(() => gemerkt("projekt", ""));
-  const [drehName, setDrehName] = useState<string>(() => gemerkt("drehName", ""));
+  // Der Drehort wird nur am selben Tag übernommen: sonst landet die Karte von heute still im Ordner von gestern.
+  const heute = new Date().toLocaleDateString("sv-SE");
+  const [drehName, setDrehName] = useState<string>(() =>
+    gemerkt("drehTag", "") === heute ? gemerkt("drehName", "") : "",
+  );
   const [drehDatum, setDrehDatum] = useState<string>(() => new Date().toLocaleDateString("sv-SE"));
   useEffect(() => merken("projekt", projekt), [projekt]);
-  useEffect(() => merken("drehName", drehName), [drehName]);
+  useEffect(() => {
+    merken("drehName", drehName);
+    merken("drehTag", heute);
+  }, [drehName, heute]);
   // Aus dem Plate Assistant gewählt: Projekt mit festem Kurznamen, Drehort mit Takes als Soll-Liste.
   const [paProjekt, setPaProjekt] = useState<Projekt | null>(null);
   const [paDreh, setPaDreh] = useState<DrehKurz | null>(null);
@@ -238,7 +247,7 @@ export function App() {
         }
       }
       const sollListe = [...sollStage, ...sollPlate];
-      setErgebnis(await karteEinlesen({
+      const e = await karteEinlesen({
           quelle,
           ziele,
           mitMd5,
@@ -250,7 +259,9 @@ export function App() {
           stageAdresse: stageAdresse.trim() || null,
           plateZugang: paDreh ? gemerkterZugang() : null,
           plateDreh: paDreh?.id ?? null,
-        }));
+        });
+      setErgebnis(e);
+      setQuelle(null); // nächste Karte: nie aus Versehen dieselbe nochmals
       setPhase("fertig");
     } catch (e) {
       setFehler(String(e));
@@ -306,7 +317,7 @@ export function App() {
           </button>
         </nav>
         <div className="i-kopf-rechts">
-          <Kopflampe phase={phase} ergebnis={ergebnis} />
+          <Kopflampe phase={phase} ergebnis={ergebnis} hatKarte={!!quelle} />
           <ThemaSchalter />
         </div>
       </header>
@@ -392,7 +403,11 @@ export function App() {
 
           <section className="k-gruppe">
             <h2>Ziele</h2>
-            {zielOrdner.length === 0 && <span className="k-leise">Mindestens zwei Ziele auf verschiedenen Platten</span>}
+            {zielOrdner.length === 0 && (
+              <span className="k-leise">
+                Mindestens {mindestKopien} {mindestKopien === 1 ? "Ziel" : "Ziele auf verschiedenen Platten"}
+              </span>
+            )}
             {zielOrdner.map((z) => (
               <div className="i-ziel" key={z}>
                 <span className="i-pfad mono" title={z}>
@@ -426,9 +441,38 @@ export function App() {
                 max={9}
                 value={mindestKopien}
                 disabled={laeuft}
-                onChange={(e) => setMindestKopien(Math.max(1, Number(e.target.value) || 1))}
+                onChange={(e) => {
+                  const n = Math.min(9, Math.max(1, Number(e.target.value) || 1));
+                  if (n < 2) setSchwelleFrage(true);
+                  else {
+                    setSchwelleFrage(false);
+                    setMindestKopien(n);
+                  }
+                }}
               />
             </label>
+            {schwelleFrage && (
+              <div className="i-rueckfrage">
+                <span className="k-warn k-klein">
+                  Freigabe schon bei einer einzigen Kopie? Fällt diese Platte aus, ist das Material weg. Nur für Tests; gilt
+                  nur bis zum Neustart.
+                </span>
+                <div className="i-knopfreihe">
+                  <button
+                    className="k-taste k-taste-klein"
+                    onClick={() => {
+                      setMindestKopien(1);
+                      setSchwelleFrage(false);
+                    }}
+                  >
+                    Ja, 1 Kopie reicht
+                  </button>
+                  <button className="k-taste k-taste-klein k-taste-leise" onClick={() => setSchwelleFrage(false)}>
+                    Bei {mindestKopien} bleiben
+                  </button>
+                </div>
+              </div>
+            )}
             <label className="i-schalter">
               Zusätzlich MD5
               <input type="checkbox" checked={mitMd5} disabled={laeuft} onChange={(e) => setMitMd5(e.target.checked)} />
@@ -519,6 +563,18 @@ export function App() {
               fehler={fehler}
               ziele={ziele}
               bereit={!!quelle && ziele.length > 0 && !pflicht && !sperrt}
+              gesperrtWeil={
+                !quelle
+                  ? "Zuerst links die Karte wählen."
+                  : ziele.length === 0
+                    ? "Links mindestens ein Ziel hinzufügen."
+                    : pflicht
+                      ? "Erst das Pflicht-Update installieren (Banner oben)."
+                      : sperrt
+                        ? "Die Vorab-Prüfung sperrt den Start (siehe oben)."
+                        : null
+              }
+              naechsteKarte={karteWaehlen}
               befunde={befunde}
               einlesen={einlesen}
               abbrechen={abbrechenKlick}
@@ -558,14 +614,30 @@ function ThemaSchalter() {
   );
 }
 
-function Kopflampe({ phase, ergebnis }: { phase: Phase; ergebnis: KartenErgebnis | null }) {
+function Kopflampe({ phase, ergebnis, hatKarte }: { phase: Phase; ergebnis: KartenErgebnis | null; hatKarte: boolean }) {
   if (phase === "kopieren") return <span className="k-lampe k-lampe-leise"><i /> Kopiert</span>;
   if (phase === "pruefen" || phase === "nachlesen" || phase === "nachpruefen")
     return <span className="k-lampe k-lampe-leise"><i /> Prüft</span>;
   if (phase === "fehler") return <span className="k-lampe k-lampe-warn"><i /> Fehler</span>;
   if (ergebnis?.freigabe.sicher) return <span className="k-lampe k-lampe-ok"><i /> Sicher zum Formatieren</span>;
   if (ergebnis) return <span className="k-lampe k-lampe-warn"><i /> Nicht freigegeben</span>;
-  return <span className="k-lampe k-lampe-leise"><i /> Bereit</span>;
+  return <span className="k-lampe k-lampe-leise"><i /> {hatKarte ? "Karte gewählt" : "Keine Karte"}</span>;
+}
+
+/** Was nach einem Fehler zu tun ist, aus dem Fehlertext abgeleitet (Kern und App-Hülle melden auf Deutsch). */
+function naechsterSchritt(fehler: string): string {
+  const f = fehler.toLowerCase();
+  if (f.includes("abgebrochen")) return "Die halben Kopien sind weggeräumt. Karte bleibt unverändert; einfach erneut einlesen.";
+  if (f.includes("existiert schon")) return "Ein anderes Ziel wählen oder den vorhandenen Ordner prüfen; er wird nie überschrieben.";
+  if (f.includes("zu wenig platz")) return "Platz auf dem Ziel schaffen oder ein grösseres Ziel wählen.";
+  if (f.includes("auf der karte") || f.includes("derselben platte"))
+    return "Ein Ziel auf einer anderen Platte wählen; die Karte selbst ist kein Ziel.";
+  if (f.includes("alle ziele ausgefallen")) return "Platten prüfen (Kabel, Strom, Schreibschutz) und erneut einlesen.";
+  if (f.includes("quelle") || f.includes("karte nicht lesbar") || f.includes("verändert"))
+    return "Karte und Kartenleser prüfen, Karte neu einstecken und erneut einlesen. Nicht formatieren.";
+  if (f.includes("nicht erreichbar") || f.includes("nicht lesbar") || f.includes("nicht schreibbar"))
+    return "Ist die Platte eingesteckt und beschreibbar? Danach erneut einlesen.";
+  return "Die Karte ist nicht freigegeben. Nicht formatieren; Meldung oben lesen und erneut versuchen.";
 }
 
 function Zustand(p: {
@@ -575,6 +647,8 @@ function Zustand(p: {
   fehler: string | null;
   ziele: string[];
   bereit: boolean;
+  gesperrtWeil: string | null;
+  naechsteKarte: () => void;
   befunde: Befund[];
   einlesen: () => void;
   abbrechen: () => void;
@@ -654,24 +728,55 @@ function Zustand(p: {
           <span className="i-zustand-titel k-lampe k-lampe-warn">
             <i /> Nicht kopiert
           </span>
-          <span className="i-zustand-grund">{p.fehler}</span>
+          <span className="i-zustand-grund">{naechsterSchritt(p.fehler ?? "")}</span>
+          <details className="i-details">
+            <summary>Meldung</summary>
+            <span className="mono k-klein">{p.fehler}</span>
+          </details>
         </>
       ) : (
-        <span className="i-leer">
-          Karte und Ziele wählen. Die Karte wird einmal gelesen, gleichzeitig an alle Ziele geschrieben und jedes Ziel danach
-          vollständig zurückgelesen.
-        </span>
+        <>
+          <span className="i-leer">
+            Karte und Ziele wählen. Die Karte wird einmal gelesen, gleichzeitig an alle Ziele geschrieben und jedes Ziel
+            danach vollständig zurückgelesen.
+          </span>
+          {p.ziele.length > 0 && (
+            <div className="i-ablage">
+              <span className="k-leise k-klein">Ablage</span>
+              {p.ziele.map((z) => (
+                <span key={z} className="i-pfad mono" title={z}>
+                  {z}
+                </span>
+              ))}
+            </div>
+          )}
+        </>
       )}
       {p.befunde.map((b) => (
         <span key={b.text} className={`k-lampe ${b.stufe === "fehler" ? "k-lampe-kritisch" : "k-lampe-warn"}`}>
-          <i /> {b.text}
+          <i /> {b.stufe === "fehler" && "Sperrt: "}
+          {b.text}
         </span>
       ))}
-      <div>
-        <button className={`k-taste ${p.bereit ? "k-taste-amber" : ""}`} disabled={!p.bereit} onClick={p.einlesen}>
-          <HardDrive size={16} strokeWidth={1.75} /> {ergebnis || phase === "fehler" ? "Neue Karte einlesen" : "Einlesen"}
-        </button>
+      <div className="i-knopfreihe">
+        {ergebnis ? (
+          <button className="k-taste" onClick={p.naechsteKarte}>
+            <HardDrive size={16} strokeWidth={1.75} /> Nächste Karte wählen
+          </button>
+        ) : (
+          <>
+            <button className={`k-taste ${p.bereit ? "k-taste-amber" : ""}`} disabled={!p.bereit} onClick={p.einlesen}>
+              <HardDrive size={16} strokeWidth={1.75} /> {phase === "fehler" ? "Nochmals einlesen" : "Einlesen"}
+            </button>
+            {phase === "fehler" && (
+              <button className="k-taste k-taste-leise" onClick={p.naechsteKarte}>
+                Andere Karte wählen
+              </button>
+            )}
+          </>
+        )}
       </div>
+      {!ergebnis && !p.bereit && p.gesperrtWeil && <span className="k-leise k-klein">{p.gesperrtWeil}</span>}
     </section>
   );
 }
@@ -859,10 +964,10 @@ function Ergebnis({ ergebnis }: { ergebnis: KartenErgebnis }) {
         })}
       </section>
 
-      <section className="i-abschnitt">
-        <h2>
+      <details className="i-abschnitt i-details">
+        <summary>
           Dateien <span className="k-leise mono">· {kopie.dateien.length} · {bytesText(summe)}</span>
-        </h2>
+        </summary>
         <table className="i-tabelle">
           <thead>
             <tr>
@@ -881,7 +986,7 @@ function Ergebnis({ ergebnis }: { ergebnis: KartenErgebnis }) {
             ))}
           </tbody>
         </table>
-      </section>
+      </details>
     </>
   );
 }

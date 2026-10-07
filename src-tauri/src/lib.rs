@@ -364,6 +364,12 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
         let liste = a.fehlt.iter().map(|s| format!("{} ({} Take {})", s.clip, s.szene, s.take)).collect::<Vec<_>>();
         freigabe.hinweise.push(format!("Gedreht, aber nicht auf der Karte: {}", liste.join(", ")));
     }
+    if auftrag.mindest_kopien < 2 {
+        freigabe.hinweise.push(format!(
+            "Schwelle auf {} Kopie gesenkt (Studio-Standard 2): nur für Tests.",
+            auftrag.mindest_kopien
+        ));
+    }
     if !kopie.ausgelassen.is_empty() {
         freigabe
             .hinweise

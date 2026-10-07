@@ -281,3 +281,31 @@ body {
   margin-right: auto;
   margin-left: 24px;
 }
+
+.i-rueckfrage {
+  display: grid;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: var(--rinne);
+  border: 1px solid var(--warnung);
+  border-radius: var(--rund-klein);
+}
+
+.i-ablage {
+  display: grid;
+  gap: 2px;
+  padding: 8px 0 2px;
+  border-top: 1px solid var(--linie);
+}
+
+.i-ablage .i-pfad {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.i-details summary {
+  cursor: pointer;
+  color: var(--text-3);
+  font-size: 12px;
+}
