@@ -29,6 +29,7 @@ Vorbilder zum Anschauen (nur lesen, nichts ungeprüft übernehmen): Sluice (MIT,
 
 - **„Sicher zum Formatieren“** erst, wenn die Karte an mindestens **N unabhängige Kopien** geprüft geschrieben ist. N ist pro Produktion einstellbar, Standard **2**.
 - **Unabhängig** heisst: verschiedene physische Platten. Zwei Ziele auf derselben Platte (gleiche Seriennummer) zählen als eine Kopie.
+- **NAS** (SMB) zählt als eine unabhängige Kopie, mit Hinweis im Bericht: den Zwischenspeicher des NAS kann keine App umgehen (Marlon, 07.10.2026).
 - **Entwerten** (zweiter, bewusster Klick nach der Freigabe): nur den Kopf des Dateisystems löschen, damit Amira/ALEXA Mini beim Einlegen das Formatieren anbieten. Die Kamera braucht ihr eigenes ARRI-UDF; Stage Ingest formatiert nie selbst.
 - **Entwerten bleibt ausgeschaltet**, bis es an einer Ersatzkarte an der echten Amira getestet ist (Phase 0).
 

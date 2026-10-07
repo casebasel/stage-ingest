@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'for k in \"${STAGE_SYSTEM:-}\" \"$CLAUDE_PROJECT_DIR/../stage-system\" \"$HOME/work/stage-system\"; do if [ -n \"$k\" ] && [ -f \"$k/werkzeuge/systemkarte.sh\" ]; then exec bash \"$k/werkzeuge/systemkarte.sh\" \"$k\"; fi; done; echo \"SYSTEMKARTE FEHLT: casebasel/stage-system neben dieses Repo klonen (oder STAGE_SYSTEM setzen). Ohne Karte nichts bauen, was eine andere App betrifft.\"'",
+            "timeout": 20
+          }
+        ]
+      }
+    ]
+  }
+}
