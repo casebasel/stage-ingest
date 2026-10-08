@@ -873,6 +873,52 @@ async fn clip_zuordnen(
     .await
 }
 
+/// Vorschaubild eines Fotos oder HDRI aus dem Plate Assistant, verkleinert auf `breite` Pixel, als data-URL.
+/// Zwischengespeichert im Cache der App (Bilder ändern sich unter demselben Pfad nicht).
+#[tauri::command]
+async fn bild_vorschau(
+    app: AppHandle,
+    plate: State<'_, Arc<plate::Plate>>,
+    zugang: plate::Zugang,
+    bucket: String,
+    pfad: String,
+    breite: u32,
+) -> Result<String, String> {
+    use base64::Engine;
+    let p = Arc::clone(&plate);
+    let cache = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("vorschau");
+    im_hintergrund(move || {
+        let name: String = format!("{bucket}_{pfad}_{breite}")
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+            .collect();
+        let datei = cache.join(format!("{name}.jpg"));
+        let jpg = match std::fs::read(&datei) {
+            Ok(b) => b,
+            Err(_) => {
+                let roh = p.bild_laden(&zugang, &bucket, &pfad)?;
+                let b = vorschau_jpg(&roh, breite)?;
+                let _ = std::fs::create_dir_all(&cache).and_then(|_| std::fs::write(&datei, &b)); // nur Cache
+                b
+            }
+        };
+        Ok(format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(jpg)))
+    })
+    .await
+}
+
+/// Verkleinert ein Bild (JPEG) auf höchstens `breite` Pixel Breite; kleinere bleiben, wie sie sind.
+fn vorschau_jpg(roh: &[u8], breite: u32) -> Result<Vec<u8>, String> {
+    let bild = image::load_from_memory(roh).map_err(|e| format!("Bild nicht lesbar: {e}"))?;
+    let bild =
+        if bild.width() > breite { bild.resize(breite, u32::MAX, image::imageops::FilterType::Triangle) } else { bild };
+    let mut aus = std::io::Cursor::new(Vec::new());
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut aus, 82)
+        .encode_image(&bild.to_rgb8())
+        .map_err(|e| e.to_string())?;
+    Ok(aus.into_inner())
+}
+
 /// Projektübersicht: Plan aus dem Plate Assistant und eingelesene Karten auf den Zielordnern.
 #[tauri::command]
 async fn projekt_uebersicht(
@@ -1022,6 +1068,7 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            bild_vorschau,
             vorab_pruefen,
             karte_einlesen,
             ziel_nachpruefen,
@@ -1062,6 +1109,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod gemeinsamer_test {
+
     //! Gemeinsamer Test mit einem Test-Server der Stage (nie gegen den echten Stage-Server):
     //! `STAGE_TEST=ws-adresse STAGE_TEST_KARTE=<ordner> cargo test -p stage-ingest -- --ignored --nocapture`
     use super::*;
@@ -1105,5 +1153,18 @@ mod gemeinsamer_test {
         let antwort = stage::karte_melden(&adresse, daten).unwrap();
         println!("Antwort der Stage: {antwort}");
         assert_eq!(antwort["ok"], true, "{antwort}");
+    }
+}
+
+#[cfg(test)]
+mod vorschau_test {
+    #[test]
+    fn vorschau_verkleinert() {
+        let mut roh = std::io::Cursor::new(Vec::new());
+        image::RgbImage::from_pixel(1000, 500, image::Rgb([200, 100, 50]))
+            .write_to(&mut roh, image::ImageFormat::Jpeg)
+            .unwrap();
+        let klein = image::load_from_memory(&super::vorschau_jpg(roh.get_ref(), 320).unwrap()).unwrap();
+        assert_eq!((klein.width(), klein.height()), (320, 160));
     }
 }

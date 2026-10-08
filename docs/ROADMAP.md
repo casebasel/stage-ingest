@@ -32,8 +32,22 @@ Gebaut ist der Kern (siehe KONZEPT Kapitel 14). Offen, in dieser Reihenfolge:
 
 - Eigene Tabellen des Ingest `clip` (Zuordnung zu Take oder Drehort, auch „Zu klären“ von Hand, Neigung/Rollen aus
   ART CMD) und `karte` (Projekt, Reel, freigegeben, Kopien, Speicherort, Bericht). Ersetzen `ingest_meldung`.
-  Nur der Ingest schreibt; Plate Assistant und Stage lesen. Wartet auf Schema und Migration des Plate Assistant;
-  bis dahin in `_ingest.json`.
+  Nur der Ingest schreibt; Plate Assistant und Stage lesen. Gebaut (1c53eaf): nach jedem Einlesen mit Projekt,
+  „Zu klären“ hängt den Clip dort mit um. Gegen den Server ungeprüft, solange PostgREST die Tabellen nicht kennt.
+
+## Projektmanager (Grill-Me 08.10.2026, Systemkarte 4a44307 + ce9e976)
+
+- **Schritt 1 (gebaut):** Projektwahl oben links für alle Seiten, gemerkt; Projektseite als Baum Drehort → Plate mit
+  Details: Fotos als Vorschaubilder (Klick gross, ← →), HDRI mit Stand des Dienstes, Takes, Karten je Drehort; leere
+  Drehorte und Plates sichtbar. Nur lesen.
+- **HDRI-Vorschau:** Der HDRI-Dienst lädt `hdri/<hdri_id>/vorschau.jpg` hoch und trägt den Pfad in
+  `hdri_job.ergebnis.vorschau` ein (wartet auf Schreibrecht im Bucket, Migration Plate Assistant).
+- **Schritt 2 (wartet auf Rechte vom Plate Assistant):** Takes bewerten + Notiz, Take (und Plate) aus einem Clip
+  anlegen, Plates vorab planen, Umbenennen/Verschieben/Papierkorb. Jüngste Änderung gewinnt, Löschen nur Papierkorb.
+- **Umbenennen samt Kurzname** (Drehort und Projekt): Ordner auf allen erreichbaren Zielen umbenennen, Pfade in
+  Datenbank und `_ingest.json` nachführen, fehlende Platten beim nächsten Einstecken; nie während eines Kopiervorgangs.
+- **ULID für alle IDs** (auch Drehort, Karte, Clip), Bestand einmal umstellen (Migration Plate Assistant). Danach
+  sucht der Ingest eine Karte über Projekt + Reel statt über eine ausgerechnete ID.
 
 ## Filmlogik (Systemkarte 64edac1 … 64185e7, wartet auf die Migrationen des Plate Assistant)
 

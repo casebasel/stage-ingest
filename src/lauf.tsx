@@ -83,6 +83,26 @@ function useLaufHalten() {
   const [projektText, setProjektText] = useState<string>(() => gemerkt("projekt", ""));
   const [paProjekt, setPaProjekt] = useState<Projekt | null>(null);
   const [paDreh, setPaDreh] = useState<DrehKurz | null>(null);
+  // Das gewählte Projekt gilt für alle Seiten und überlebt Seitenwechsel und Neustart (gemerkt wird die ID).
+  useEffect(() => {
+    if (paProjekt) merken("paProjekt", paProjekt.id);
+  }, [paProjekt?.id]);
+  useEffect(() => {
+    const id = paProjekt?.id ?? gemerkt("paProjekt", "");
+    const p = id ? konto.projekte.find((x) => x.id === id) : undefined;
+    // Nach dem Laden der Liste (oder dem Speichern der Einstellungen) den aktuellen Stand übernehmen.
+    if (p && p !== paProjekt) {
+      setPaProjekt(p);
+      if (!paProjekt) setProjektText(p.name);
+    }
+  }, [konto.projekte]);
+  /** Projekt wählen (oben links): setzt auch den Projektnamen der Ablage und vergisst den Drehort. */
+  function projektWaehlen(p: Projekt | null) {
+    setPaProjekt(p);
+    setProjektText(p?.name ?? "");
+    setPaDreh(null);
+    if (!p) merken("paProjekt", "");
+  }
   // Der Drehort wird nur am selben Tag übernommen: sonst landet die Karte von heute still im Ordner von gestern.
   const [drehName, setDrehName] = useState<string>(() => (gemerkt("drehTag", "") === heute ? gemerkt("drehName", "") : ""));
   const [drehDatum, setDrehDatum] = useState(heute);
@@ -314,6 +334,7 @@ function useLaufHalten() {
     setProjektText,
     paProjekt,
     setPaProjekt,
+    projektWaehlen,
     paDreh,
     setPaDreh,
     drehName,

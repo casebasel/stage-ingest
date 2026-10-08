@@ -266,7 +266,11 @@ impl Plate {
 
     /// Lädt ein Foto aus dem Bucket `fotos` (nur lesen).
     pub fn foto_laden(&self, z: &Zugang, pfad: &str) -> Result<Vec<u8>, String> {
-        let url = format!("{}/storage/v1/object/authenticated/fotos/{}", z.adresse.trim_end_matches('/'), pfad);
+        self.speicher_laden(z, "fotos", pfad)
+    }
+
+    fn speicher_laden(&self, z: &Zugang, bucket: &str, pfad: &str) -> Result<Vec<u8>, String> {
+        let url = format!("{}/storage/v1/object/authenticated/{bucket}/{}", z.adresse.trim_end_matches('/'), pfad);
         for neu in [false, true] {
             let token = self.token(z, neu)?;
             match agent()
@@ -291,16 +295,44 @@ impl Plate {
     /// Alle Drehorte eines Projekts mit Plates, Takes, Fotos und HDRI. Drehorte von vor Migration 0009 haben nur
     /// den Projektnamen als Text: sie zählen nur bei exakter Gleichheit (und nur ohne `projekt_id`).
     pub fn projekt_drehs(&self, z: &Zugang, projekt: &Projekt) -> Result<Value, String> {
-        let auswahl = "select=id,name,datum,geloescht,hdri(id,plate_id,zustand,geloescht),\
-                       plate(id,nummer,name,szene,buchstabe,geloescht,foto(id,geloescht),\
-                       take(id,nummer,art,clip,clip_name,bewertung,geloescht))";
-        let neu = self.lesen(z, &format!("dreh?projekt_id=eq.{}&{auswahl}", url_teil(&projekt.id)))?;
+        // Mit Kurzname, Fotos und HDRI-Zeit (ab 0017); bei einem älteren Server die schmale Auswahl.
+        let voll = "select=id,name,kurzname,datum,geloescht,hdri(id,plate_id,zustand,erstellt_am,geloescht),\
+                    plate(id,nummer,name,szene,buchstabe,geloescht,foto(id,art,pfad,zeit,geloescht),\
+                    take(id,nummer,art,clip,clip_name,bewertung,geloescht))";
+        let schmal = "select=id,name,datum,geloescht,hdri(id,plate_id,zustand,geloescht),\
+                      plate(id,nummer,name,szene,buchstabe,geloescht,foto(id,geloescht),\
+                      take(id,nummer,art,clip,clip_name,bewertung,geloescht))";
+        let mut auswahl = voll;
+        let neu = match self.lesen(z, &format!("dreh?projekt_id=eq.{}&{voll}", url_teil(&projekt.id))) {
+            Ok(v) => v,
+            Err(_) => {
+                auswahl = schmal;
+                self.lesen(z, &format!("dreh?projekt_id=eq.{}&{schmal}", url_teil(&projekt.id)))?
+            }
+        };
         let alt = self
             .lesen(z, &format!("dreh?projekt_id=is.null&produktion=eq.{}&{auswahl}", url_teil(&projekt.name)))
             .unwrap_or(Value::Array(vec![]));
         let mut alle = neu.as_array().cloned().unwrap_or_default();
         alle.extend(alt.as_array().cloned().unwrap_or_default());
         Ok(Value::Array(alle))
+    }
+
+    /// HDRI-Jobs des Projekts (Tabelle `hdri_job`, ab 0019): Zustand und Ergebnis (mit Pfad der Vorschau).
+    pub fn hdri_jobs(&self, z: &Zugang, projekt: &Projekt) -> Result<Value, String> {
+        self.lesen(
+            z,
+            &format!("hdri_job?projekt_id=eq.{}&select=hdri_id,zustand,ergebnis,geloescht", url_teil(&projekt.id)),
+        )
+    }
+
+    /// Lädt ein Bild aus einem Bucket des Plate Assistant (nur lesen): `fotos` oder `hdri`.
+    pub fn bild_laden(&self, z: &Zugang, bucket: &str, pfad: &str) -> Result<Vec<u8>, String> {
+        match bucket {
+            "fotos" => self.foto_laden(z, pfad),
+            "hdri" => self.speicher_laden(z, "hdri", pfad),
+            _ => Err(format!("Unbekannter Speicher {bucket}")),
+        }
     }
 
     /// Legt ein Projekt an (oder führt es zusammen, wenn es das schon gibt). Gibt die ID zurück.

@@ -4909,8 +4909,10 @@ dependencies = [
 name = "stage-ingest"
 version = "0.1.11"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
  "gethostname",
+ "image",
  "ingest-bericht",
  "ingest-kern",
  "keyring",

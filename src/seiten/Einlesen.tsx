@@ -16,7 +16,6 @@ import {
   Network,
   Plus,
   RotateCcw,
-  Settings,
   TriangleAlert,
   X,
 } from "lucide-react";
@@ -33,7 +32,6 @@ import {
 import { useEinstellungen } from "../einstellungen";
 import { drehsVon, useKonto } from "../konto";
 import { useLauf, type Quelle } from "../lauf";
-import { ProjektEinstellungen } from "../ProjektEinstellungen";
 import { Pfad, Status, dauerText, name, zahl, type Ton } from "../teile";
 
 const ALLE_MS = 3000;
@@ -455,7 +453,7 @@ function Auftrag({ pflicht, zurEinrichtung, laufwerke }: { pflicht: boolean; zur
   );
 }
 
-const kurz = (p: string) =>
+export const kurz = (p: string) =>
   p
     .trim()
     .replace(/[äÄ]/g, "AE")
@@ -470,164 +468,49 @@ const kurz = (p: string) =>
     .slice(0, 24)
     .replace(/_+$/, "") || "OHNE_PROJEKT";
 
-/** Projekt, Datum, Drehort: aus dem Plate Assistant gewählt, oder von Hand, wenn keine Verbindung besteht. */
+/** Datum und Drehort des Projekts (das Projekt selbst wird oben links gewählt und gilt für alle Seiten).
+ *  Drehorte aus dem Plate Assistant, oder von Hand, wenn keine Verbindung besteht. */
 function DrehZeile() {
   const lauf = useLauf();
   const konto = useKonto();
   const verbunden = konto.verbindung === "verbunden";
-  const [neu, setNeu] = useState<{ name: string; kurzname: string; fehler: string | null } | null>(null);
-  const [einstellen, setEinstellen] = useState(false);
   const passende = drehsVon(konto.drehs, lauf.paProjekt);
-
-  async function anlegen() {
-    if (!neu) return;
-    const k = neu.kurzname;
-    if (!neu.name.trim() || !/^[A-Z0-9]+(_[A-Z0-9]+)*$/.test(k) || k.length < 2 || k.length > 24) {
-      setNeu({ ...neu, fehler: "Kurzname: 2–24 Zeichen, nur A–Z, 0–9 und _. Er ist der Ordnername und danach fest." });
-      return;
-    }
-    try {
-      const p = await konto.projektAnlegen(neu.name.trim(), k);
-      lauf.setPaProjekt(p);
-      lauf.setProjektText(p.name);
-      lauf.setPaDreh(null);
-      setNeu(null);
-    } catch (err) {
-      setNeu({ ...neu, fehler: String(err) });
-    }
-  }
+  const ohneProjekt = verbunden ? !lauf.paProjekt : !lauf.projektText.trim();
 
   return (
-    <>
-      <div className="dreh">
-        <label className="eingabe-gruppe">
-          <span>Projekt</span>
-          {verbunden ? (
-            <select
-              value={lauf.paProjekt?.id ?? ""}
-              onChange={(ev) => {
-                const p = konto.projekte.find((x) => x.id === ev.target.value) ?? null;
-                lauf.setPaProjekt(p);
-                lauf.setProjektText(p?.name ?? "");
-                lauf.setPaDreh(null);
-              }}
-            >
-              <option value="">Projekt wählen …</option>
-              {konto.projekte
-                .filter((x) => x.aktiv || x.id === lauf.paProjekt?.id)
-                .map((x) => (
-                  <option key={x.id} value={x.id}>
-                    {x.name} ({x.kurzname})
-                  </option>
-                ))}
-            </select>
-          ) : (
-            <input
-              value={lauf.projektText}
-              placeholder="Name des Projekts"
-              onChange={(ev) => {
-                lauf.setProjektText(ev.target.value);
-                lauf.setPaProjekt(null);
-              }}
-            />
-          )}
-        </label>
-        <label className="eingabe-gruppe eingabe-datum">
-          <span>Datum</span>
-          <input type="date" className="zahl" value={lauf.drehDatum} onChange={(ev) => lauf.setDrehDatum(ev.target.value)} />
-        </label>
-        <label className="eingabe-gruppe">
-          <span>Drehort</span>
-          {verbunden && passende.length > 0 ? (
-            <select
-              value={lauf.paDreh?.id ?? (lauf.drehName ? "__hand" : "")}
-              onChange={(ev) => {
-                const d = passende.find((x) => x.id === ev.target.value) ?? null;
-                lauf.setPaDreh(d);
-                if (d) {
-                  lauf.setDrehName(d.name);
-                  lauf.setDrehDatum(d.datum);
-                } else lauf.setDrehName("");
-              }}
-            >
-              <option value="">Drehort wählen …</option>
-              {lauf.drehName && !lauf.paDreh && <option value="__hand">{lauf.drehName} (von Hand)</option>}
-              {passende.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.datum} · {d.name}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <input value={lauf.drehName} placeholder="z. B. Rheinufer" onChange={(ev) => lauf.setDrehName(ev.target.value)} />
-          )}
-        </label>
-        {verbunden && lauf.paProjekt && !neu && (
-          <button
-            className="knopf-symbol"
-            aria-pressed={einstellen}
-            aria-label="Projekt-Einstellungen"
-            title="Projekt-Einstellungen"
-            onClick={() => setEinstellen(!einstellen)}
-          >
-            <Settings size={16} strokeWidth={1.75} />
-          </button>
-        )}
-        {verbunden && !neu && (
-          <button className="knopf" onClick={() => setNeu({ name: "", kurzname: "", fehler: null })}>
-            <Plus size={14} strokeWidth={2} aria-hidden /> Neues Projekt
-          </button>
-        )}
-      </div>
-      {einstellen && lauf.paProjekt && (
-        <div className="dreh-einstellungen">
-          <ProjektEinstellungen
-            projekt={konto.projekte.find((p) => p.id === lauf.paProjekt!.id) ?? lauf.paProjekt}
-            schliessen={(p) => {
-              setEinstellen(false);
-              if (p) {
-                lauf.setPaProjekt(konto.projekte.find((x) => x.id === p.id) ?? p);
-                lauf.setProjektText(p.name);
-              }
+    <div className="dreh">
+      <label className="eingabe-gruppe eingabe-datum">
+        <span>Datum</span>
+        <input type="date" className="zahl" value={lauf.drehDatum} onChange={(ev) => lauf.setDrehDatum(ev.target.value)} />
+      </label>
+      <label className="eingabe-gruppe">
+        <span>Drehort</span>
+        {verbunden && passende.length > 0 ? (
+          <select
+            value={lauf.paDreh?.id ?? (lauf.drehName ? "__hand" : "")}
+            onChange={(ev) => {
+              const d = passende.find((x) => x.id === ev.target.value) ?? null;
+              lauf.setPaDreh(d);
+              if (d) {
+                lauf.setDrehName(d.name);
+                lauf.setDrehDatum(d.datum);
+              } else lauf.setDrehName("");
             }}
-          />
-        </div>
-      )}
-      {neu && (
-        <div className="neues-projekt">
-          <label className="eingabe-gruppe">
-            <span>Name</span>
-            <input
-              autoFocus
-              placeholder="z. B. Happy End"
-              value={neu.name}
-              onChange={async (ev) => {
-                const n = ev.target.value;
-                setNeu({ ...neu, name: n, fehler: null });
-                const k = await konto.kurznameVorschlag(n);
-                setNeu((x) => (x ? { ...x, kurzname: k } : x));
-              }}
-            />
-          </label>
-          <label className="eingabe-gruppe">
-            <span>Kurzname (Ordner, fest)</span>
-            <input
-              className="zahl"
-              placeholder="HAPPY_END"
-              value={neu.kurzname}
-              onChange={(ev) => setNeu({ ...neu, kurzname: ev.target.value.toUpperCase(), fehler: null })}
-            />
-          </label>
-          <button className="knopf knopf-haupt" onClick={anlegen}>
-            Anlegen
-          </button>
-          <button className="knopf" onClick={() => setNeu(null)}>
-            Abbrechen
-          </button>
-          {neu.fehler && <Status ton="fehler">{neu.fehler}</Status>}
-        </div>
-      )}
-    </>
+          >
+            <option value="">Drehort wählen …</option>
+            {lauf.drehName && !lauf.paDreh && <option value="__hand">{lauf.drehName} (von Hand)</option>}
+            {passende.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.datum} · {d.name}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input value={lauf.drehName} placeholder="z. B. Rheinufer" onChange={(ev) => lauf.setDrehName(ev.target.value)} />
+        )}
+      </label>
+      {ohneProjekt && <Status ton="warn">Oben links ein Projekt wählen</Status>}
+    </div>
   );
 }
 

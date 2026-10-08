@@ -61,6 +61,7 @@ function Gerust() {
           <span className="marke-name">Stage Ingest</span>
           <span className="marke-version zahl">{version}</span>
         </div>
+        <ProjektWahl />
         <nav className="seiten" aria-label="Seiten">
           {SEITEN.map(({ id, text, Zeichen }) => (
             <button key={id} className="seite" aria-current={seite === id ? "page" : undefined} onClick={() => setSeite(id)}>
@@ -112,5 +113,59 @@ function Gerust() {
         {seite === "einrichtung" && <Einrichtung wahl={wahl} setWahl={setWahl} />}
       </div>
     </div>
+  );
+}
+
+/** Projekt für alle Seiten (Einlesen, Projekt, Prüfen). Während eine Karte kopiert, gesperrt: die laufende Karte
+ *  gehört zum Projekt, mit dem sie gestartet wurde. */
+function ProjektWahl() {
+  const lauf = useLauf();
+  const konto = useKonto();
+  const gesperrt = lauf.laeuft ? "Während eine Karte kopiert, bleibt das Projekt gleich" : undefined;
+  if (konto.verbindung !== "verbunden")
+    return (
+      <label className="kopf-projekt" title={gesperrt}>
+        <span className="unsichtbar">Projekt</span>
+        <input
+          value={lauf.projektText}
+          placeholder="Projekt"
+          disabled={lauf.laeuft}
+          onChange={(ev) => {
+            lauf.setProjektText(ev.target.value);
+            lauf.setPaProjekt(null);
+          }}
+        />
+      </label>
+    );
+  const aktuell = lauf.paProjekt?.id ?? "";
+  return (
+    <label className="kopf-projekt" title={gesperrt}>
+      <span className="unsichtbar">Projekt</span>
+      <select
+        value={aktuell}
+        disabled={lauf.laeuft}
+        onChange={(ev) => lauf.projektWaehlen(konto.projekte.find((x) => x.id === ev.target.value) ?? null)}
+      >
+        <option value="">Projekt wählen …</option>
+        {konto.projekte
+          .filter((x) => x.aktiv || x.id === aktuell)
+          .map((x) => (
+            <option key={x.id} value={x.id}>
+              {x.name} ({x.kurzname})
+            </option>
+          ))}
+        {konto.projekte.some((x) => !x.aktiv && x.id !== aktuell) && (
+          <optgroup label="Abgeschlossen">
+            {konto.projekte
+              .filter((x) => !x.aktiv && x.id !== aktuell)
+              .map((x) => (
+                <option key={x.id} value={x.id}>
+                  {x.name} ({x.kurzname})
+                </option>
+              ))}
+          </optgroup>
+        )}
+      </select>
+    </label>
   );
 }

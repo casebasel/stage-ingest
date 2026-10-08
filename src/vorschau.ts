@@ -194,6 +194,15 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
     await warte(800);
     return { ordner: "/Volumes/NAS/Footage/HAPPY_END/2026-10-27_Rheinufer/01_KAMERA/A001R130", generation: "0001_A001R130_2026-10-27_161000Z.mhl", geprueft: 10, abweichungen: [] };
   },
+  // Vorschaubild: Farbfläche mit Beschriftung (in der App kommt hier ein verkleinertes JPEG).
+  bild_vorschau: (a) => {
+    const pfad = String(a.pfad);
+    const hdri = a.bucket === "hdri";
+    const farbe = (pfad.length * 47) % 360;
+    const [w, h] = hdri ? [800, 400] : [800, 600];
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="hsl(${hdri ? 205 : farbe} 45% 62%)"/><stop offset="1" stop-color="hsl(${hdri ? 30 : farbe} 30% 28%)"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#g)"/><text x="50%" y="52%" font-family="sans-serif" font-size="28" fill="white" text-anchor="middle">${pfad}</text></svg>`;
+    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  },
   projekt_uebersicht: () => ({
     projekt,
     hinweis: null,
@@ -208,16 +217,24 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
     ],
     drehs: [
       {
-        id: "d1", name: "Rheinufer", datum: "2026-10-28", hdri: ["uploaded"],
+        id: "d1", name: "Rheinufer", kurzname: "RHEINUFER", datum: "2026-10-28", karten: ["A001R131", "A001R132"],
+        hdri: [{ id: "h0", zustand: "uploaded", erstelltAm: "2026-10-28T08:12:00Z", job: "wartet", vorschau: null }],
         plates: [
-          { slate: "42A", name: "Ufer Süd", fotos: 6, hdri: [], takes: [1, 2, 3].map((n) => ({ id: `t${n}`, nummer: n, art: "take", bewertung: n === 2 ? "circle" : "", clip: `A001C00${n}_261028_R131`, karte: "A001R131", freigegeben: true })) },
-          { slate: "42B", name: "Brücke", fotos: 3, hdri: ["processed"], takes: [
-            { id: "t4", nummer: 1, art: "take", bewertung: "gut", clip: "A001C011_261028_R132", karte: "A001R132", freigegeben: false },
-            { id: "t5", nummer: 2, art: "graukugel", bewertung: "", clip: "A001C012_261028_R132", karte: "A001R132", freigegeben: false },
-            { id: "t6", nummer: 3, art: "take", bewertung: "", clip: "", karte: null, freigegeben: false },
-          ] },
+          { id: "p1", nummer: 1, slate: "42A", name: "Ufer Süd", hdri: [],
+            fotos: ["referenz", "set", "set", "position", "set", "set"].map((art, i) => ({ id: `f${i}`, art, pfad: `p1/f${i}.jpg` })),
+            takes: [1, 2, 3].map((n) => ({ id: `t${n}`, nummer: n, art: "take", bewertung: n === 2 ? "circle" : "", clip: `A001C00${n}_261028_R131`, karte: "A001R131", freigegeben: true })) },
+          { id: "p2", nummer: 2, slate: "42B", name: "Brücke",
+            fotos: [0, 1, 2].map((i) => ({ id: `g${i}`, art: "set", pfad: `p2/g${i}.jpg` })),
+            hdri: [{ id: "h1", zustand: "uploaded", erstelltAm: "2026-10-28T10:40:00Z", job: "processed", vorschau: "h1/vorschau.jpg" }],
+            takes: [
+              { id: "t4", nummer: 1, art: "take", bewertung: "gut", clip: "A001C011_261028_R132", karte: "A001R132", freigegeben: false },
+              { id: "t5", nummer: 2, art: "graukugel", bewertung: "", clip: "A001C012_261028_R132", karte: "A001R132", freigegeben: false },
+              { id: "t6", nummer: 3, art: "take", bewertung: "", clip: "", karte: null, freigegeben: false },
+            ] },
+          { id: "p3", nummer: 3, slate: "", name: "Fähre", fotos: [], hdri: [], takes: [] },
         ],
       },
+      { id: "d2", name: "Gasstrasse", kurzname: "GASSTR", datum: "", karten: [], hdri: [], plates: [] },
     ],
   }),
 };

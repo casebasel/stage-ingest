@@ -45,20 +45,48 @@ pub struct OffenerClip {
 pub struct DrehStand {
     pub id: String,
     pub name: String,
+    /// Kurzname (ab 0017), zugleich Ordnername; leer bei alten Drehorten.
+    pub kurzname: String,
     pub datum: String,
     pub plates: Vec<PlateStand>,
-    /// HDRI des ganzen Drehorts (ohne Plate): Zustände.
-    pub hdri: Vec<String>,
+    /// HDRI des ganzen Drehorts (ohne Plate).
+    pub hdri: Vec<HdriStand>,
+    /// Eingelesene Karten, deren Ordner zu diesem Drehort gehört (`<Datum>_<KURZNAME>`).
+    pub karten: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlateStand {
+    pub id: String,
+    pub nummer: i64,
     pub slate: String,
     pub name: String,
-    pub fotos: usize,
-    pub hdri: Vec<String>,
+    pub fotos: Vec<FotoStand>,
+    pub hdri: Vec<HdriStand>,
     pub takes: Vec<TakeStand>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FotoStand {
+    pub id: String,
+    pub art: String,
+    /// Pfad im Bucket `fotos`.
+    pub pfad: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HdriStand {
+    pub id: String,
+    /// Zustand im Plate Assistant (`captured`, `uploaded`, …).
+    pub zustand: String,
+    pub erstellt_am: String,
+    /// Job des HDRI-Dienstes (`wartet`, `laeuft`, `processed`, …), falls bekannt.
+    pub job: Option<String>,
+    /// Vorschaubild im Bucket `hdri` (vom HDRI-Dienst hochgeladen), falls vorhanden.
+    pub vorschau: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -82,10 +110,25 @@ fn text(v: &Value) -> String {
 pub fn zusammenfuehren(
     projekt: Projekt,
     drehs_json: &Value,
+    jobs_json: &Value,
     karten: Vec<GefundeneKarte>,
     unlesbar: Vec<PathBuf>,
 ) -> Uebersicht {
     let gilt = |x: &Value| x["geloescht"] != true;
+    // HDRI-Jobs nach HDRI-ID (Tabelle `hdri_job`, fehlt vor 0019 oder ohne Leserecht: leer).
+    let jobs: HashMap<String, &Value> =
+        jobs_json.as_array().into_iter().flatten().filter(|j| gilt(j)).map(|j| (text(&j["hdri_id"]), j)).collect();
+    let hdri_stand = |h: &Value| {
+        let id = text(&h["id"]);
+        let job = jobs.get(&id);
+        HdriStand {
+            zustand: text(&h["zustand"]),
+            erstellt_am: text(&h["erstellt_am"]),
+            job: job.map(|j| text(&j["zustand"])).filter(|z| !z.is_empty()),
+            vorschau: job.map(|j| text(&j["ergebnis"]["vorschau"])).filter(|v| !v.is_empty()),
+            id,
+        }
+    };
     // Eingelesene Clips: nach Take-ID und nach Clipname.
     let mut nach_take: HashMap<String, (String, bool)> = HashMap::new();
     let mut nach_clip: HashMap<String, (String, bool)> = HashMap::new();
@@ -129,19 +172,47 @@ pub fn zusammenfuehren(
                 });
             }
             takes.sort_by_key(|t| t.nummer);
+            let mut fotos: Vec<(&Value, FotoStand)> = p["foto"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|x| gilt(x))
+                .map(|f| (f, FotoStand { id: text(&f["id"]), art: text(&f["art"]), pfad: text(&f["pfad"]) }))
+                .filter(|(_, f)| !f.pfad.is_empty())
+                .collect();
+            fotos.sort_by_key(|(f, _)| text(&f["zeit"]));
             plates.push(PlateStand {
+                id: pid.clone(),
+                nummer: p["nummer"].as_i64().unwrap_or(0),
                 slate: format!("{}{}", text(&p["szene"]), text(&p["buchstabe"])),
                 name: text(&p["name"]),
-                fotos: p["foto"].as_array().map(|f| f.iter().filter(|x| gilt(x)).count()).unwrap_or(0),
-                hdri: hdri_alle.iter().filter(|h| text(&h["plate_id"]) == pid).map(|h| text(&h["zustand"])).collect(),
+                fotos: fotos.into_iter().map(|(_, f)| f).collect(),
+                hdri: hdri_alle.iter().filter(|h| text(&h["plate_id"]) == pid).map(|h| hdri_stand(h)).collect(),
                 takes,
             });
         }
+        plates.sort_by_key(|p| p.nummer);
+        let kurzname = text(&d["kurzname"]);
+        let datum = text(&d["datum"]);
+        // Ordner `<Datum>_<KURZNAME>`; ohne Drehort-Datum zählt jedes Datum (Aufnahmedatum der Karte).
+        let mut karten_hier: Vec<String> = karten
+            .iter()
+            .filter(|k| {
+                !kurzname.is_empty()
+                    && k.dreh_ordner
+                        .split_once('_')
+                        .is_some_and(|(d, n)| n.eq_ignore_ascii_case(&kurzname) && (datum.is_empty() || d == datum))
+            })
+            .map(|k| k.inhalt.karte.clone())
+            .collect();
+        karten_hier.dedup();
         drehs.push(DrehStand {
             id: text(&d["id"]),
             name: text(&d["name"]),
-            datum: text(&d["datum"]),
-            hdri: hdri_alle.iter().filter(|h| text(&h["plate_id"]).is_empty()).map(|h| text(&h["zustand"])).collect(),
+            kurzname,
+            datum,
+            hdri: hdri_alle.iter().filter(|h| text(&h["plate_id"]).is_empty()).map(|h| hdri_stand(h)).collect(),
+            karten: karten_hier,
             plates,
         });
     }
@@ -187,14 +258,14 @@ pub fn laden(plate: &Plate, zugang: Option<&Zugang>, projekt: Projekt, basis: &[
     // Dieselbe Karte auf mehreren Zielen: einmal zählen (neuester Durchgang gewinnt).
     karten.sort_by(|a, b| (&a.inhalt.karte, &b.inhalt.beginn).cmp(&(&b.inhalt.karte, &a.inhalt.beginn)));
     karten.dedup_by(|a, b| a.inhalt.karte == b.inhalt.karte);
-    let (drehs, hinweis) = match zugang {
+    let (drehs, jobs, hinweis) = match zugang {
         Some(z) => match plate.projekt_drehs(z, &projekt) {
-            Ok(v) => (v, None),
-            Err(e) => (Value::Null, Some(e)),
+            Ok(v) => (v, plate.hdri_jobs(z, &projekt).unwrap_or(Value::Null), None),
+            Err(e) => (Value::Null, Value::Null, Some(e)),
         },
-        None => (Value::Null, Some("Kein Zugang zum Plate Assistant: nur eingelesene Karten".into())),
+        None => (Value::Null, Value::Null, Some("Kein Zugang zum Plate Assistant: nur eingelesene Karten".into())),
     };
-    let mut u = zusammenfuehren(projekt, &drehs, karten, unlesbar);
+    let mut u = zusammenfuehren(projekt, &drehs, &jobs, karten, unlesbar);
     u.hinweis = hinweis;
     u
 }
@@ -208,11 +279,11 @@ mod tests {
     #[test]
     fn plan_und_karten_verbinden() {
         let drehs = json!([{
-            "id": "D1", "name": "Rheinufer", "datum": "2026-10-28", "geloescht": false,
+            "id": "D1", "name": "Rheinufer", "kurzname": "RHEINUFER", "datum": "2026-10-28", "geloescht": false,
             "hdri": [{"id": "H1", "plate_id": "P1", "zustand": "uploaded", "geloescht": false},
                      {"id": "H2", "plate_id": null, "zustand": "captured", "geloescht": false}],
             "plate": [{ "id": "P1", "szene": "42", "buchstabe": "A", "name": "Ufer", "geloescht": false,
-                "foto": [{"id": "F1", "geloescht": false}, {"id": "F2", "geloescht": true}],
+                "foto": [{"id": "F1", "pfad": "P1/F1.jpg", "geloescht": false}, {"id": "F2", "pfad": "P1/F2.jpg", "geloescht": true}],
                 "take": [
                     {"id": "T1", "nummer": 1, "art": "take", "clip_name": "A001C003_261028_R1AB", "bewertung": "circle", "geloescht": false},
                     {"id": "T2", "nummer": 2, "art": "take", "clip_name": null, "geloescht": false},
@@ -282,11 +353,19 @@ mod tests {
             regie: None,
             dop: None,
         };
-        let u = zusammenfuehren(p, &drehs, vec![karte], vec![]);
+        let jobs = json!([{"hdri_id": "H1", "zustand": "processed", "ergebnis": {"vorschau": "H1/vorschau.jpg"}}]);
+        let u = zusammenfuehren(p, &drehs, &jobs, vec![karte], vec![]);
         let plate = &u.drehs[0].plates[0];
-        assert_eq!((plate.slate.as_str(), plate.fotos), ("42A", 1));
-        assert_eq!(plate.hdri, ["uploaded"]);
-        assert_eq!(u.drehs[0].hdri, ["captured"]);
+        assert_eq!((plate.slate.as_str(), plate.fotos.len()), ("42A", 1));
+        assert_eq!(plate.fotos[0].pfad, "P1/F1.jpg");
+        assert_eq!(plate.hdri.len(), 1);
+        assert_eq!(
+            (plate.hdri[0].job.as_deref(), plate.hdri[0].vorschau.as_deref()),
+            (Some("processed"), Some("H1/vorschau.jpg"))
+        );
+        assert_eq!(u.drehs[0].hdri[0].zustand, "captured");
+        assert_eq!(u.drehs[0].hdri[0].job, None);
+        assert_eq!(u.drehs[0].karten, ["A001R1AB"]);
         let karten: Vec<Option<&str>> = plate.takes.iter().map(|t| t.karte.as_deref()).collect();
         assert_eq!(karten, [Some("A001R1AB"), Some("A001R1AB"), None], "T3 fehlt noch: Karte nicht eingelesen");
         assert_eq!(u.zu_klaeren.len(), 1);
