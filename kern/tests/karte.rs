@@ -280,12 +280,8 @@ fn vorhandene_kopie_wird_nachgeprueft_und_nie_weggeraeumt() {
 
     // Karte verändert (gleiche Grösse, anderer Inhalt): passt nicht mehr zur früheren Prüfsumme der Kopie.
     assert!(ingest_kern::mhl::abweichungen_zur_historie(&a, &k3).unwrap().is_empty());
-    let datei = walkdir::WalkDir::new(t.path().join("karte"))
-        .into_iter()
-        .flatten()
-        .find(|e| e.file_type().is_file())
-        .unwrap()
-        .into_path();
+    // Fest eine Kameradatei (nicht die erste beim Durchlaufen: das wäre je nach System die übersprungene .DS_Store).
+    let datei = t.path().join("karte/A001R132/A001C002_261007_R132.mov");
     let mut inhalt = fs::read(&datei).unwrap();
     inhalt[0] ^= 0xff;
     fs::write(&datei, inhalt).unwrap();
