@@ -67,10 +67,11 @@ def zugang_pruefen(datei: Path) -> int:
         s.token()
         print(f"Anmeldung ok: {s.email} (Dienst-Konto, app = hdri)")
         alle = s.lesen("hdri?geloescht=eq.false&select=id,zustand,format")
-        print(f"Aufnahmen sichtbar: {len(alle)} ({', '.join(sorted({a['zustand'] for a in alle})) or 'keine'})")
-        for a in s.offene_aufnahmen():
+        print(f"Aufnahmen sichtbar: {len(alle)}")
+        for a in alle:
             n = len(s.lesen(f"hdri_frame?hdri_id=eq.{a['id']}&geloescht=eq.false&select=id"))
-            print(f"  offen: {a['id']} · {a.get('format')} · {n} Bilder")
+            print(f"  {a['id']} · {a['zustand']} · {a.get('format')} · {n} Bilder")
+        print(f"Bereit zum Rechnen (uploaded, ohne fertigen Job): {len(s.offene_aufnahmen())}")
         try:
             print(f"Jobs lesbar: {len(s.lesen('hdri_job?select=id'))}")
         except ServerFehler as e:

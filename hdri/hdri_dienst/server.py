@@ -108,7 +108,12 @@ class Server:
     def offene_aufnahmen(self) -> list[dict]:
         """Aufnahmen mit vollständig hochgeladenen Rohdaten, deren Job noch nicht fertig, verworfen oder freigegeben ist."""
         aufnahmen = self.lesen("hdri?zustand=eq.uploaded&geloescht=eq.false&select=id,dreh_id,plate_id,format&order=erstellt_am.asc")
-        jobs = {j["hdri_id"]: j for j in self.lesen("hdri_job?geloescht=eq.false&select=hdri_id,zustand")}
+        try:
+            jobs = {j["hdri_id"]: j for j in self.lesen("hdri_job?geloescht=eq.false&select=hdri_id,zustand")}
+        except ServerFehler as e:
+            if "PGRST205" not in str(e):
+                raise
+            jobs = {}  # Tabelle hdri_job gibt es erst ab Migration 0019
         erledigt = {"processed", "verworfen", "linked"}
         return [a for a in aufnahmen if jobs.get(a["id"], {}).get("zustand") not in erledigt]
 
