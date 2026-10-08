@@ -184,8 +184,9 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
   ],
   plate_soll: () => [],
   plate_projekt_aendern: () => null,
+  plate_drehort_anlegen: (a) => `dreh-happy_end-${String(a.kurzname).toLowerCase()}`,
   plate_projekt_anlegen: (a) => `projekt-${String(a.kurzname).toLowerCase()}`,
-  kurzname_vorschlag: (a) => kurz(String(a.name)),
+  kurzname_vorschlag: (a) => (kurz(String(a.name)) ?? "").slice(0, Number(a.laenge ?? 24)).replace(/_+$/, ""),
   ziel_nachpruefen: async () => {
     await warte(800);
     return { ordner: "/Volumes/NAS/Footage/HAPPY_END/2026-10-27_Rheinufer/01_KAMERA/A001R130", generation: "0001_A001R130_2026-10-27_161000Z.mhl", geprueft: 10, abweichungen: [] };

@@ -158,7 +158,15 @@ function useKontoHalten() {
     await laden();
   }
 
-  const kurznameVorschlag = async (name: string) => (await invoke<string | null>("kurzname_vorschlag", { name })) ?? "";
+  const kurznameVorschlag = async (name: string, laenge?: number) =>
+    (await invoke<string | null>("kurzname_vorschlag", { name, laenge: laenge ?? null })) ?? "";
+
+  /** Drehort anlegen (ab Migration 0017): gibt die neue ID zurück. */
+  async function drehortAnlegen(projekt: Projekt, name: string, kurzname: string, datum: string): Promise<string> {
+    const id = await invoke<string>("plate_drehort_anlegen", { zugang, projekt, name, kurzname, datum });
+    await laden();
+    return id;
+  }
 
   return {
     zugang,
@@ -175,6 +183,7 @@ function useKontoHalten() {
     anmelden,
     projektAnlegen,
     projektAendern,
+    drehortAnlegen,
     kurznameVorschlag,
   };
 }

@@ -61,6 +61,11 @@ pub fn ordnername(s: &str) -> String {
 /// 5. höchstens 24 Zeichen, danach kein `_` am Ende, 6. unter 2 Zeichen: kein Vorschlag (`None`).
 /// Ein angelegtes Projekt hat seinen festen Kurznamen; dieser Vorschlag gilt nur für Text ohne Projekt.
 pub fn kurzname_vorschlag(name: &str) -> Option<String> {
+    kurzname_vorschlag_bis(name, 24)
+}
+
+/// Wie [`kurzname_vorschlag`], aber höchstens `laenge` Zeichen (Drehort-Kurzname: 12, Systemkarte 64185e7).
+pub fn kurzname_vorschlag_bis(name: &str, laenge: usize) -> Option<String> {
     use unicode_normalization::char::is_combining_mark;
     use unicode_normalization::UnicodeNormalization;
     let ersetzt: String = name
@@ -86,7 +91,7 @@ pub fn kurzname_vorschlag(name: &str) -> Option<String> {
             kurz.push('_');
         }
     }
-    let kurz: String = kurz.chars().take(24).collect();
+    let kurz: String = kurz.chars().take(laenge).collect();
     let kurz = kurz.trim_end_matches('_').to_string();
     (kurz.len() >= 2).then_some(kurz)
 }
@@ -166,6 +171,13 @@ mod tests {
         );
         // 24. Zeichen wäre „_“: wird abgeschnitten
         assert_eq!(kurzname_vorschlag("Abc defghijklmnopqrstuv w").as_deref(), Some("ABC_DEFGHIJKLMNOPQRSTUV"));
+    }
+
+    #[test]
+    fn drehort_kurzname_hoechstens_12() {
+        assert_eq!(kurzname_vorschlag_bis("Rheinufer Kleinbasel", 12).as_deref(), Some("RHEINUFER_KL"));
+        assert_eq!(kurzname_vorschlag_bis("Münsterplatz", 12).as_deref(), Some("MUENSTERPLAT"));
+        assert_eq!(kurzname_vorschlag_bis("Hof B", 12).as_deref(), Some("HOF_B"));
     }
 
     #[test]

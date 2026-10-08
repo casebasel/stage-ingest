@@ -16,7 +16,11 @@ use serde_json::{json, Value};
 
 /// Tabellen, die der Ingest ändern darf (Systemkarte 05dc71c, BESITZ.md). Der Server beschränkt ein persönliches
 /// Konto nicht mehr; diese Liste ist die Sperre. Nie: dreh, plate, take, foto.
-pub const DARF_AENDERN: &[&str] = &["projekt", "ingest_meldung", "hdri_job"];
+pub const DARF_AENDERN: &[&str] = &["projekt", "ingest_meldung", "hdri_job", "dreh"];
+
+/// Felder, die der Ingest an `dreh` (= Drehort) schreiben darf (Systemkarte, Stufe A): anlegen, Name, Datum.
+/// Der Kurzname ist nach dem Anlegen fest; Ort, Kamera und gemessene Werte schreibt nur der Plate Assistant.
+const DREH_FELDER: &[&str] = &["_anlegen", "name", "datum"];
 
 /// Prüft alle Änderungen einer Anfrage an `aenderungen_anwenden`, bevor sie das Netz verlassen.
 pub fn aenderungen_pruefen(body: &Value) -> Result<(), String> {
@@ -25,6 +29,10 @@ pub fn aenderungen_pruefen(body: &Value) -> Result<(), String> {
         let t = a["tabelle"].as_str().unwrap_or("");
         if !DARF_AENDERN.contains(&t) {
             return Err(format!("Stage Ingest ändert „{t}“ nicht (gehört dem Plate Assistant)"));
+        }
+        let feld = a["feld"].as_str().unwrap_or("");
+        if t == "dreh" && !DREH_FELDER.contains(&feld) {
+            return Err(format!("Stage Ingest ändert am Drehort „{feld}“ nicht (gehört dem Plate Assistant)"));
         }
     }
     Ok(())
@@ -357,6 +365,52 @@ impl Plate {
         }
     }
 
+    /// Drehort anlegen (ab Migration 0017). ID `dreh-<projekt-kurzname>-<drehort-kurzname>` klein, Kurzname danach fest.
+    /// Das Datum ist bis Stufe C Pflicht.
+    pub fn drehort_anlegen(
+        &self,
+        z: &Zugang,
+        projekt: &Projekt,
+        name: &str,
+        kurzname: &str,
+        datum: &str,
+    ) -> Result<String, String> {
+        drehort_kurzname_pruefen(kurzname)?;
+        if name.trim().is_empty() {
+            return Err("Der Name des Drehorts darf nicht leer sein.".into());
+        }
+        if chrono::NaiveDate::parse_from_str(datum, "%Y-%m-%d").is_err() {
+            return Err("Datum fehlt (JJJJ-MM-TT); bis zur Stufe C ist es Pflicht.".into());
+        }
+        let id = format!("dreh-{}-{}", projekt.kurzname.to_lowercase(), kurzname.to_lowercase());
+        let jetzt = chrono::Utc::now();
+        let body = json!({
+            "p_geraet": geraet_name(),
+            "p_aenderungen": [{
+                "id": ulid_aehnlich(),
+                "tabelle": "dreh",
+                "datensatz": id,
+                "feld": "_anlegen",
+                "wert": { "name": name.trim(), "kurzname": kurzname, "datum": datum, "projekt_id": projekt.id,
+                          "produktion": projekt.name, "geloescht": false,
+                          "erstellt_am": jetzt.to_rfc3339_opts(chrono::SecondsFormat::Millis, true) },
+                "zeit": jetzt.timestamp_micros(),
+            }]
+        });
+        let v = self.anwenden(z, &body)?;
+        match v[0]["ergebnis"].as_str().unwrap_or("") {
+            "uebernommen" | "aelter" | "doppelt" => Ok(id),
+            e => {
+                let grund = v[0]["grund"].as_str().unwrap_or(e).to_owned();
+                Err(if grund.contains("kurzname") || grund.contains("column") {
+                    format!("Drehort nicht angelegt: {grund}. Fehlt noch die Migration 0017?")
+                } else {
+                    format!("Drehort nicht angelegt: {grund}")
+                })
+            }
+        }
+    }
+
     /// Schickt Änderungen an `aenderungen_anwenden` (vorher gegen die Besitzregel geprüft). Bei 401 einmal neu anmelden.
     fn anwenden(&self, z: &Zugang, body: &Value) -> Result<Value, String> {
         aenderungen_pruefen(body)?;
@@ -428,6 +482,19 @@ fn anmelden(z: &Zugang, body: Value, art: &str) -> Result<Sitzung, String> {
 
 fn text(v: &Value) -> String {
     v.as_str().unwrap_or_default().trim().to_owned()
+}
+
+/// Drehort-Kurzname: `^[A-Z0-9]+(_[A-Z0-9]+)*$`, 2–12 Zeichen; `STUDIO` ist dem Studio-Drehort vorbehalten.
+pub fn drehort_kurzname_pruefen(k: &str) -> Result<(), String> {
+    let teile_gut =
+        k.split('_').all(|t| !t.is_empty() && t.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit()));
+    if !(2..=12).contains(&k.len()) || !teile_gut {
+        return Err("Kurzname: 2–12 Zeichen, nur A–Z, 0–9 und _ (nicht vorne, hinten oder doppelt).".into());
+    }
+    if k == "STUDIO" {
+        return Err("STUDIO ist dem Studio vorbehalten; die Stage legt diesen Drehort an.".into());
+    }
+    Ok(())
 }
 
 /// `^[1-9][0-9]{0,5}x[1-9][0-9]{0,5}$`
@@ -651,10 +718,22 @@ mod tests {
 
     #[test]
     fn schreibt_nie_tabellen_des_plate_assistant() {
-        for t in ["dreh", "plate", "take", "foto", "hdri", "hdri_frame", ""] {
+        for t in ["plate", "take", "foto", "hdri", "hdri_frame", ""] {
             let body = json!({"p_aenderungen": [{"tabelle": "projekt"}, {"tabelle": t}]});
             assert!(aenderungen_pruefen(&body).is_err(), "{t} muss gesperrt sein");
         }
+        // Drehort: nur anlegen, Name, Datum; nie Kurzname, Ort, Kamera oder Gemessenes.
+        for f in ["kurzname", "lat", "kamera", "objektiv", "projekt_id", "geloescht"] {
+            let body = json!({"p_aenderungen": [{"tabelle": "dreh", "feld": f}]});
+            assert!(aenderungen_pruefen(&body).is_err(), "dreh.{f} muss gesperrt sein");
+        }
+        for f in ["_anlegen", "name", "datum"] {
+            assert!(aenderungen_pruefen(&json!({"p_aenderungen": [{"tabelle": "dreh", "feld": f}]})).is_ok());
+        }
+        assert!(drehort_kurzname_pruefen("RHEINUFER").is_ok());
+        assert!(drehort_kurzname_pruefen("STUDIO").is_err());
+        assert!(drehort_kurzname_pruefen("RHEIN__UFER").is_err());
+        assert!(drehort_kurzname_pruefen("RHEINUFER_KLEIN").is_err());
         assert!(aenderungen_pruefen(&json!({"p_aenderungen": [{"tabelle": "projekt"}]})).is_ok());
         // Im ganzen App-Code gibt es genau einen Aufruf von aenderungen_anwenden, und der geht durch die Sperre.
         let code = include_str!("plate.rs");

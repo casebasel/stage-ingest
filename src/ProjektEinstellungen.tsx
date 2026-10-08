@@ -2,7 +2,7 @@
 // Name änderbar, Kurzname fest, Art, Produktionsfirma, Regie, DoP und die Kamera-Vorgaben. Alles freiwillig.
 // Vorläufig eigenes Formular; sobald das gemeinsame Paket stage-projekt da ist, kommt das Formular von dort.
 import { useState } from "react";
-import { ARTEN, useKonto, type Projekt } from "./konto";
+import { ARTEN, drehsVon, useKonto, type Projekt } from "./konto";
 import { Feld, Status } from "./teile";
 
 type Werte = Record<
@@ -194,6 +194,133 @@ export function NeuesProjekt({ fertig }: { fertig: (p?: Projekt) => void }) {
           Abbrechen
         </button>
         <button className="knopf knopf-haupt" disabled={!name.trim() || !kurzname || stand?.ton === "laeuft"} onClick={anlegen}>
+          Anlegen
+        </button>
+      </div>
+    </section>
+  );
+}
+
+/** Nächster freier Kurzname: RHEINUFER, RHEINUFER_2, … (höchstens 12 Zeichen, der Stamm wird nötigenfalls gekürzt). */
+export function freierKurzname(wunsch: string, vergeben: string[]): string {
+  if (!vergeben.includes(wunsch)) return wunsch;
+  for (let n = 2; n < 100; n++) {
+    const endung = `_${n}`;
+    const k = wunsch.slice(0, 12 - endung.length).replace(/_+$/, "") + endung;
+    if (!vergeben.includes(k)) return k;
+  }
+  return wunsch;
+}
+
+/** Drehort anlegen (Systemkarte 4f197ed): Kurzname vorgeschlagen und änderbar, fest nach dem Anlegen, Ordnername;
+ *  schon vergeben → Warnung und nächster freier. Datum bis Stufe C Pflicht. */
+export function NeuerDrehort({ projekt, fertig }: { projekt: Projekt; fertig: (id?: string) => void }) {
+  const konto = useKonto();
+  const [name, setName] = useState("");
+  const [kurzname, setKurzname] = useState("");
+  const [vonHand, setVonHand] = useState(false);
+  /** Vorschlag war vergeben und wurde auf den nächsten freien gesetzt: sichtbar machen. */
+  const [ausgewichen, setAusgewichen] = useState<string | null>(null);
+  const [datum, setDatum] = useState(() => new Date().toLocaleDateString("sv-SE"));
+  const [stand, setStand] = useState<{ ton: "fehler" | "laeuft" | "warn"; text: string } | null>(null);
+  const vergeben = drehsVon(konto.drehs, projekt)
+    .map((d) => d.kurzname)
+    .filter((k): k is string => !!k)
+    .concat("STUDIO");
+  const doppelt = !!kurzname && vergeben.includes(kurzname);
+
+  async function vorschlagen(n: string) {
+    const k = await konto.kurznameVorschlag(n, 12);
+    const frei = freierKurzname(k, vergeben);
+    setKurzname(frei);
+    setAusgewichen(frei !== k ? k : null);
+  }
+
+  async function anlegen() {
+    if (!name.trim()) return setStand({ ton: "fehler", text: "Der Name darf nicht leer sein." });
+    if (!/^[A-Z0-9]+(_[A-Z0-9]+)*$/.test(kurzname) || kurzname.length < 2 || kurzname.length > 12)
+      return setStand({ ton: "fehler", text: "Kurzname: 2–12 Zeichen, nur A–Z, 0–9 und _ (nicht vorne, hinten oder doppelt)." });
+    if (doppelt) return setStand({ ton: "fehler", text: `${kurzname} gibt es im Projekt schon. Frei wäre ${freierKurzname(kurzname, vergeben)}.` });
+    setStand({ ton: "laeuft", text: "Legt an …" });
+    try {
+      fertig(await konto.drehortAnlegen(projekt, name.trim(), kurzname, datum));
+    } catch (e) {
+      setStand({ ton: "fehler", text: String(e) });
+    }
+  }
+
+  return (
+    <section className="block projekt-einstellungen" aria-labelledby="t-nd">
+      <div className="block-kopf">
+        <h2 id="t-nd">Neuer Drehort</h2>
+        <span className="leise">in {projekt.name}</span>
+      </div>
+      <Feld name="Name" hilfe="Änderbar, auch später.">
+        <input
+          aria-label="Name des Drehorts"
+          autoFocus
+          placeholder="z. B. Rheinufer Kleinbasel"
+          value={name}
+          onChange={(e) => {
+            setName(e.target.value);
+            setStand(null);
+            if (!vonHand) vorschlagen(e.target.value);
+          }}
+        />
+      </Feld>
+      <Feld
+        name="Kurzname"
+        hilfe={
+          <>
+            Nach dem Anlegen fest. Ordnername auf allen Platten (
+            <span className="zahl">
+              {projekt.kurzname}/{datum || "Datum"}_{kurzname || "KURZNAME"}
+            </span>
+            ) und Anfang der Plate-Namen (<span className="zahl">{kurzname || "KURZNAME"}-01</span>).
+          </>
+        }
+      >
+        <input
+          aria-label="Kurzname des Drehorts"
+          className="zahl"
+          placeholder="RHEINUFER"
+          maxLength={12}
+          value={kurzname}
+          onChange={(e) => {
+            setVonHand(true);
+            setAusgewichen(null);
+            setKurzname(e.target.value.toUpperCase());
+            setStand(null);
+          }}
+        />
+      </Feld>
+      {ausgewichen && !doppelt && (
+        <p className="feld-meldung">
+          <Status ton="warn">
+            {ausgewichen} gibt es im Projekt schon, darum {kurzname}. Ist es derselbe Ort, diesen Drehort nicht neu
+            anlegen, sondern den vorhandenen wählen.
+          </Status>
+        </p>
+      )}
+      {doppelt && (
+        <p className="feld-meldung">
+          <Status ton="warn">
+            {kurzname} gibt es im Projekt schon.{" "}
+            <button className="verweis" onClick={() => setKurzname(freierKurzname(kurzname, vergeben))}>
+              {freierKurzname(kurzname, vergeben)} verwenden
+            </button>
+          </Status>
+        </p>
+      )}
+      <Feld name="Datum" hilfe="Vorerst Pflicht; später freiwillig, dann zählt das Aufnahmedatum der Clips.">
+        <input aria-label="Datum" type="date" className="zahl" value={datum} onChange={(e) => setDatum(e.target.value)} />
+      </Feld>
+      <div className="knopfreihe einstellungen-knoepfe">
+        {stand && <Status ton={stand.ton}>{stand.text}</Status>}
+        <button className="knopf" onClick={() => fertig()}>
+          Abbrechen
+        </button>
+        <button className="knopf knopf-haupt" disabled={!name.trim() || !kurzname || !datum || stand?.ton === "laeuft"} onClick={anlegen}>
           Anlegen
         </button>
       </div>

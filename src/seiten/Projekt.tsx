@@ -2,8 +2,8 @@
 // Beantwortet vor dem Formatieren: Ist von diesem Projekt alles da? Welche Takes haben noch keinen Clip?
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Plus, RefreshCw, Settings } from "lucide-react";
-import { NeuesProjekt, ProjektEinstellungen } from "../ProjektEinstellungen";
+import { MapPinPlus, Plus, RefreshCw, Settings } from "lucide-react";
+import { NeuerDrehort, NeuesProjekt, ProjektEinstellungen } from "../ProjektEinstellungen";
 import { useEinstellungen } from "../einstellungen";
 import { useKonto, type Projekt as ProjektT } from "../konto";
 import { useLauf } from "../lauf";
@@ -54,6 +54,7 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
   const [gewaehlt, setGewaehlt] = useState<string | null>(null);
   const [einstellen, setEinstellen] = useState(false);
   const [anlegen, setAnlegen] = useState(false);
+  const [drehortNeu, setDrehortNeu] = useState(false);
   // Aktueller Stand des Projekts (nach dem Speichern neu geladen) für das Formular.
   const aktuell = konto.projekte.find((p) => p.id === projekt?.id) ?? projekt;
 
@@ -136,9 +137,23 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
             onClick={() => {
               setAnlegen(!anlegen);
               setEinstellen(false);
+              setDrehortNeu(false);
             }}
           >
             <Plus size={14} strokeWidth={2} aria-hidden /> Neues Projekt
+          </button>
+        )}
+        {verbunden && projekt?.id && (
+          <button
+            className="knopf"
+            aria-pressed={drehortNeu}
+            onClick={() => {
+              setDrehortNeu(!drehortNeu);
+              setAnlegen(false);
+              setEinstellen(false);
+            }}
+          >
+            <MapPinPlus size={14} strokeWidth={2} aria-hidden /> Neuer Drehort
           </button>
         )}
         {verbunden && projekt?.id && (
@@ -148,6 +163,7 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
             onClick={() => {
               setEinstellen(!einstellen);
               setAnlegen(false);
+              setDrehortNeu(false);
             }}
             title="Projekt-Einstellungen"
           >
@@ -180,7 +196,17 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
         </p>
       )}
 
-      {anlegen ? (
+      {drehortNeu && aktuell ? (
+        <div className="projekt-formular">
+          <NeuerDrehort
+            projekt={aktuell}
+            fertig={(id) => {
+              setDrehortNeu(false);
+              if (id && projekt) laden(projekt);
+            }}
+          />
+        </div>
+      ) : anlegen ? (
         <div className="projekt-formular">
           <NeuesProjekt
             fertig={(p) => {

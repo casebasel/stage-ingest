@@ -729,8 +729,22 @@ async fn stage_projekt(adresse: String) -> Result<Option<serde_json::Value>, Str
 
 /// Kurzname-Vorschlag nach der gemeinsamen Regel (für das Formular „Neues Projekt“).
 #[tauri::command]
-fn kurzname_vorschlag(name: String) -> Option<String> {
-    struktur::kurzname_vorschlag(&name)
+fn kurzname_vorschlag(name: String, laenge: Option<usize>) -> Option<String> {
+    struktur::kurzname_vorschlag_bis(&name, laenge.unwrap_or(24))
+}
+
+/// Drehort anlegen (ab Migration 0017; Systemkarte 64185e7/4f197ed).
+#[tauri::command]
+async fn plate_drehort_anlegen(
+    plate: State<'_, Arc<plate::Plate>>,
+    zugang: plate::Zugang,
+    projekt: plate::Projekt,
+    name: String,
+    kurzname: String,
+    datum: String,
+) -> Result<String, String> {
+    let p = Arc::clone(&plate);
+    im_hintergrund(move || p.drehort_anlegen(&zugang, &projekt, &name, &kurzname, &datum)).await
 }
 
 /// Kartenziele zu den gewählten Zielordnern: mit Drehstruktur `<Ziel>/<KURZNAME>/<Datum>_<Dreh>/01_KAMERA/<Karte>`,
@@ -845,6 +859,7 @@ pub fn run() {
             plate_projekt_anlegen,
             plate_projekt_aendern,
             kurzname_vorschlag,
+            plate_drehort_anlegen,
             stage_projekt,
             projekt_uebersicht,
             abbrechen,
