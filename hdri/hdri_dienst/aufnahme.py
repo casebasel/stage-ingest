@@ -100,10 +100,17 @@ def positionen_zusammenfuehren(a: Aufnahme, halb: bool = False, melden=None) -> 
     """Je Position die Belichtungsreihe zusammenführen und mit Lage und Kamera versehen."""
     h = a.hdri
     gruppen = a.positionen()
+    if not any((a.ordner / Path(f["pfad"]).name).exists() for f in a.frames):
+        raise AufnahmeFehler("Keines der Bilder ist da")
     aus: list[Position] = []
     for n, (pos, frames) in enumerate(gruppen.items()):
         reihe = []
-        for f in frames:
+        vorhanden = [f for f in frames if (a.ordner / Path(f["pfad"]).name).exists()]
+        if not vorhanden:
+            if melden:
+                melden(f"Position {pos}: keine Bilder da, ausgelassen", (n + 1) / len(gruppen))
+            continue
+        for f in vorhanden:
             bild = bild_laden(datei(a, f), halb=halb)
             zeit, iso = f.get("belichtung_s"), f.get("iso")
             if not zeit or not iso:
@@ -114,7 +121,7 @@ def positionen_zusammenfuehren(a: Aufnahme, halb: bool = False, melden=None) -> 
         # Sichtfeld: hfov = kurze Seite, vfov = lange Seite (Hochformat). Liegt das Bild quer, tauschen.
         kurz, lang = float(h["hfov_grad"]), float(h["vfov_grad"])
         hfov, vfov = (kurz, lang) if breite <= hoehe else (lang, kurz)
-        q = frames[0]["lage_quaternion"]
+        q = vorhanden[0]["lage_quaternion"]
         aus.append(Position(hdr, quaternion_zu_matrix(tuple(q)), Kamera(breite, hoehe, hfov, vfov), clip))
         if melden:
             melden(f"Position {pos} zusammengeführt", (n + 1) / len(gruppen))

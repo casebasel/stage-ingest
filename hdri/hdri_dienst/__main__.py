@@ -84,7 +84,34 @@ def zugang_pruefen(datei: Path) -> int:
     return 0
 
 
+def rechnen(hdri_id: str, datei: Path, arbeit: Path, hoehe: int | None, halb: bool) -> int:
+    """Eine Aufnahme aus der Supabase holen und rechnen (noch ohne Job-Eintrag; der kommt mit Migration 0019)."""
+    from .server import Server, ServerFehler
+    from .waechter import StageAktiv, pruefen
+
+    try:
+        pruefen()
+        s = Server.aus_datei(datei)
+        h = s.lesen(f"hdri?id=eq.{hdri_id}&select=id,zustand,format")
+        if not h:
+            print(f"Aufnahme {hdri_id} nicht gefunden", file=sys.stderr)
+            return 2
+        if h[0]["zustand"] != "uploaded":
+            print(f"Hinweis: Zustand {h[0]['zustand']}, noch nicht alles hochgeladen; gerechnet wird, was da ist.")
+        ordner = s.aufnahme_holen(hdri_id, arbeit, melden=lambda t, f: print(f"  geladen {t}", flush=True))
+        pruefen()
+        verarbeiten(ordner, None, hoehe, halb)
+    except (ServerFehler, AufnahmeFehler, StageAktiv) as e:
+        print(f"Nicht gerechnet: {e}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
+    # Konsole unter Windows (SSH, Dienst) zeigt sonst Umlaute falsch.
+    for strom in (sys.stdout, sys.stderr):
+        if hasattr(strom, "reconfigure"):
+            strom.reconfigure(encoding="utf-8", errors="replace")
     p = argparse.ArgumentParser(prog="hdri_dienst")
     sub = p.add_subparsers(dest="befehl", required=True)
     v = sub.add_parser("verarbeiten", help="eine Aufnahme (Ordner mit metadata.json und DNGs) zum EXR rechnen")
@@ -94,7 +121,15 @@ def main(argv: list[str] | None = None) -> int:
     v.add_argument("--halb", action="store_true", help="DNGs in halber Auflösung entwickeln (schneller)")
     z = sub.add_parser("zugang", help="Zugang zur Supabase prüfen (nur lesen)")
     z.add_argument("--datei", type=Path, default=Path(r"D:\hdri-dienst\zugang.env"))
+    r = sub.add_parser("rechnen", help="Aufnahme aus der Supabase holen und rechnen")
+    r.add_argument("hdri_id")
+    r.add_argument("--datei", type=Path, default=Path(r"D:\hdri-dienst\zugang.env"))
+    r.add_argument("--arbeit", type=Path, default=Path(r"D:\hdri-dienst\arbeit"))
+    r.add_argument("--hoehe", type=int)
+    r.add_argument("--halb", action="store_true")
     args = p.parse_args(argv)
+    if args.befehl == "rechnen":
+        return rechnen(args.hdri_id, args.datei, args.arbeit, args.hoehe, args.halb)
     if args.befehl == "zugang":
         return zugang_pruefen(args.datei)
     try:

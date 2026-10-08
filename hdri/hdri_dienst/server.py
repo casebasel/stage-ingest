@@ -128,12 +128,19 @@ class Server:
         meta_bytes = self.datei(f"{hdri_id}/metadata.json")
         (ziel / "metadata.json").write_bytes(meta_bytes)
         frames = json.loads(meta_bytes)["frames"]
+        fehlend: list[str] = []
         for n, f in enumerate(frames, 1):
             name = Path(f["pfad"]).name
             p = ziel / name
             if p.exists() and (not f.get("bytes") or p.stat().st_size == int(f["bytes"])):
                 continue
-            daten = self.datei(f["pfad"])
+            try:
+                daten = self.datei(f["pfad"])
+            except ServerFehler as e:
+                if "HTTP 400" in str(e) or "HTTP 404" in str(e):
+                    fehlend.append(name)  # noch nicht hochgeladen
+                    continue
+                raise
             if f.get("bytes") and len(daten) != int(f["bytes"]):
                 raise ServerFehler(f"{name}: {len(daten)} statt {f['bytes']} Bytes geladen")
             teil = p.with_suffix(p.suffix + ".teil")
@@ -141,6 +148,8 @@ class Server:
             teil.replace(p)
             if melden:
                 melden(f"{n}/{len(frames)} {name}", n / len(frames))
+        if fehlend and melden:
+            melden(f"noch nicht hochgeladen: {len(fehlend)} Bilder", 1.0)
         return ziel
 
     # --- Schreiben (nur hdri_job) -----------------------------------------------------------------------------
