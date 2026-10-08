@@ -1,5 +1,6 @@
 //! Tauri-Hülle um den Kern: Befehle für die Oberfläche, Fortschritt als Ereignisse.
 
+mod karte_db;
 mod plate;
 mod plates;
 mod projekt;
@@ -53,6 +54,9 @@ struct KartenAuftrag {
     plate_zugang: Option<plate::Zugang>,
     #[serde(default)]
     plate_dreh: Option<String>,
+    /// Projekt aus dem Plate Assistant (fest gewählt): dann gehen Karte und Clips in die gemeinsame Datenbank.
+    #[serde(default)]
+    plate_projekt: Option<PlateProjekt>,
     /// Pfad zu ARRI ART CMD (lokale Einstellung). Leer = keine Bewegungsdaten.
     #[serde(default)]
     art_cmd: Option<PathBuf>,
@@ -62,6 +66,13 @@ struct KartenAuftrag {
     /// Produktionsfirma, Regie, DoP des Projekts (Projekt-Einstellungen): für Bericht und Zusammenfassung.
     #[serde(default)]
     projekt_angaben: Option<ProjektAngaben>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PlateProjekt {
+    id: String,
+    kurzname: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -120,6 +131,8 @@ struct KartenErgebnis {
     plates: Option<plates::Ablage>,
     /// Antwort der Stage auf `ingest.karte` (oder Fehlertext), `None` ohne Stage-Adresse.
     stage: Option<Result<serde_json::Value, String>>,
+    /// Gemeinsame Datenbank (`karte`/`clip`): ID der Karte oder Fehlertext, `None` ohne Projekt aus dem Plate Assistant.
+    datenbank: Option<Result<String, String>>,
     /// Abgleich mit der Soll-Liste (`None` ohne Soll-Liste).
     abgleich: Option<Abgleich>,
     /// PDF-Bericht je Ziel: Pfad oder Fehlertext.
@@ -128,6 +141,70 @@ struct KartenErgebnis {
 }
 
 const FORTSCHRITT: &str = "ingest://fortschritt";
+
+/// Schreibt Karte und Clips (Tabellen `karte`/`clip`); gibt die Karten-ID und abgelehnte Änderungen zurück.
+#[allow(clippy::too_many_arguments)]
+fn karte_in_datenbank(
+    app: &AppHandle,
+    auftrag: &KartenAuftrag,
+    z: &plate::Zugang,
+    projekt: &PlateProjekt,
+    kopie: &Kopie,
+    urteile: &[Urteil],
+    kennungen: &[Kennung],
+    clips: &[ClipZeile],
+    bewegung: &[(String, Bewegung)],
+    take_von: &std::collections::HashMap<String, (String, &str)>,
+    berichte: &[Result<PathBuf, String>],
+    freigabe: &Freigabe,
+) -> Result<(String, Vec<String>), String> {
+    let gut: Vec<usize> = (0..urteile.len()).filter(|&i| urteile[i].gut()).collect();
+    let haupt = gut.iter().find(|&&i| kennungen[i].art == geraet::Art::Netz).or(gut.first());
+    let ist_clip = |p: &str| clips.iter().any(|c| c.pfad == p);
+    let erste_aufnahme = kopie.dateien.iter().filter(|d| ist_clip(&d.pfad)).map(|d| d.geaendert).min();
+    let reel = clips.iter().find_map(|c| soll::arri_reel(&c.pfad).map(|(r, k)| format!("{r}{k}")));
+    let kartenname = geraet::kartenname(&auftrag.quelle);
+    let karte = karte_db::Karte {
+        projekt_id: &projekt.id,
+        projekt_kurzname: &projekt.kurzname,
+        name: &kartenname,
+        reel: reel.as_deref(),
+        eingelesen_am: kopie.beginn,
+        erste_aufnahme,
+        kopien: freigabe.unabhaengige_kopien,
+        freigegeben: freigabe.sicher,
+        speicherort: haupt.map(|&i| urteile[i].ordner.display().to_string()),
+        bericht_ok: !berichte.is_empty() && berichte.iter().all(Result::is_ok),
+    };
+    let namen: Vec<String> = clips.iter().map(|c| soll::ohne_endung(&c.pfad).to_owned()).collect();
+    let eintraege: Vec<karte_db::Clip> = clips
+        .iter()
+        .zip(&namen)
+        .map(|(c, name)| {
+            let (take, art) = take_von.get(name).map(|(t, a)| (Some(t.as_str()), *a)).unwrap_or((None, ""));
+            let a = c.angaben.as_ref();
+            karte_db::Clip {
+                name,
+                start_tc: a.and_then(|a| a.start_tc.as_deref()),
+                end_tc: a.and_then(|a| a.end_tc.as_deref()),
+                fps: a.and_then(|a| a.fps),
+                dreh_id: auftrag.plate_dreh.as_deref(),
+                take_id: take.filter(|t| !t.is_empty()),
+                zuordnung: art,
+                aus_clip: bewegung
+                    .iter()
+                    .find(|(p, _)| p == &c.pfad)
+                    .and_then(|(_, b)| b.aus_clip())
+                    .and_then(|x| serde_json::to_value(x).ok()),
+            }
+        })
+        .collect();
+    let (id, aenderungen, ungueltig) =
+        karte_db::aenderungen(&karte, &eintraege, chrono::Utc::now(), plate::ulid_aehnlich);
+    let mut abgelehnt = app.state::<Arc<plate::Plate>>().karte_schreiben(z, aenderungen)?;
+    abgelehnt.extend(ungueltig.into_iter().map(|n| format!("Clip {n}: Name nicht verwendbar")));
+    Ok((id, abgelehnt))
+}
 
 /// Daten für `ingest.karte` (Form abgestimmt mit der Stage, Systemkarte b71386f).
 #[allow(clippy::too_many_arguments)]
@@ -489,21 +566,42 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
             ingest_bericht::schreiben(&urteile[i].ordner, &pdf, &kopie.beginn).map_err(|e| e.to_string())
         })
         .collect();
+    // Take je Clip (ohne Endung) aus dem Abgleich, mit der Art der Zuordnung.
+    let mut take_von: std::collections::HashMap<String, (String, &str)> = std::collections::HashMap::new();
+    if let Some(a) = &abgleich {
+        for (s, p) in &a.gefunden {
+            take_von.insert(soll::ohne_endung(p).to_owned(), (s.take_id.clone(), "clipname"));
+        }
+        for (s, p) in &a.ueber_timecode {
+            take_von.insert(soll::ohne_endung(p).to_owned(), (s.take_id.clone(), "timecode"));
+        }
+        for (s, p) in &a.ueber_zeitfenster {
+            take_von.insert(soll::ohne_endung(p).to_owned(), (s.take_id.clone(), "zeitfenster"));
+        }
+    }
+
+    // Karte und Clips in die gemeinsame Datenbank (nur mit festem Projekt). Ein Fehler sperrt nichts.
+    let datenbank = match (&auftrag.plate_zugang, &auftrag.plate_projekt) {
+        (Some(z), Some(p)) => {
+            let _ = app.emit(FORTSCHRITT, Fortschritt::Nachlesen { pfad: "Karte und Clips in die Datenbank".into() });
+            let r = karte_in_datenbank(
+                app, auftrag, z, p, &kopie, &urteile, &kennungen, &clips, &bewegung, &take_von, &berichte, &freigabe,
+            );
+            match &r {
+                Ok((_, abgelehnt)) if !abgelehnt.is_empty() => {
+                    freigabe.hinweise.push(format!("Datenbank: nicht übernommen: {}", abgelehnt.join("; ")))
+                }
+                Err(e) => freigabe.hinweise.push(format!("Karte nicht in die Datenbank geschrieben: {e}")),
+                _ => {}
+            }
+            Some(r.map(|(id, _)| id))
+        }
+        _ => None,
+    };
+
     // Zusammenfassung der Karte neben den Bericht, auf jedes gute Ziel (für die Projektübersicht).
     {
         use ingest_kern::uebersicht::{self, ClipEintrag, KartenZusammenfassung};
-        let mut take_von: std::collections::HashMap<String, (String, &str)> = std::collections::HashMap::new();
-        if let Some(a) = &abgleich {
-            for (s, p) in &a.gefunden {
-                take_von.insert(soll::ohne_endung(p).to_owned(), (s.take_id.clone(), "clipname"));
-            }
-            for (s, p) in &a.ueber_timecode {
-                take_von.insert(soll::ohne_endung(p).to_owned(), (s.take_id.clone(), "timecode"));
-            }
-            for (s, p) in &a.ueber_zeitfenster {
-                take_von.insert(soll::ohne_endung(p).to_owned(), (s.take_id.clone(), "zeitfenster"));
-            }
-        }
         let z = KartenZusammenfassung {
             format: uebersicht::FORMAT,
             karte: geraet::kartenname(&auftrag.quelle),
@@ -513,6 +611,7 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
             unabhaengige_kopien: freigabe.unabhaengige_kopien,
             grund: freigabe.grund.clone(),
             projekt: projekt_zeilen(auftrag).into_iter().collect(),
+            karte_id: datenbank.as_ref().and_then(|d| d.as_ref().ok()).cloned(),
             clips: clips
                 .iter()
                 .map(|c| {
@@ -525,7 +624,7 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
                         zuordnung: art.to_string(),
                         pfad: c.pfad.clone(),
                         abweichungen: abweichend.get(&name).cloned().unwrap_or_default(),
-                        dreh_id: None,
+                        dreh_id: None, // nur von Hand gesetzt; sonst stünde der Clip nicht mehr unter „Zu klären“
                         name,
                     }
                 })
@@ -577,6 +676,7 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
         bewegung,
         plates: plates_ablage,
         stage,
+        datenbank,
         abgleich,
         berichte,
         freigabe,
@@ -728,24 +828,46 @@ async fn plate_projekt_aendern(
 /// Zusammenfassung der Karte auf jedem Ziel (`04_BERICHTE/*_ingest.json`), nie in den Kartenordner (ASC MHL bleibt).
 #[tauri::command]
 async fn clip_zuordnen(
+    plate: State<'_, Arc<plate::Plate>>,
+    zugang: Option<plate::Zugang>,
     dateien: Vec<PathBuf>,
     clip: String,
     take_id: Option<String>,
     dreh_id: Option<String>,
 ) -> Result<(), String> {
+    let p = Arc::clone(&plate);
     im_hintergrund(move || {
-        let fehler: Vec<String> = dateien
-            .iter()
-            .filter_map(|d| {
-                ingest_kern::uebersicht::zuordnen(d, &clip, take_id.as_deref(), dreh_id.as_deref())
-                    .err()
-                    .map(|e| format!("{}: {e}", d.display()))
-            })
-            .collect();
+        let mut karte_id = None;
+        let mut fehler: Vec<String> = Vec::new();
+        for d in &dateien {
+            match ingest_kern::uebersicht::zuordnen(d, &clip, take_id.as_deref(), dreh_id.as_deref()) {
+                Ok(id) => karte_id = karte_id.or(id),
+                Err(e) => fehler.push(format!("{}: {e}", d.display())),
+            }
+        }
+        // Steht die Karte in der gemeinsamen Datenbank, dort ebenfalls umhängen (Plate Assistant und Stage lesen das).
+        if let (Some(z), Some(kid)) = (&zugang, &karte_id) {
+            let jetzt = chrono::Utc::now();
+            match karte_db::zuordnung_aenderungen(
+                kid,
+                &clip,
+                take_id.as_deref(),
+                dreh_id.as_deref(),
+                jetzt,
+                plate::ulid_aehnlich,
+            ) {
+                Some(a) => match p.karte_schreiben(z, a) {
+                    Ok(abgelehnt) if abgelehnt.is_empty() => {}
+                    Ok(abgelehnt) => fehler.push(format!("Datenbank: {}", abgelehnt.join("; "))),
+                    Err(e) => fehler.push(format!("Datenbank: {e}")),
+                },
+                None => fehler.push(format!("Datenbank: Clipname {clip} nicht verwendbar")),
+            }
+        }
         if fehler.is_empty() {
             Ok(())
         } else {
-            Err(format!("Nicht auf allen Zielen gespeichert: {}", fehler.join("; ")))
+            Err(format!("Nicht überall gespeichert: {}", fehler.join("; ")))
         }
     })
     .await
@@ -963,6 +1085,7 @@ mod gemeinsamer_test {
             dreh: None,
             plate_zugang: None,
             plate_dreh: None,
+            plate_projekt: None,
             art_cmd: None,
             kamera: None,
             projekt_angaben: None,

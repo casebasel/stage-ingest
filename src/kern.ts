@@ -40,6 +40,8 @@ export type KartenErgebnis = {
   ale: (string | null)[];
   bewegung: [string, Bewegung][];
   stage: { Ok: Record<string, unknown> } | { Err: string } | null;
+  /** Gemeinsame Datenbank (karte/clip): ID der Karte oder Fehler, null ohne Projekt aus dem Plate Assistant. */
+  datenbank: { Ok: string } | { Err: string } | null;
   plates: { plates: number; fotosNeu: number; fehler: string[] } | null;
   abgleich: Abgleich | null;
   berichte: ({ Ok: string } | { Err: string })[];
@@ -70,6 +72,7 @@ export type KartenAuftrag = {
   stageAdresse?: string | null;
   plateZugang?: { adresse: string; anonKey: string; email: string } | null;
   plateDreh?: string | null;
+  plateProjekt?: { id: string; kurzname: string } | null;
   kamera?: { fps: number | null; codec: string | null; aufloesungPx: string | null } | null;
   projektAngaben?: { firma: string | null; regie: string | null; dop: string | null } | null;
 };

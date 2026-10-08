@@ -28,6 +28,9 @@ pub struct KartenZusammenfassung {
     /// Projektangaben zum Nachschlagen (Projekt, Kurzname, Produktionsfirma, Regie, DoP), nur gefüllte.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub projekt: std::collections::BTreeMap<String, String>,
+    /// ID der Karte in der gemeinsamen Datenbank (`karte`), wenn sie dort steht; für spätere Zuordnungen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub karte_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -64,7 +67,13 @@ pub struct GefundeneKarte {
 
 /// Ordnet einen Clip im Nachhinein von Hand zu (Take oder nur Drehort) und schreibt die Zusammenfassung sicher
 /// zurück. Ohne Take und ohne Drehort wird die Zuordnung wieder entfernt.
-pub fn zuordnen(datei: &Path, clip: &str, take_id: Option<&str>, dreh_id: Option<&str>) -> std::io::Result<()> {
+/// Gibt die ID der Karte in der Datenbank zurück (falls die Karte dort steht), damit auch der Clip dort umgehängt wird.
+pub fn zuordnen(
+    datei: &Path,
+    clip: &str,
+    take_id: Option<&str>,
+    dreh_id: Option<&str>,
+) -> std::io::Result<Option<String>> {
     let mut z: KartenZusammenfassung = serde_json::from_slice(&std::fs::read(datei)?).map_err(std::io::Error::other)?;
     let eintrag = z.clips.iter_mut().find(|c| c.name.eq_ignore_ascii_case(clip)).ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::NotFound, format!("Clip {clip} nicht in {}", datei.display()))
@@ -73,7 +82,8 @@ pub fn zuordnen(datei: &Path, clip: &str, take_id: Option<&str>, dreh_id: Option
     eintrag.dreh_id = dreh_id.map(str::to_owned);
     eintrag.zuordnung = if take_id.is_some() || dreh_id.is_some() { "hand".into() } else { String::new() };
     let text = serde_json::to_vec_pretty(&z).map_err(std::io::Error::other)?;
-    crate::sicher_schreiben(datei, &text)
+    crate::sicher_schreiben(datei, &text)?;
+    Ok(z.karte_id)
 }
 
 /// Schreibt die Zusammenfassung neben den Bericht.
@@ -140,6 +150,7 @@ mod tests {
             unabhaengige_kopien: 2,
             grund: "2 unabhängige Kopien geprüft".into(),
             projekt: Default::default(),
+            karte_id: None,
             clips: vec![ClipEintrag {
                 name: "A001C003_261028_R1AB".into(),
                 pfad: "A001C003_261028_R1AB.mov".into(),

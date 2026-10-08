@@ -243,8 +243,10 @@ function useLaufHalten() {
         dreh,
         artCmd: e.artCmd.trim() || null,
         stageAdresse: e.stageAdresse.trim() || null,
-        plateZugang: paDreh ? konto.zugang : null,
+        plateZugang: paDreh || paProjekt ? konto.zugang : null,
         plateDreh: paDreh?.id ?? null,
+        // Fest gewähltes Projekt: Karte und Clips gehen in die gemeinsame Datenbank (Tabellen karte/clip).
+        plateProjekt: paProjekt ? { id: paProjekt.id, kurzname: paProjekt.kurzname } : null,
         kamera:
           paProjekt && (paProjekt.fps || paProjekt.codec || paProjekt.aufloesungPx)
             ? { fps: paProjekt.fps ?? null, codec: paProjekt.codec ?? null, aufloesungPx: paProjekt.aufloesungPx ?? null }

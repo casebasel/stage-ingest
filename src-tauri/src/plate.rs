@@ -16,11 +16,16 @@ use serde_json::{json, Value};
 
 /// Tabellen, die der Ingest ändern darf (Systemkarte 05dc71c, BESITZ.md). Der Server beschränkt ein persönliches
 /// Konto nicht mehr; diese Liste ist die Sperre. Nie: dreh, plate, take, foto.
-pub const DARF_AENDERN: &[&str] = &["projekt", "ingest_meldung", "hdri_job", "dreh"];
+pub const DARF_AENDERN: &[&str] = &["projekt", "ingest_meldung", "hdri_job", "dreh", "karte", "clip"];
 
 /// Felder, die der Ingest an `dreh` (= Drehort) schreiben darf (Systemkarte, Stufe A): anlegen, Name, Datum.
 /// Der Kurzname ist nach dem Anlegen fest; Ort, Kamera und gemessene Werte schreibt nur der Plate Assistant.
 const DREH_FELDER: &[&str] = &["_anlegen", "name", "datum"];
+
+/// Felder an `karte` und `clip` (0018, Besitz Ingest): Karte nur als Ganzes (ein zweites `_anlegen` wird
+/// zusammengeführt); ein Clip zusätzlich umhängen („Zu klären“). Projekt, Name und Reel sind nach dem Anlegen fest.
+const KARTE_FELDER: &[&str] = &["_anlegen"];
+const CLIP_FELDER: &[&str] = &["_anlegen", "take_id", "dreh_id", "zuordnung"];
 
 /// Prüft alle Änderungen einer Anfrage an `aenderungen_anwenden`, bevor sie das Netz verlassen.
 pub fn aenderungen_pruefen(body: &Value) -> Result<(), String> {
@@ -33,6 +38,9 @@ pub fn aenderungen_pruefen(body: &Value) -> Result<(), String> {
         let feld = a["feld"].as_str().unwrap_or("");
         if t == "dreh" && !DREH_FELDER.contains(&feld) {
             return Err(format!("Stage Ingest ändert am Drehort „{feld}“ nicht (gehört dem Plate Assistant)"));
+        }
+        if (t == "karte" && !KARTE_FELDER.contains(&feld)) || (t == "clip" && !CLIP_FELDER.contains(&feld)) {
+            return Err(format!("Stage Ingest ändert an „{t}“ das Feld „{feld}“ nicht (nach dem Anlegen fest)"));
         }
     }
     Ok(())
@@ -446,6 +454,26 @@ impl Plate {
         }
     }
 
+    /// Karte und Clips schreiben (Tabellen `karte`/`clip`). Nur mit dem Recht `ingest` (persönliches Konto); ohne
+    /// das Recht nichts schicken, statt am Server abzuprallen. Gibt die abgelehnten Änderungen mit Grund zurück.
+    pub fn karte_schreiben(&self, z: &Zugang, aenderungen: Vec<Value>) -> Result<Vec<String>, String> {
+        if !self.anmelden_pruefen(z)?.ingest_recht {
+            return Err("Das Konto hat das Recht „ingest“ nicht; Karte und Clips bleiben nur auf den Zielen.".into());
+        }
+        let body = json!({ "p_geraet": geraet_name(), "p_aenderungen": aenderungen });
+        let v = self.anwenden(z, &body)?;
+        let antworten = v.as_array().cloned().unwrap_or_default();
+        Ok(antworten
+            .iter()
+            .zip(aenderungen_von(&body))
+            .filter(|(a, _)| !matches!(a["ergebnis"].as_str(), Some("uebernommen" | "aelter" | "doppelt")))
+            .map(|(a, (tabelle, datensatz))| {
+                let grund = a["grund"].as_str().or(a["ergebnis"].as_str()).unwrap_or("unbekannt");
+                format!("{tabelle} {datensatz}: {grund}")
+            })
+            .collect())
+    }
+
     /// Schickt Änderungen an `aenderungen_anwenden` (vorher gegen die Besitzregel geprüft). Bei 401 einmal neu anmelden.
     fn anwenden(&self, z: &Zugang, body: &Value) -> Result<Value, String> {
         aenderungen_pruefen(body)?;
@@ -465,6 +493,19 @@ impl Plate {
         }
         Err("Anmeldung beim Plate Assistant abgelehnt".into())
     }
+}
+
+fn aenderungen_von(body: &Value) -> Vec<(String, String)> {
+    body["p_aenderungen"]
+        .as_array()
+        .map(|l| {
+            l.iter()
+                .map(|a| {
+                    (a["tabelle"].as_str().unwrap_or("").to_owned(), a["datensatz"].as_str().unwrap_or("").to_owned())
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Eigener Gerätename, damit der Verlauf im Plate Assistant lesbar bleibt.
@@ -668,7 +709,7 @@ impl OderLeer for String {
 }
 
 /// ID je Änderung (10–40 Zeichen, eindeutig): Zeit in Millisekunden + Zufall, Crockford-Base32 wie ULID.
-fn ulid_aehnlich() -> String {
+pub fn ulid_aehnlich() -> String {
     const Z: &[u8] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
     let mut n = (chrono::Utc::now().timestamp_millis() as u128) << 80;
     let zufall = {

@@ -69,6 +69,7 @@ function ergebnis(ziele: string[]) {
     bewegung: [],
     plates: null,
     stage: null,
+    datenbank: null,
     abgleich: {
       gefunden: clips.slice(0, 11).map((c, i) => [{ clip: c, szene: "42A", take: String(i + 1), startTc: "", endTc: "", bewertung: "", quelle: "plate" }, c]),
       fehlt: sicher

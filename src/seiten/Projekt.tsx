@@ -5,7 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { MapPinPlus, Plus, RefreshCw, Settings } from "lucide-react";
 import { NeuerDrehort, NeuesProjekt, ProjektEinstellungen } from "../ProjektEinstellungen";
 import { useEinstellungen } from "../einstellungen";
-import { useKonto, type Projekt as ProjektT } from "../konto";
+import { useKonto, type Projekt as ProjektT, type Zugang } from "../konto";
 import { useLauf } from "../lauf";
 import { Status, type Ton } from "../teile";
 
@@ -305,6 +305,7 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
 
             {ansicht === "takes" && filter === "klaeren" && (
               <ZuKlaeren
+                zugang={verbunden ? konto.zugang : null}
                 u={u}
                 neuerDrehort={() => {
                   setDrehortNeu(true);
@@ -446,8 +447,19 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
 }
 
 /** Zu klären: Clips auf den Karten ohne Take. Im Nachhinein einem Take oder nur einem Drehort zuordnen
- *  (auch einem neu angelegten). Gespeichert in der Zusammenfassung der Karte auf allen Zielen. */
-function ZuKlaeren({ u, neuerDrehort, gespeichert }: { u: Uebersicht; neuerDrehort: () => void; gespeichert: () => void }) {
+ *  (auch einem neu angelegten). Gespeichert in der Zusammenfassung der Karte auf allen Zielen und, wenn die Karte
+ *  in der gemeinsamen Datenbank steht, auch dort (der Plate Assistant zeigt es dann an). */
+function ZuKlaeren({
+  u,
+  zugang,
+  neuerDrehort,
+  gespeichert,
+}: {
+  u: Uebersicht;
+  zugang: Zugang | null;
+  neuerDrehort: () => void;
+  gespeichert: () => void;
+}) {
   const [wahl, setWahl] = useState<Record<string, { dreh: string; take: string }>>({});
   const [stand, setStand] = useState<Record<string, { ton: Ton; text: string }>>({});
   if (u.zuKlaeren.length === 0)
@@ -458,7 +470,7 @@ function ZuKlaeren({ u, neuerDrehort, gespeichert }: { u: Uebersicht; neuerDreho
     if (!w?.dreh) return;
     setStand({ ...stand, [schluessel]: { ton: "laeuft", text: "Speichert …" } });
     try {
-      await invoke("clip_zuordnen", { dateien: c.dateien, clip: c.clip, takeId: w.take || null, drehId: w.dreh });
+      await invoke("clip_zuordnen", { zugang, dateien: c.dateien, clip: c.clip, takeId: w.take || null, drehId: w.dreh });
       setStand({ ...stand, [schluessel]: { ton: "ok", text: "Zugeordnet" } });
       gespeichert();
     } catch (e) {

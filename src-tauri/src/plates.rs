@@ -174,6 +174,7 @@ mod tests {
             unabhaengige_kopien: 2,
             grund: String::new(),
             projekt: Default::default(),
+            karte_id: None,
             clips: vec![
                 ClipEintrag {
                     name: "A001C003_261028_R1AB".into(),

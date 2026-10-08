@@ -1141,12 +1141,22 @@ function Metadaten({ ergebnis }: { ergebnis: KartenErgebnis }) {
       ? { ton: "ok", text: `An die Stage gemeldet: ${d.zugeordnet ?? 0} Clips zugeordnet${offen ? `, ${offen} in der Konsole zu klären` : ""}` }
       : { ton: "warn", text: `Stage hat die Karte abgelehnt: ${d.meldung ?? "ohne Grund"}` };
   }
+  const db = ergebnis.datenbank;
   const p = ergebnis.plates;
   const ales = ergebnis.ale.filter(Boolean) as string[];
   return (
     <div className="metadaten">
       <ul className="liste">
         <li>{stage ? <Status ton={stage.ton}>{stage.text}</Status> : <Status ton="leise">Keine Stage eingetragen</Status>}</li>
+        <li>
+          {!db ? (
+            <Status ton="leise">Nicht in der Datenbank (kein Projekt aus dem Plate Assistant gewählt)</Status>
+          ) : "Err" in db ? (
+            <Status ton="warn">Nicht in der Datenbank: {db.Err}</Status>
+          ) : (
+            <Status ton="ok">Karte und Clips in der Datenbank, der Plate Assistant sieht sie</Status>
+          )}
+        </li>
         <li>
           {p ? (
             <Status ton={p.fehler.length ? "warn" : "ok"}>
