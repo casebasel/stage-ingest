@@ -31,6 +31,9 @@ pub struct KartenZusammenfassung {
     /// ID der Karte in der gemeinsamen Datenbank (`karte`), wenn sie dort steht; für spätere Zuordnungen.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub karte_id: Option<String>,
+    /// Aus `<Datum>_OHNE_DREHORT` in einen Drehort einsortiert (wann, woher, geprüft).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub einsortiert: Option<crate::einsortieren::Einsortiert>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -151,6 +154,7 @@ mod tests {
             grund: "2 unabhängige Kopien geprüft".into(),
             projekt: Default::default(),
             karte_id: None,
+            einsortiert: None,
             clips: vec![ClipEintrag {
                 name: "A001C003_261028_R1AB".into(),
                 pfad: "A001C003_261028_R1AB.mov".into(),

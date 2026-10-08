@@ -48,7 +48,19 @@ type Uebersicht = {
   zuKlaeren: OffenerClip[];
   unlesbar: string[];
   hinweis: string | null;
+  einsortieren: Einsortierbar[];
 };
+type Einsortierbar = {
+  karte: string;
+  von: string;
+  kopien: string[];
+  drehId: string | null;
+  drehort: string | null;
+  ziel: string | null;
+  grund: string | null;
+};
+type Verschoben = { karte: string; nachpruefung: { geprueft: number; abweichungen: unknown[] }; hinweise: string[] };
+type EinsortiertStand = { zusammenfassung: string; ergebnis: { Ok: Verschoben } | { Err: string } };
 
 const ART: Record<string, string> = { graukugel: "Graukugel", chromkugel: "Chromkugel", cleanplate: "Cleanplate", take: "Take" };
 const BEWERTUNG: Record<string, string> = { circle: "Favorit", gut: "Gut", schlecht: "Schlecht" };
@@ -438,7 +450,9 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
                 gespeichert={() => projekt && laden(projekt)}
               />
             )}
-            {auswahl.art === "karten" && <KartenListe karten={u.karten} />}
+            {auswahl.art === "karten" && (
+              <KartenListe karten={u.karten} einsortieren={u.einsortieren ?? []} neuLaden={() => projekt && laden(projekt)} />
+            )}
             {auswahl.art === "dreh" &&
               (() => {
                 const d = u.drehs.find((x) => x.id === auswahl.id);
@@ -550,12 +564,13 @@ function AlleTakes({
   );
 }
 
-function KartenListe({ karten }: { karten: Karte[] }) {
+function KartenListe({ karten, einsortieren, neuLaden }: { karten: Karte[]; einsortieren: Einsortierbar[]; neuLaden: () => void }) {
   return (
     <>
       <div className="detail-kopf">
         <h2>Eingelesene Karten</h2>
       </div>
+      {einsortieren.length > 0 && <OhneDrehort liste={einsortieren} neuLaden={neuLaden} />}
       {karten.length ? (
         <table className="tabelle">
           <thead>
@@ -587,6 +602,85 @@ function KartenListe({ karten }: { karten: Karte[] }) {
         <p className="leer-zeile">Auf den Zielen liegt noch keine eingelesene Karte dieses Projekts.</p>
       )}
     </>
+  );
+}
+
+/** Karten unter „<Datum>_OHNE_DREHORT“: einsortieren, sobald alle Clips einem Drehort gehören (Systemkarte). */
+function OhneDrehort({ liste, neuLaden }: { liste: Einsortierbar[]; neuLaden: () => void }) {
+  const lauf = useLauf();
+  const [laeuft, setLaeuft] = useState<string | null>(null);
+  const [ergebnis, setErgebnis] = useState<Record<string, { ton: Ton; text: string }>>({});
+  async function los(k: Einsortierbar) {
+    if (!k.ziel) return;
+    const ja = await ask(
+      `${k.karte} von ${k.von} nach ${k.ziel} (${k.drehort}) einsortieren?\n\nAuf ${k.kopien.length} ${
+        k.kopien.length === 1 ? "Platte" : "Platten"
+      }: nur Umbenennen auf derselben Platte, nichts wird kopiert oder gelöscht. Danach liest die App jede Kopie vollständig gegen ihr ASC MHL nach.`,
+      { title: "Einsortieren", kind: "info", okLabel: "Einsortieren", cancelLabel: "Abbrechen" },
+    );
+    if (!ja) return;
+    setLaeuft(k.karte);
+    try {
+      const r = await invoke<EinsortiertStand[]>("karte_einsortieren", { kopien: k.kopien, ziel: k.ziel });
+      const fehler = r.filter((x) => "Err" in x.ergebnis).map((x) => ("Err" in x.ergebnis ? x.ergebnis.Err : ""));
+      const abweichend = r.filter((x) => "Ok" in x.ergebnis && x.ergebnis.Ok.nachpruefung.abweichungen.length > 0).length;
+      const gut = r.length - fehler.length - abweichend;
+      setErgebnis({
+        ...ergebnis,
+        [k.karte]:
+          fehler.length || abweichend
+            ? {
+                ton: "rot",
+                text: `${gut} von ${r.length} Kopien einsortiert und geprüft.${abweichend ? ` ${abweichend} mit Abweichungen bei der Nachprüfung (unter Prüfen nachsehen).` : ""}${
+                  fehler.length ? ` Nicht verschoben: ${fehler.join("; ")}` : ""
+                }`,
+              }
+            : { ton: "ok", text: `Auf ${gut} ${gut === 1 ? "Platte" : "Platten"} einsortiert und vollständig geprüft.` },
+      });
+      neuLaden();
+    } catch (e) {
+      setErgebnis({ ...ergebnis, [k.karte]: { ton: "rot", text: String(e) } });
+    } finally {
+      setLaeuft(null);
+    }
+  }
+  return (
+    <div className="ohne-drehort">
+      <h3 className="detail-titel">Ohne Drehort ({liste.length})</h3>
+      <table className="tabelle">
+        <thead>
+          <tr>
+            <th>Karte</th>
+            <th>Ordner</th>
+            <th className="rechts">Platten</th>
+            <th>Einsortieren</th>
+          </tr>
+        </thead>
+        <tbody>
+          {liste.map((k) => (
+            <tr key={`${k.von}/${k.karte}`}>
+              <td className="zahl">{k.karte}</td>
+              <td className="zahl">{k.von}</td>
+              <td className="rechts zahl">{k.kopien.length}</td>
+              <td>
+                {ergebnis[k.karte] ? (
+                  <Status ton={ergebnis[k.karte].ton}>{ergebnis[k.karte].text}</Status>
+                ) : k.ziel ? (
+                  <button className="knopf knopf-klein" disabled={!!laeuft || lauf.laeuft} onClick={() => los(k)}>
+                    {laeuft === k.karte ? "Verschiebt und prüft …" : `In ${k.drehort} einsortieren`}
+                  </button>
+                ) : (
+                  <Status ton="leise">{k.grund}</Status>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="leise ohne-drehort-hinweis">
+        Nicht eingesteckte Platten erscheinen hier wieder, sobald sie angeschlossen sind; dann dort ebenfalls einsortieren.
+      </p>
+    </div>
   );
 }
 

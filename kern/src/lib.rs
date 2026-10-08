@@ -13,6 +13,7 @@
 pub mod ale;
 pub mod artcmd;
 pub mod clip;
+pub mod einsortieren;
 pub mod fehler;
 pub mod freigabe;
 pub mod gedaechtnis;

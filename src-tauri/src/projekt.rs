@@ -25,6 +25,26 @@ pub struct Uebersicht {
     pub unlesbar: Vec<PathBuf>,
     /// Hinweis, wenn der Plate Assistant nicht erreichbar war (dann nur die Karten).
     pub hinweis: Option<String>,
+    /// Karten unter `<Datum>_OHNE_DREHORT`: ob und wohin sie sich einsortieren lassen.
+    pub einsortieren: Vec<Einsortierbar>,
+}
+
+/// Eine Karte unter `<Datum>_OHNE_DREHORT` (alle gefundenen Kopien zusammen). Einsortierbar, wenn jeder Clip über
+/// seinen Take oder von Hand genau einem Drehort gehört (Systemkarte: gemischte Karten nie verschieben).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Einsortierbar {
+    pub karte: String,
+    /// Ordner, in dem die Karte heute liegt (`2026-10-08_OHNE_DREHORT`).
+    pub von: String,
+    /// Zusammenfassungen der Kopien (eine pro Platte).
+    pub kopien: Vec<PathBuf>,
+    /// Ziel: Drehort und Ordnername (`2026-10-08_STUDIO_2`); leer, wenn nicht einsortierbar.
+    pub dreh_id: Option<String>,
+    pub drehort: Option<String>,
+    pub ziel: Option<String>,
+    /// Warum (noch) nicht.
+    pub grund: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -149,6 +169,74 @@ fn clips_im_ordner(ordner: &std::path::Path) -> HashMap<String, PathBuf> {
         .collect()
 }
 
+/// Welche Karten unter `…_OHNE_DREHORT` sich einsortieren lassen und wohin.
+fn einsortierbar(
+    karten: &[GefundeneKarte],
+    drehs: &[DrehStand],
+    take_zu_dreh: &HashMap<String, String>,
+    clip_zu_dreh: &HashMap<String, String>,
+) -> Vec<Einsortierbar> {
+    use std::collections::BTreeMap;
+    let ende = format!("_{}", crate::zuordnung::OHNE_DREHORT);
+    // Gleiche Karte im gleichen Ordner auf mehreren Platten: eine Zeile.
+    let mut gruppen: BTreeMap<(String, String), Vec<&GefundeneKarte>> = BTreeMap::new();
+    for k in karten.iter().filter(|k| k.dreh_ordner.ends_with(&ende)) {
+        gruppen.entry((k.dreh_ordner.clone(), k.inhalt.karte.clone())).or_default().push(k);
+    }
+    gruppen
+        .into_iter()
+        .map(|((von, karte), kopien)| {
+            let clips = &kopien[0].inhalt.clips;
+            let mut ziele: HashSet<&str> = HashSet::new();
+            let mut offen = 0;
+            for c in clips {
+                let dreh = c
+                    .take_id
+                    .as_ref()
+                    .and_then(|t| take_zu_dreh.get(t))
+                    .or_else(|| clip_zu_dreh.get(&c.name.to_uppercase()))
+                    .or(c.dreh_id.as_ref());
+                match dreh {
+                    Some(d) => {
+                        ziele.insert(d);
+                    }
+                    None => offen += 1,
+                }
+            }
+            let mut e = Einsortierbar {
+                karte,
+                kopien: kopien.iter().map(|k| k.datei.clone()).collect(),
+                dreh_id: None,
+                drehort: None,
+                ziel: None,
+                grund: None,
+                von: von.clone(),
+            };
+            if clips.is_empty() {
+                e.grund = Some("Keine Clips auf der Karte".into());
+            } else if offen > 0 {
+                e.grund = Some(format!("{offen} von {} Clips noch zu klären", clips.len()));
+            } else if ziele.len() > 1 {
+                e.grund = Some("Clips aus mehreren Drehorten: die Karte bleibt ganz (wird nie geteilt)".into());
+            } else if let Some(d) = ziele.iter().next().and_then(|id| drehs.iter().find(|d| d.id == *id)) {
+                // Datum vom Drehort, sonst wie heute (Aufnahmetag im Ordnernamen); Name wie beim Einlesen.
+                let datum = if d.datum.is_empty() { von.split('_').next().unwrap_or_default() } else { &d.datum };
+                let ort = if d.kurzname.is_empty() { &d.name } else { &d.kurzname };
+                e.ziel = Some(format!(
+                    "{}_{}",
+                    ingest_kern::struktur::ordnername(datum),
+                    ingest_kern::struktur::ordnername(ort)
+                ));
+                e.dreh_id = Some(d.id.clone());
+                e.drehort = Some(d.name.clone());
+            } else {
+                e.grund = Some("Drehort nicht mehr im Projekt".into());
+            }
+            e
+        })
+        .collect()
+}
+
 /// Wo ein eingelesener Clip liegt.
 #[derive(Clone)]
 struct Eingelesen {
@@ -236,6 +324,9 @@ pub fn zusammenfuehren(
         }
     }
     let mut zugeordnete_clips: HashSet<String> = HashSet::new();
+    // Für das Einsortieren: Take → Drehort und Clipname (aus dem Plate Assistant) → Drehort.
+    let mut take_zu_dreh: HashMap<String, String> = HashMap::new();
+    let mut clip_zu_dreh: HashMap<String, String> = HashMap::new();
     let mut drehs = Vec::new();
     for d in drehs_json.as_array().into_iter().flatten().filter(|d| gilt(d)) {
         let hdri_alle: Vec<&Value> = d["hdri"].as_array().into_iter().flatten().filter(|h| gilt(h)).collect();
@@ -251,6 +342,10 @@ pub fn zusammenfuehren(
                     .find(|c| !c.is_empty())
                     .map(|c| ingest_kern::soll::ohne_endung(&c).to_uppercase())
                     .unwrap_or_default();
+                take_zu_dreh.insert(id.clone(), text(&d["id"]));
+                if !clip.is_empty() {
+                    clip_zu_dreh.insert(clip.clone(), text(&d["id"]));
+                }
                 let stand = nach_take.get(&id).or_else(|| (!clip.is_empty()).then(|| nach_clip.get(&clip)).flatten());
                 if !clip.is_empty() && stand.is_some() {
                     zugeordnete_clips.insert(clip.clone());
@@ -346,7 +441,8 @@ pub fn zusammenfuehren(
             }),
         }
     }
-    Uebersicht { projekt, drehs, karten, zu_klaeren, unlesbar, hinweis: None }
+    let einsortieren = einsortierbar(&karten, &drehs, &take_zu_dreh, &clip_zu_dreh);
+    Uebersicht { projekt, drehs, karten, zu_klaeren, unlesbar, hinweis: None, einsortieren }
 }
 
 /// Liest Plan und Stand und verbindet beides. Ohne Zugang zum Plate Assistant: nur die Karten.
@@ -416,6 +512,7 @@ mod tests {
                 grund: String::new(),
                 projekt: Default::default(),
                 karte_id: None,
+                einsortiert: None,
                 clips: vec![
                     ClipEintrag {
                         name: "A001C003_261028_R1AB".into(),

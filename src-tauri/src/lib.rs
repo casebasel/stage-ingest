@@ -764,6 +764,7 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
             grund: freigabe.grund.clone(),
             projekt: projekt_zeilen(auftrag).into_iter().collect(),
             karte_id: datenbank.as_ref().and_then(|d| d.as_ref().ok()).cloned(),
+            einsortiert: None,
             clips: clips
                 .iter()
                 .map(|c| {
@@ -1054,6 +1055,46 @@ fn kaskade_ausfuehren(
         .map_err(|e| freigabe.hinweise.push(format!("Bericht nicht geschrieben: {e}")))
         .ok();
     Ok(KaskadenErgebnis { quelle: quelle.to_path_buf(), ziel, urteile, kennungen, freigabe, bericht })
+}
+
+/// Ergebnis des Einsortierens pro Kopie (Platte).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EinsortiertStand {
+    zusammenfassung: PathBuf,
+    ergebnis: Result<ingest_kern::einsortieren::Verschoben, String>,
+}
+
+/// Sortiert eine Karte aus `<Datum>_OHNE_DREHORT` in den Drehordner `ziel` ein, auf jeder gefundenen Kopie (nur
+/// Umbenennen auf derselben Platte, danach volle Prüfung gegen ASC MHL). Nie während eines anderen Vorgangs.
+#[tauri::command]
+async fn karte_einsortieren(
+    app: AppHandle,
+    laufend: State<'_, Laufend>,
+    kopien: Vec<PathBuf>,
+    ziel: String,
+) -> Result<Vec<EinsortiertStand>, String> {
+    if laufend.aktiv.swap(true, Ordering::SeqCst) {
+        return Err("Es läuft schon ein Vorgang.".into());
+    }
+    laufend.abbruch.store(false, Ordering::SeqCst);
+    let aktiv = Arc::clone(&laufend.aktiv);
+    let abbruch = Arc::clone(&laufend.abbruch);
+    let ergebnis = tauri::async_runtime::spawn_blocking(move || {
+        kopien
+            .into_iter()
+            .map(|zusammenfassung| {
+                let ergebnis = ingest_kern::einsortieren::verschieben(&zusammenfassung, &ziel, &abbruch, |pfad| {
+                    let _ = app.emit(FORTSCHRITT, Fortschritt::Nachpruefen { pfad: pfad.to_string() });
+                });
+                EinsortiertStand { zusammenfassung, ergebnis }
+            })
+            .collect::<Vec<_>>()
+    })
+    .await
+    .map_err(|e| e.to_string());
+    aktiv.store(false, Ordering::SeqCst);
+    ergebnis
 }
 
 /// Prüft eine bestehende Kopie gegen ihr ASC MHL (vollständig, ohne Cache).
@@ -1523,6 +1564,7 @@ pub fn run() {
             projekt_uebersicht,
             take_technik,
             karte_wiedererkennen,
+            karte_einsortieren,
             artcmd_laden,
             art_viewer,
             im_art_viewer,

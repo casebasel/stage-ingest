@@ -1507,6 +1507,13 @@ input[type="checkbox"][role="switch"]:checked::before {
 .knopf-abspielen:hover {
   background: var(--hover);
 }
+.ohne-drehort {
+  margin-bottom: 16px;
+}
+.ohne-drehort-hinweis {
+  padding: 6px 16px 0;
+  font-size: 12px;
+}
 .gedaechtnis {
   margin: 0 0 12px;
 }

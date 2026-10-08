@@ -289,7 +289,7 @@ pub fn nachpruefen(
         .into_iter()
         .filter_entry(|e| e.depth() != 1 || e.file_name() != ORDNER)
         .filter_map(Result::ok)
-        .filter(|e| e.file_type().is_file() && e.file_name() != ".DS_Store")
+        .filter(|e| e.file_type().is_file() && !crate::kopie::vom_system(&e.file_name().to_string_lossy()))
         .map(|e| crate::kopie::relativ(ordner, e.path()))
         .collect();
 

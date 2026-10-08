@@ -175,6 +175,7 @@ mod tests {
             grund: String::new(),
             projekt: Default::default(),
             karte_id: None,
+            einsortiert: None,
             clips: vec![
                 ClipEintrag {
                     name: "A001C003_261028_R1AB".into(),
