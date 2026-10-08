@@ -42,7 +42,7 @@ pub fn auflisten() -> Vec<Laufwerk> {
             let (gesamt, frei) = platz(&pfad).map_or((None, None), |(g, f)| (Some(g), Some(f)));
             Laufwerk {
                 name: crate::geraet::kartenname(&pfad),
-                karte: if netz { None } else { karte_erkennen(&pfad) },
+                karte: if netz { None } else { karte_gemerkt(&pfad, gesamt) },
                 pfad,
                 gesamt,
                 frei,
@@ -52,6 +52,36 @@ pub fn auflisten() -> Vec<Laufwerk> {
         .collect();
     liste.sort_by(|a, b| b.karte.is_some().cmp(&a.karte.is_some()).then(a.name.cmp(&b.name)));
     liste
+}
+
+/// Wie [`karte_erkennen`], aber gemerkt, solange das Volume dasselbe ist und sich in der Wurzel nichts ändert
+/// (Gerät, Änderungszeit der Wurzel, Grösse). Die Oberfläche fragt alle paar Sekunden; ohne Gedächtnis würde jede
+/// Zielplatte dabei bis zu 4000 Einträge tief gelesen (und eine Festplatte nie schlafen).
+fn karte_gemerkt(pfad: &Path, gesamt: Option<u64>) -> Option<Karte> {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    type Schluessel = (u64, Option<std::time::SystemTime>, Option<u64>);
+    type Gemerkt = HashMap<PathBuf, (Schluessel, Option<Karte>)>;
+    static GEMERKT: Mutex<Option<Gemerkt>> = Mutex::new(None);
+    let meta = std::fs::metadata(pfad).ok();
+    #[cfg(unix)]
+    let geraet = {
+        use std::os::unix::fs::MetadataExt;
+        meta.as_ref().map_or(0, |m| m.dev())
+    };
+    #[cfg(not(unix))]
+    let geraet = 0u64;
+    let schluessel: Schluessel = (geraet, meta.and_then(|m| m.modified().ok()), gesamt);
+    if let Some((s, k)) = GEMERKT.lock().ok().and_then(|g| g.as_ref().and_then(|g| g.get(pfad).cloned())) {
+        if s == schluessel {
+            return k;
+        }
+    }
+    let karte = karte_erkennen(pfad);
+    if let Ok(mut g) = GEMERKT.lock() {
+        g.get_or_insert_with(HashMap::new).insert(pfad.to_path_buf(), (schluessel, karte.clone()));
+    }
+    karte
 }
 
 /// Clips einer Kamera nahe der Wurzel? `None` für Platten mit Kopien und alles ohne Clips.

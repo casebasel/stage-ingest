@@ -62,7 +62,7 @@ pub fn vorpruefen_mit(auftrag: &Auftrag, bytes: u64, zur_seite: &[std::path::Pat
     }
     // Ein Ziel auf der Karte selbst (oder auf derselben Platte) würde mitformatiert.
     let karte_volume = geraet::volume_kennung(&quelle).ok();
-    let karte_geraet = geraet::kennung(&quelle).ok().filter(|k| k.sicher).map(|k| k.wert);
+    let karte_geraet = geraet::kennung_schnell(&quelle).ok().filter(|k| k.sicher).map(|k| k.wert);
 
     let mut kennungen: HashMap<String, Vec<&Path>> = HashMap::new();
     // Platz, den die Karte auf einem Zielmedium belegt: jede Datei auf ganze Blöcke des Ziels aufgerundet (exFAT
@@ -126,7 +126,7 @@ pub fn vorpruefen_mit(auftrag: &Auftrag, bytes: u64, zur_seite: &[std::path::Pat
         if karte_volume.is_some() && geraet::volume_kennung(&ort_echt).ok() == karte_volume {
             befunde.push(fehler(format!("Ziel liegt auf der Karte selbst: {}", ziel.display())));
         }
-        match geraet::kennung(&ort_echt) {
+        match geraet::kennung_schnell(&ort_echt) {
             Ok(k) if k.sicher && Some(&k.wert) == karte_geraet.as_ref() => {
                 befunde.push(fehler(format!("Ziel liegt auf derselben Platte wie die Karte: {}", ziel.display())))
             }
@@ -141,7 +141,7 @@ pub fn vorpruefen_mit(auftrag: &Auftrag, bytes: u64, zur_seite: &[std::path::Pat
     // Frühere, vollständige Kopien: nichts zu schreiben, aber sie müssen erreichbar sein und zählen für die
     // Unabhängigkeit wie jedes Ziel.
     for ziel in &auftrag.vorhandene {
-        match geraet::kennung(ziel) {
+        match geraet::kennung_schnell(ziel) {
             Ok(k) if k.sicher => kennungen.entry(k.wert).or_default().push(ziel),
             Ok(_) => {}
             Err(e) => befunde.push(fehler(format!("Vorhandene Kopie nicht lesbar: {}: {e}", ziel.display()))),

@@ -140,8 +140,10 @@ fn passwort(email: &str) -> Result<String, String> {
         .map_err(|_| "Kein Passwort für den Plate Assistant hinterlegt".to_string())
 }
 
+/// Eine Verbindung für alle Anfragen (Keep-alive): sonst kostet jedes Foto der Projektseite einen neuen TLS-Aufbau.
 fn agent() -> ureq::Agent {
-    ureq::AgentBuilder::new().timeout(Duration::from_secs(15)).build()
+    static AGENT: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
+    AGENT.get_or_init(|| ureq::AgentBuilder::new().timeout(Duration::from_secs(15)).build()).clone()
 }
 
 fn fehler(e: ureq::Error) -> String {

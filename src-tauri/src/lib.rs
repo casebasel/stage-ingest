@@ -1453,7 +1453,7 @@ async fn ziel_geraete(basis: Vec<PathBuf>) -> Vec<ZielGeraet> {
                 }
                 let (gesamt, frei) =
                     ingest_kern::laufwerke::platz(&pfad).map_or((None, None), |(g, f)| (Some(g), Some(f)));
-                match geraet::kennung(&pfad) {
+                match geraet::kennung_schnell(&pfad) {
                     Ok(k) => ZielGeraet { pfad, kennung: Some(k), gesamt, frei, fehler: None },
                     Err(e) => ZielGeraet { pfad, kennung: None, gesamt, frei, fehler: Some(e.to_string()) },
                 }

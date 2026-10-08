@@ -39,6 +39,15 @@ pub fn kennung(pfad: &Path) -> std::io::Result<Kennung> {
     plattform::kennung(pfad)
 }
 
+/// Wie [`kennung`], aber ohne Seriennummer (auf dem Mac kostet sie einen Aufruf von `system_profiler`, mehrere
+/// Sekunden). Für Vorab-Prüfung und Anzeige; Bericht und Freigabe nehmen [`kennung`].
+pub fn kennung_schnell(pfad: &Path) -> std::io::Result<Kennung> {
+    #[cfg(target_os = "macos")]
+    return plattform::kennung_mit(pfad, false);
+    #[cfg(not(target_os = "macos"))]
+    plattform::kennung(pfad)
+}
+
 fn volume(pfad: &Path, grund: &str) -> std::io::Result<Kennung> {
     #[cfg(unix)]
     let wert = {
@@ -120,13 +129,17 @@ mod plattform {
     use std::process::Command;
 
     pub fn kennung(pfad: &Path) -> std::io::Result<Kennung> {
+        kennung_mit(pfad, true)
+    }
+
+    pub fn kennung_mit(pfad: &Path, mit_seriennummer: bool) -> std::io::Result<Kennung> {
         let (typ, von, auf) = statfs(pfad)?;
         if matches!(typ.as_str(), "smbfs" | "nfs" | "afpfs" | "webdav") {
             return Ok(netz(&von, &von));
         }
         match ganze_platte(&auf) {
             Some((platte, modell)) => Ok(Kennung {
-                seriennummer: seriennummer(&platte),
+                seriennummer: if mit_seriennummer { seriennummer(&platte) } else { None },
                 wert: format!("platte:{platte}"),
                 sicher: true,
                 art: Art::Platte,
