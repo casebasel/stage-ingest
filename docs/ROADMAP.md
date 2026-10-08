@@ -17,7 +17,9 @@ Gebaut ist der Kern (siehe KONZEPT Kapitel 14). Offen, in dieser Reihenfolge:
    - Windows: auf Ada mit `A001R132`
    - Bericht und Gerätekennung kontrollieren
    - Kartenerkennung und Auswerfen mit einer echten ALEXA-Karte
-   - Echter ALEXA-Clip: Codec und Auflösung bestätigen, Sensor-fps und Sensormodus lesbar?
+   - ~~Echter ALEXA-Clip~~ (Ada, A001R132, 08.10.2026): Karte ist ARRIRAW in MXF; MXF-Leser gebaut und bestätigt
+     (Timecode, Dauer, fps, ARRIRAW, 2880x1620). Offen: Sensor-fps steht im ARRIRAW-Bildkopf (Kandidaten bei
+     Byte 416/420/432 = 25000); eindeutig erst mit einem Clip, bei dem Sensor- und Projekt-fps verschieden sind
 4. Erst danach: Stage Ingest am Dreh einsetzen, die ersten Tage parallel zum bisherigen Werkzeug.
 
 ## Laufend, ohne fremde Abhängigkeit
