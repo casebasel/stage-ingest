@@ -46,9 +46,13 @@ Gebaut ist der Kern (siehe KONZEPT Kapitel 14). Offen, in dieser Reihenfolge:
 - **Studio im Baum** (Systemkarte „Übersicht, Studio-Spiegel, VFX“): Drehort STUDIO mit gespiegelten Einstellungen und
   Studio-Takes der Stage; Studio-Karten zusätzlich in `karte`/`clip` mit `clip.studio_take_id` (nicht `take_id`).
   Studio-Takes darf der Ingest **bewerten und mit Notiz versehen** (nur diese zwei Felder, Recht kommt mit 0022).
+  Regeln 0022 (plate-assistant `docs/SCHEMA-STUDIO-VFX.md` Fassung 2): höchstens `take_id` oder `studio_take_id`;
+  beim Umhängen im selben Aufruf zuerst `take_id` = null, dann `studio_take_id`. `einstellung` nur lesen.
 - **VFX-Rücklauf** (`plate_version`, Entwurf Plate Assistant SCHEMA-STUDIO-VFX 1.3): Version 0 = Kamera-Clip ohne
   Transcode (Abspielfassung von Hand); VFX-Fassungen 1, 2 … mit Pfad relativ zum Projektordner, Prüfsumme/MHL,
-  Farbraum, Zustand geliefert/freigegeben/verworfen.
+  Farbraum, Zustand geliefert/freigegeben/verworfen. Fest: projekt_id, take_id, version, art; Version eindeutig je
+  Take auch unter gelöschten (`version_vergeben`); `pfad`/`mhl_pfad` relativ (kein /, ://, .., Laufwerk);
+  `abspielbar` nur mit pfad; `xxh128` 32 kleine Hex-Zeichen.
 - **Schritt 2 (wartet auf Rechte vom Plate Assistant):** Takes bewerten + Notiz, Take (und Plate) aus einem Clip
   anlegen, Plates vorab planen, Umbenennen/Verschieben/Papierkorb. Jüngste Änderung gewinnt, Löschen nur Papierkorb.
 - **Umbenennen samt Kurzname** (Drehort und Projekt): Ordner auf allen erreichbaren Zielen umbenennen, Pfade in
