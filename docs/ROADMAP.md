@@ -43,6 +43,15 @@ Gebaut ist der Kern (siehe KONZEPT Kapitel 14). Offen, in dieser Reihenfolge:
 - **HDRI-Vorschau:** Der HDRI-Dienst lädt `hdri/<hdri_id>/vorschau.jpg` hoch und trägt den Pfad in
   `hdri_job.ergebnis.vorschau_speicher` ein (gebaut e54ea57; wartet auf Migration 0021). **Beim späteren Löschen der
   Rohdaten nach der Freigabe `ergebnis.jpg` ausnehmen** (0015/0020 erlauben das Löschen jeder Datei der Aufnahme).
+- **Ziel existiert / Kopien ergänzen** (gebaut, v0.1.15): frühere vollständige Kopie wird nur nachgeprüft (gegen Karte
+  und frühere MHL-Prüfsumme, Generation in-place/verified) und gezählt; abweichende Ordner nur auf Bestätigung zur
+  Seite gelegt (_ALT_<Datum>_<Zeit>); Start mit zu wenigen Kopien nur nach Rückfrage (steht im Bericht); „Kopie
+  ergänzen“; Kopie aus Kopie (Kaskade) unter Prüfen, gegen die ursprünglichen Karten-Prüfsummen. Kopienzahl pro
+  Projekt (vorerst lokal; Feld `projekt.kopien` beim Plate Assistant angefragt). Offen: Löschen zur Seite gelegter
+  Fassungen in der App (mit Bestätigung, nur wenn eine geprüfte Kopie existiert).
+- **Fotos am Drehort** (0023/0024 beim Plate Assistant gebaut, noch nicht angewendet): Fotos vom Fotoapparat beim
+  Einlesen nach `foto` (dreh_id, plate_id über Zeit/GPS, quelle fotoapparat, xxh128 eindeutig, original relativ),
+  JPEG ≤ 3072 px ohne Metadaten in den Bucket.
 - **Kamera-Register** (Systemkarte KAMERAS.md, Schema beim Plate Assistant): Clips über die Seriennummer aus dem Clip
   einer Kamera zuordnen (`clip.kamera` = Rolle A/B des Projekts, dazu Seriennummer). Unglaubwürdiges Aufnahmedatum
   (nicht gestellte Kamerauhr, z. B. 2012) erzeugt eine Warnung im Bericht und kein `karte.erste_aufnahme` (gebaut).

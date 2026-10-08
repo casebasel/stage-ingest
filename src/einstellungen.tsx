@@ -32,9 +32,18 @@ function useEinstellungenHalten() {
   const [ziele, setZiele] = useGemerkt<string[]>("ziele", []);
   const [mitMd5, setMitMd5] = useGemerkt("mitMd5", false);
   const [zweimalLesen, setZweimalLesen] = useGemerkt("zweimalLesen", false);
-  // Auch die Testschwelle 1 bleibt gemerkt (Marlon, 08.10.2026); die Kopfleiste zeigt sie dann immer als Warnung.
-  const [mindestKopien, setMindestKopien] = useState(() => Math.min(9, Math.max(1, gemerkt("mindestKopien", 2))));
-  useEffect(() => merken("mindestKopien", mindestKopien), [mindestKopien]);
+  // Kopien für die Freigabe: pro Projekt (Marlon, 08.10.2026: Standard 2, pro Projekt einstellbar, z. B. 3 für
+  // Netflix). Ohne Projekt gilt der allgemeine Wert. Auch die Testschwelle 1 bleibt gemerkt; die Kopfleiste warnt.
+  const [kopienAllgemein, setKopienAllgemein] = useState(() => Math.min(9, Math.max(1, gemerkt("mindestKopien", 2))));
+  useEffect(() => merken("mindestKopien", kopienAllgemein), [kopienAllgemein]);
+  const [kopienJeProjekt, setKopienJeProjekt] = useGemerkt<Record<string, number>>("kopienJeProjekt", {});
+  const [aktivesProjekt, setAktivesProjekt] = useState<string | null>(null);
+  const mindestKopien = (aktivesProjekt && kopienJeProjekt[aktivesProjekt]) || kopienAllgemein;
+  const setMindestKopien = (n: number) => {
+    const wert = Math.min(9, Math.max(1, n));
+    if (aktivesProjekt) setKopienJeProjekt({ ...kopienJeProjekt, [aktivesProjekt]: wert });
+    else setKopienAllgemein(wert);
+  };
   const [stageAdresse, setStageAdresse] = useGemerkt("stageAdresse", "");
   const [artCmd, setArtCmd] = useGemerkt("artCmd", "");
   return {
@@ -46,6 +55,9 @@ function useEinstellungenHalten() {
     setZweimalLesen,
     mindestKopien,
     setMindestKopien,
+    /** Projekt, für das `mindestKopien` gilt (setzt `lauf` beim Wählen oben links). */
+    aktivesProjekt,
+    setAktivesProjekt,
     stageAdresse,
     setStageAdresse,
     artCmd,

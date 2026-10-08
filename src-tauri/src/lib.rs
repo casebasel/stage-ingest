@@ -795,6 +795,223 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
     Ok(ergebnis)
 }
 
+/// Ergebnis von „Kopie aus Kopie“ (Kaskade): die neue Kopie, Urteile (Quelle zuerst) und die neue Freigabe der Karte.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct KaskadenErgebnis {
+    quelle: PathBuf,
+    ziel: PathBuf,
+    urteile: Vec<Urteil>,
+    kennungen: Vec<Kennung>,
+    freigabe: Freigabe,
+    bericht: Option<PathBuf>,
+}
+
+#[cfg(test)]
+mod kaskaden_ziel_test {
+    #[test]
+    fn struktur_bleibt() {
+        let q = std::path::Path::new("/ssd/ingest/TEST/2026-10-08_STUDIO_2/01_KAMERA/A004R132");
+        assert_eq!(
+            super::kaskaden_ziel(q, std::path::Path::new("/nas/Footage")),
+            std::path::PathBuf::from("/nas/Footage/TEST/2026-10-08_STUDIO_2/01_KAMERA/A004R132")
+        );
+        assert_eq!(
+            super::kaskaden_ziel(std::path::Path::new("/ssd/A004R132"), std::path::Path::new("/nas")),
+            std::path::PathBuf::from("/nas/A004R132")
+        );
+    }
+}
+
+/// Zielpfad einer Kopie aus Kopie: In einer Drehstruktur (`…/<PROJEKT>/<Dreh>/01_KAMERA/<Karte>`) dieselbe Struktur
+/// unter `basis`, sonst nur der Kartenordner.
+fn kaskaden_ziel(quelle: &Path, basis: &Path) -> PathBuf {
+    let teile: Vec<_> = quelle.components().rev().take(4).collect();
+    let in_struktur =
+        quelle.parent().and_then(Path::file_name).is_some_and(|n| n == struktur::KAMERA) && teile.len() == 4;
+    if in_struktur {
+        teile.iter().rev().fold(basis.to_path_buf(), |p, k| p.join(k.as_os_str()))
+    } else {
+        basis.join(quelle.file_name().unwrap_or_default())
+    }
+}
+
+/// Kopie aus Kopie: Ist die Karte nicht mehr da, die fehlende Kopie aus einer früheren, geprüften Kopie erstellen.
+/// Geprüft gegen die ursprünglichen Prüfsummen der Karte (ASC MHL der Quelle); zählt die Quelle mit.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn kopie_aus_kopie(
+    app: AppHandle,
+    laufend: State<'_, Laufend>,
+    plate: State<'_, Arc<plate::Plate>>,
+    quelle: PathBuf,
+    ziel_basis: PathBuf,
+    mindest_kopien: usize,
+    zugang: Option<plate::Zugang>,
+    projekt: Option<PlateProjekt>,
+) -> Result<KaskadenErgebnis, String> {
+    if laufend.aktiv.swap(true, Ordering::SeqCst) {
+        return Err("Es läuft schon ein Vorgang.".into());
+    }
+    laufend.abbruch.store(false, Ordering::SeqCst);
+    let aktiv = Arc::clone(&laufend.aktiv);
+    let abbruch = Arc::clone(&laufend.abbruch);
+    let p = Arc::clone(&plate);
+    let ergebnis = tauri::async_runtime::spawn_blocking(move || {
+        kaskade_ausfuehren(&app, &p, &quelle, &ziel_basis, mindest_kopien, zugang.as_ref(), projekt.as_ref(), &abbruch)
+    })
+    .await
+    .map_err(|e| e.to_string())
+    .and_then(|r| r);
+    aktiv.store(false, Ordering::SeqCst);
+    ergebnis
+}
+
+#[allow(clippy::too_many_arguments)]
+fn kaskade_ausfuehren(
+    app: &AppHandle,
+    plate: &plate::Plate,
+    quelle: &Path,
+    ziel_basis: &Path,
+    mindest_kopien: usize,
+    zugang: Option<&plate::Zugang>,
+    projekt: Option<&PlateProjekt>,
+    abbruch: &AtomicBool,
+) -> Result<KaskadenErgebnis, String> {
+    let ziel = kaskaden_ziel(quelle, ziel_basis);
+    // Kennungen vorher: beide Platten müssen erreichbar sein; dieselbe Platte zählt nur einmal.
+    let k_quelle = geraet::kennung(quelle).map_err(|e| format!("{}: {e}", quelle.display()))?;
+    let ort = struktur::vorhandener_vorfahr(&ziel).unwrap_or(ziel_basis);
+    let k_ziel = geraet::kennung(ort).map_err(|e| format!("{}: {e}", ziel.display()))?;
+    if k_quelle.sicher && k_ziel.sicher && k_quelle.wert == k_ziel.wert {
+        return Err(
+            "Das Ziel liegt auf derselben Platte wie die vorhandene Kopie; das wäre keine unabhängige Kopie.".into()
+        );
+    }
+    // In einer Drehstruktur den Drehordner mit allen Unterordnern anlegen (wie beim Einlesen).
+    if ziel.parent().and_then(Path::file_name).is_some_and(|n| n == struktur::KAMERA) {
+        if let Some(drehordner) = ziel.parent().and_then(Path::parent) {
+            struktur::anlegen(drehordner).map_err(|e| format!("{}: {e}", drehordner.display()))?;
+        }
+    }
+    let k = ingest_kern::kaskade::aus_kopie(quelle, &ziel, abbruch, |meldung| {
+        let _ = app.emit(FORTSCHRITT, Fortschritt::Kopieren { meldung });
+    })?;
+    let urteil_neu = pruefen::zurueckpruefen(&k.kopie, true, abbruch, |ziel, pfad| {
+        let _ = app.emit(FORTSCHRITT, Fortschritt::Pruefen { ziel, pfad: pfad.to_string() });
+    })
+    .map_err(|e| {
+        let _ = std::fs::remove_dir_all(&ziel); // nur die neue, ungeprüfte Kopie
+        e.to_string()
+    })?;
+    let quelle_gut = k.quelle_abweichungen.is_empty();
+    let mut urteile = vec![Urteil {
+        ordner: quelle.to_path_buf(),
+        geprueft: k.kopie.dateien.len(),
+        abweichungen: k.quelle_abweichungen.clone(),
+        kopierfehler: None,
+    }];
+    urteile.extend(urteil_neu.into_iter().map(|mut u| {
+        if !quelle_gut {
+            u.kopierfehler.get_or_insert_with(|| "Quelle passt nicht zu den Prüfsummen der Karte".into());
+        }
+        u
+    }));
+    // Neue MHL-Generation auf der neuen Kopie (transfer, verified gegen die mitkopierte Historie); die Quelle bekommt
+    // eine Generation „in-place“, weil sie dabei vollständig gegen die Karte nachgeprüft wurde.
+    let angaben = mhl::Angaben {
+        werkzeug: "Stage Ingest".into(),
+        version: app.package_info().version.to_string(),
+        zeit: k.kopie.beginn,
+        nur_pruefen: false,
+    };
+    for (i, u) in urteile.iter_mut().enumerate() {
+        if u.gut() {
+            let a = mhl::Angaben { nur_pruefen: i == 0, ..angaben.clone() };
+            if let Err(e) = mhl::schreiben(&u.ordner, &k.kopie, &a) {
+                u.kopierfehler = Some(format!("ASC MHL nicht geschrieben: {e}"));
+            }
+        }
+    }
+    let kennungen = vec![k_quelle, k_ziel];
+    let umfang = freigabe::Umfang {
+        dateien: k.kopie.dateien.len(),
+        ganze_karte: true,
+        historie_abweichungen: k.quelle_abweichungen.len(),
+    };
+    let mut freigabe = freigabe::beurteilen(&urteile, &kennungen, mindest_kopien, umfang);
+    freigabe.hinweise.push(format!(
+        "Kopie aus Kopie: aus {} erstellt, geprüft gegen die ursprünglichen Prüfsummen der Karte (ASC MHL).",
+        quelle.display()
+    ));
+    // Zusammenfassung der Karte (für Projekt-Seite und Verlauf) auf beiden Kopien nachführen.
+    let mut zusammenfassung = None;
+    if let Ok(dateien) = std::fs::read_dir(struktur::berichtordner(quelle)) {
+        let name = quelle.file_name().map(|n| n.to_string_lossy().to_uppercase()).unwrap_or_default();
+        for d in dateien.flatten() {
+            let n = d.file_name().to_string_lossy().into_owned();
+            if n.ends_with(ingest_kern::uebersicht::ENDUNG) && n.to_uppercase().starts_with(&name) {
+                if let Ok(mut z) = serde_json::from_slice::<ingest_kern::uebersicht::KartenZusammenfassung>(
+                    &std::fs::read(d.path()).unwrap_or_default(),
+                ) {
+                    z.freigegeben = freigabe.sicher;
+                    z.unabhaengige_kopien = freigabe.unabhaengige_kopien;
+                    z.grund = freigabe.grund.clone();
+                    for u in urteile.iter().filter(|u| u.gut()) {
+                        if let Err(e) = ingest_kern::uebersicht::schreiben(&struktur::berichtordner(&u.ordner), &z) {
+                            freigabe
+                                .hinweise
+                                .push(format!("Zusammenfassung nicht geschrieben ({}): {e}", u.ordner.display()));
+                        }
+                    }
+                    zusammenfassung = Some(z);
+                }
+            }
+        }
+    }
+    // Datenbank: Kopienzahl und Freigabe der Karte nachführen (gleiche Karten-ID wie beim Einlesen).
+    if let (Some(z), Some(zu), Some(zf)) = (zugang, projekt, zusammenfassung.as_ref()) {
+        let reel = zf.clips.iter().find_map(|c| soll::arri_reel(&c.name).map(|(r, k)| format!("{r}{k}")));
+        let karte = karte_db::Karte {
+            projekt_id: &zu.id,
+            projekt_kurzname: &zu.kurzname,
+            name: &zf.karte,
+            reel: reel.as_deref(),
+            eingelesen_am: chrono::DateTime::parse_from_rfc3339(&zf.beginn)
+                .map(|t| t.to_utc())
+                .unwrap_or(k.kopie.beginn),
+            erste_aufnahme: None,
+            kopien: freigabe.unabhaengige_kopien,
+            freigegeben: freigabe.sicher,
+            speicherort: Some(quelle.display().to_string()),
+            bericht_ok: true,
+        };
+        if zf.karte_id.as_deref() == Some(karte_db::karte_id(&karte).as_str()) {
+            let (_, aenderungen, _) = karte_db::aenderungen(&karte, &[], chrono::Utc::now(), plate::ulid_aehnlich);
+            match plate.karte_schreiben(z, aenderungen) {
+                Ok(a) if a.is_empty() => {}
+                Ok(a) => freigabe.hinweise.push(format!("Datenbank: {}", a.join("; "))),
+                Err(e) => freigabe.hinweise.push(format!("Datenbank nicht nachgeführt: {e}")),
+            }
+        }
+    }
+    // Bericht auf die neue Kopie (Dateiliste ohne die mitkopierte Historie).
+    let mut fuer_bericht = k.kopie.clone();
+    fuer_bericht.dateien.retain(|d| !d.pfad.starts_with("ascmhl/"));
+    let version = app.package_info().version.to_string();
+    let b_angaben = ingest_bericht::Angaben {
+        version: &version,
+        mit_md5: true,
+        projekt: zusammenfassung.as_ref().map(|z| z.projekt.clone().into_iter().collect()).unwrap_or_default(),
+    };
+    let bericht = ingest_bericht::pdf(&fuer_bericht, &urteile, &kennungen, &freigabe, 1, &b_angaben)
+        .map_err(|e| e.to_string())
+        .and_then(|pdf| ingest_bericht::schreiben(&ziel, &pdf, &k.kopie.beginn).map_err(|e| e.to_string()))
+        .map_err(|e| freigabe.hinweise.push(format!("Bericht nicht geschrieben: {e}")))
+        .ok();
+    Ok(KaskadenErgebnis { quelle: quelle.to_path_buf(), ziel, urteile, kennungen, freigabe, bericht })
+}
+
 /// Prüft eine bestehende Kopie gegen ihr ASC MHL (vollständig, ohne Cache).
 #[tauri::command]
 async fn ziel_nachpruefen(
@@ -1201,6 +1418,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             bild_vorschau,
             einlesen_vorschau,
+            kopie_aus_kopie,
             ziele_stand,
             vorab_pruefen,
             karte_einlesen,

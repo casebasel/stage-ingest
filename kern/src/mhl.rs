@@ -352,6 +352,19 @@ pub fn historie_abgleichen(kopie: &Kopie) -> io::Result<Vec<crate::pruefen::Abwe
     Ok(aus)
 }
 
+/// Dateien der Kopie (ohne die Historie selbst), für die die Historie in `<quelle>/ascmhl/` keine frühere Prüfsumme
+/// kennt. Für eine Kopie aus Kopie heisst das: nicht gegen die Karte prüfbar.
+pub fn ohne_historie(kopie: &Kopie) -> io::Result<Vec<String>> {
+    let h = historie_lesen(&kopie.quelle.join(ORDNER))?;
+    let bekannt: BTreeSet<&str> = h.hashes.keys().map(|(p, _)| p.as_str()).collect();
+    Ok(kopie
+        .dateien
+        .iter()
+        .filter(|d| gehoert_dazu(&d.pfad) && !bekannt.contains(d.pfad.as_str()))
+        .map(|d| d.pfad.clone())
+        .collect())
+}
+
 /// Was eine mitgebrachte Historie schon enthält.
 #[derive(Default)]
 struct Historie {

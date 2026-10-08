@@ -212,6 +212,24 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
           : { art: "abweichend", grund: "3 von 5 Dateien fehlen" }
         : { art: "neu" },
     ),
+  kopie_aus_kopie: () => ({
+    quelle: "/Volumes/SAMSUNG T7/Footage/HAPPY_END/2026-10-28_RHEINUFER/01_KAMERA/A001R132",
+    ziel: "/Volumes/NAS/Footage/HAPPY_END/2026-10-28_RHEINUFER/01_KAMERA/A001R132",
+    urteile: [
+      { ordner: "/Volumes/SAMSUNG T7/…/A001R132", geprueft: 16, abweichungen: [], kopierfehler: null },
+      { ordner: "/Volumes/NAS/…/A001R132", geprueft: 16, abweichungen: [], kopierfehler: null },
+    ],
+    kennungen: [
+      { art: "platte", sicher: true, wert: "a", beschreibung: "Samsung PSSD T7", seriennummer: "S6XNNF0W123456" },
+      { art: "netz", sicher: true, wert: "b", beschreibung: "Netzlaufwerk //nas/Footage", seriennummer: null },
+    ],
+    freigabe: {
+      sicher: true, unabhaengige_kopien: 2, mindest_kopien: 2, kennung_unsicher: false,
+      grund: "2 unabhängige Kopien geprüft",
+      hinweise: ["Kopie aus Kopie: aus /Volumes/SAMSUNG T7/…/A001R132 erstellt, geprüft gegen die ursprünglichen Prüfsummen der Karte (ASC MHL)."],
+    },
+    bericht: "/Volumes/NAS/…/04_BERICHTE/A001R132_Bericht.pdf",
+  }),
   einlesen_vorschau: () => ({
     drehorte: [{ id: "d1", name: "Rheinufer", datum: "2026-10-28", kurzname: "RHEINUFER", clips: ["A001C001_261028_R132", "A001C002_261028_R132"] }],
     ohne: ["A001C014_261028_R132"],

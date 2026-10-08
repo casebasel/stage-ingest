@@ -332,7 +332,9 @@ function Auftrag({ pflicht, zurEinrichtung, laufwerke }: { pflicht: boolean; zur
             </Status>
           )}
           <label className="kopien-wahl">
-            <span>Freigabe ab</span>
+            <span title={lauf.paProjekt ? `Gilt für das Projekt ${lauf.paProjekt.name}` : "Gilt ohne Projekt"}>
+              Freigabe ab{lauf.paProjekt ? ` (${lauf.paProjekt.kurzname})` : ""}
+            </span>
             <select
               value={e.mindestKopien}
               disabled={lauf.laeuft}
@@ -928,7 +930,9 @@ function Urteil({ ergebnis, laufwerke }: { ergebnis: KartenErgebnis; laufwerke: 
                 ? "eine weitere unabhängige Kopie"
                 : `${freigabe.mindest_kopien - freigabe.unabhaengige_kopien} weitere unabhängige Kopien`}
               . Sobald eine weitere Platte da ist: „Kopie ergänzen“. Die vorhandene Kopie wird dann nur nachgeprüft, nicht neu
-              geschrieben. {steckt ? "" : "Dafür die Karte wieder einstecken; sie ist ja nicht formatiert."}
+              geschrieben. {steckt
+                ? ""
+                : "Dafür die Karte wieder einstecken (sie ist ja nicht formatiert). Ist sie nicht mehr da: unter „Prüfen“ die fehlende Kopie aus dieser Kopie erstellen."}
             </p>
           )}
           <p className="urteil-kennwerte">

@@ -1755,3 +1755,16 @@ input[type="checkbox"][role="switch"]:checked::before {
   gap: 8px;
   max-width: 640px;
 }
+
+.kaskade {
+  display: grid;
+  gap: 8px;
+  padding: 0 12px 12px;
+  justify-items: start;
+}
+.kaskade-schritt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}

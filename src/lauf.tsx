@@ -12,6 +12,8 @@ import {
   zielNachpruefen,
   einlesenVorschau,
   zieleStand,
+  kopieAusKopie,
+  type KaskadenErgebnis,
   type EinlesenVorschau,
   type ZielStand,
   type Befund,
@@ -81,6 +83,7 @@ function useLaufHalten() {
   const [nachpruefung, setNachpruefung] = useState<Nachpruefung | null>(null);
   const [nachpruefFehler, setNachpruefFehler] = useState<{ ordner: string; text: string } | null>(null);
   const laeuft = LAUFEND.includes(phase);
+  const kaskadeAktiv = useRef(false);
 
   // Dreh: Projekt (aus dem Plate Assistant gewählt oder getippt), Datum, Drehort.
   const heute = new Date().toLocaleDateString("sv-SE");
@@ -90,6 +93,7 @@ function useLaufHalten() {
   // Das gewählte Projekt gilt für alle Seiten und überlebt Seitenwechsel und Neustart (gemerkt wird die ID).
   useEffect(() => {
     if (paProjekt) merken("paProjekt", paProjekt.id);
+    e.setAktivesProjekt(paProjekt?.id ?? null);
   }, [paProjekt?.id]);
   useEffect(() => {
     const id = paProjekt?.id ?? gemerkt("paProjekt", "");
@@ -249,7 +253,8 @@ function useLaufHalten() {
     // Phase ausserhalb des Zustands-Updaters setzen: React darf Updater mehrfach und spät ausführen, ein setPhase
     // darin könnte „prüft“ nach dem fertigen Ergebnis wieder setzen.
     const weg = aufFortschritt((f: Fortschritt) => {
-      if (f.phase !== "kopieren") setPhase(f.phase);
+      // Bei „Kopie aus Kopie“ bleibt die Phase „nachpruefen“ (Kopf und Einlesen-Seite zeigen keinen Kartenlauf).
+      if (f.phase !== "kopieren" && !kaskadeAktiv.current) setPhase(f.phase);
       setStand((s) => {
         if (f.phase === "pruefen")
           return {
@@ -368,6 +373,36 @@ function useLaufHalten() {
     setPhase(vorher === "fertig" || vorher === "fehler" ? vorher : "bereit");
   }
 
+  // Kopie aus Kopie (Karte nicht mehr da): wie das Nachprüfen leiht es nur Phase und Stand.
+  const [kaskade, setKaskade] = useState<KaskadenErgebnis | null>(null);
+  const [kaskadeLaeuft, setKaskadeLaeuft] = useState(false);
+  const [kaskadeFehler, setKaskadeFehler] = useState<string | null>(null);
+  async function kopieAusKopieStarten(quelleKopie: string, zielBasis: string) {
+    const vorher = phase;
+    setKaskade(null);
+    setKaskadeFehler(null);
+    setStand({ ...LEER, beginn: Date.now() });
+    setPhase("nachpruefen");
+    kaskadeAktiv.current = true;
+    setKaskadeLaeuft(true);
+    try {
+      setKaskade(
+        await kopieAusKopie({
+          quelle: quelleKopie,
+          zielBasis,
+          mindestKopien: e.mindestKopien,
+          zugang: konto.verbindung === "verbunden" && paProjekt ? konto.zugang : null,
+          projekt: paProjekt ? { id: paProjekt.id, kurzname: paProjekt.kurzname } : null,
+        }),
+      );
+    } catch (err) {
+      setKaskadeFehler(String(err));
+    }
+    kaskadeAktiv.current = false;
+    setKaskadeLaeuft(false);
+    setPhase(vorher === "fertig" || vorher === "fehler" ? vorher : "bereit");
+  }
+
   // Abbrechen braucht einen zweiten Klick nach frühestens 0,5 s und innerhalb von 4 s (wie Überschreiben in der Stage).
   const [abbruchFragen, setAbbruchFragen] = useState(false);
   const abbruchZeit = useRef(0);
@@ -421,6 +456,10 @@ function useLaufHalten() {
     sollLaden,
     einlesen,
     nachpruefen,
+    kaskade,
+    kaskadeFehler,
+    kaskadeLaeuft,
+    kopieAusKopieStarten,
     abbrechen,
     abbruchFragen,
   };

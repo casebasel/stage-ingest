@@ -177,3 +177,20 @@ export const einlesenVorschau = (zugang: unknown, projekt: unknown, quelle: stri
 /** Zustand eines Zielordners vor dem Einlesen (kern/zielstand.rs). */
 export type ZielStand = { art: "neu" } | { art: "vorhanden"; dateien: number } | { art: "abweichend"; grund: string };
 export const zieleStand = (quelle: string, ziele: string[]) => invoke<ZielStand[]>("ziele_stand", { quelle, ziele });
+
+/** Kopie aus Kopie (Kaskade): fehlende Kopie aus einer geprüften Kopie, geprüft gegen die Prüfsummen der Karte. */
+export type KaskadenErgebnis = {
+  quelle: string;
+  ziel: string;
+  urteile: Urteil[];
+  kennungen: Kennung[];
+  freigabe: Freigabe;
+  bericht: string | null;
+};
+export const kopieAusKopie = (a: {
+  quelle: string;
+  zielBasis: string;
+  mindestKopien: number;
+  zugang: unknown;
+  projekt: { id: string; kurzname: string } | null;
+}) => invoke<KaskadenErgebnis>("kopie_aus_kopie", a);
