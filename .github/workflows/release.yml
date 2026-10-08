@@ -32,7 +32,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      # Liest den Zwischenspeicher, den ci.yml auf main mit demselben Ziel füllt; an der Versionsmarke nicht speichern.
       - uses: swatinem/rust-cache@v2
+        with:
+          shared-key: app-${{ runner.os }}
+          save-if: false
       - run: npm ci
       - name: Vorbelegung der Anmeldung prüfen
         shell: bash

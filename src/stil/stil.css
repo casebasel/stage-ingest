@@ -521,6 +521,14 @@ input[type="checkbox"][role="switch"]:checked::before {
   font-size: 11px;
 }
 
+.marke-test {
+  padding: 1px 6px;
+  border-radius: var(--rund-klein);
+  background: var(--warn-grund);
+  color: var(--warn);
+  font-size: 11px;
+}
+
 .kopf-projekt {
   display: flex;
   align-items: center;

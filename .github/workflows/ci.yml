@@ -71,7 +71,13 @@ jobs:
           node-version: 22
           cache: npm
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.os == 'windows-2025' && 'x86_64-pc-windows-msvc' || 'aarch64-apple-darwin' }}
+      # Gleicher Zwischenspeicher wie release.yml: Releases laufen an einer Versionsmarke und dürfen nur den
+      # Zwischenspeicher von main lesen. Darum baut main hier mit demselben Ziel vor (Release etwa halb so lang).
       - uses: swatinem/rust-cache@v2
+        with:
+          shared-key: app-${{ runner.os }}
       - run: npm ci
       - name: Oberfläche bauen
         run: npm run build
@@ -82,13 +88,13 @@ jobs:
       - name: Installer bauen
         if: github.event_name == 'push'
         shell: bash
-        run: npx tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}' --bundles ${{ matrix.os == 'windows-2025' && 'nsis' || 'dmg' }}
+        run: npx tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}' --bundles ${{ matrix.os == 'windows-2025' && 'nsis' || 'dmg' }} --target ${{ matrix.os == 'windows-2025' && 'x86_64-pc-windows-msvc' || 'aarch64-apple-darwin' }}
       - name: Installer hochladen
         if: github.event_name == 'push'
         uses: actions/upload-artifact@v4
         with:
           name: stage-ingest-${{ matrix.os == 'windows-2025' && 'windows' || 'mac' }}
           path: |
-            target/release/bundle/dmg/*.dmg
-            target/release/bundle/nsis/*.exe
+            target/*/release/bundle/dmg/*.dmg
+            target/*/release/bundle/nsis/*.exe
           retention-days: 14
