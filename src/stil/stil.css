@@ -1507,6 +1507,9 @@ input[type="checkbox"][role="switch"]:checked::before {
 .knopf-abspielen:hover {
   background: var(--hover);
 }
+.gedaechtnis {
+  margin: 0 0 12px;
+}
 .art-laden {
   display: grid;
   gap: 8px;

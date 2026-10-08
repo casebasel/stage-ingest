@@ -15,6 +15,7 @@ pub mod artcmd;
 pub mod clip;
 pub mod fehler;
 pub mod freigabe;
+pub mod gedaechtnis;
 pub mod geraet;
 pub mod kaskade;
 pub mod kopie;

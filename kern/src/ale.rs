@@ -14,6 +14,12 @@ use crate::soll::{arri_reel, ohne_endung};
 /// Videoclips (ARRI MOV/MXF, iPhone MOV, Sony und andere MP4).
 const CLIP_ENDUNGEN: &[&str] = &["mov", "mxf", "mp4"];
 
+/// Ist der Pfad ein Clip (Kamera-Original), nicht eine Begleitdatei oder AppleDouble?
+pub fn ist_clip(pfad: &str) -> bool {
+    let endung = pfad.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    CLIP_ENDUNGEN.contains(&endung.as_str()) && !pfad.rsplit('/').next().unwrap_or("").starts_with("._")
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClipZeile {
@@ -29,10 +35,7 @@ pub fn clips_lesen(kopie: &Kopie, ordner: &Path) -> Vec<ClipZeile> {
     kopie
         .dateien
         .iter()
-        .filter(|d| {
-            let endung = d.pfad.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
-            CLIP_ENDUNGEN.contains(&endung.as_str()) && !d.pfad.rsplit('/').next().unwrap_or("").starts_with("._")
-        })
+        .filter(|d| ist_clip(&d.pfad))
         .map(|d| match clip::lesen(&ordner.join(&d.pfad)) {
             Ok(a) => ClipZeile { pfad: d.pfad.clone(), angaben: Some(a), fehler: None },
             Err(e) => ClipZeile { pfad: d.pfad.clone(), angaben: None, fehler: Some(e.to_string()) },

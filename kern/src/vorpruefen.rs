@@ -65,11 +65,23 @@ pub fn vorpruefen_mit(auftrag: &Auftrag, bytes: u64, zur_seite: &[std::path::Pat
     let karte_geraet = geraet::kennung(&quelle).ok().filter(|k| k.sicher).map(|k| k.wert);
 
     let mut kennungen: HashMap<String, Vec<&Path>> = HashMap::new();
+    // Platz, den die Karte auf einem Zielmedium belegt: jede Datei auf ganze Blöcke des Ziels aufgerundet (exFAT
+    // z. B. 128 KB pro Block), ohne pauschalen Zuschlag (Marlon, 09.10.2026). Ohne Dateiliste: die Kartengrösse.
+    let groessen: Vec<u64> =
+        crate::kopie::ueberblick_dateien(&quelle).map(|d| d.into_values().collect()).unwrap_or_default();
+    let belegt = |ort: &Path| -> u64 {
+        match blockgroesse(ort).filter(|b| *b > 0) {
+            Some(b) if !groessen.is_empty() => groessen.iter().map(|g| g.div_ceil(b) * b).sum(),
+            _ => bytes,
+        }
+    };
     // Mehrere Ziele auf einem Volume brauchen zusammen Platz.
     let mut je_volume: HashMap<String, u64> = HashMap::new();
     for ziel in &auftrag.ziele {
-        if let Some(Ok(v)) = crate::struktur::vorhandener_vorfahr(ziel).map(geraet::volume_kennung) {
-            *je_volume.entry(v).or_default() += bytes;
+        if let Some(ort) = crate::struktur::vorhandener_vorfahr(ziel) {
+            if let Ok(v) = geraet::volume_kennung(ort) {
+                *je_volume.entry(v).or_default() += belegt(ort);
+            }
         }
     }
     for ziel in &auftrag.ziele {
@@ -98,7 +110,10 @@ pub fn vorpruefen_mit(auftrag: &Auftrag, bytes: u64, zur_seite: &[std::path::Pat
                 ziel.display()
             )));
         }
-        let noetig = geraet::volume_kennung(&ort_echt).ok().and_then(|v| je_volume.get(&v).copied()).unwrap_or(bytes);
+        let noetig = geraet::volume_kennung(&ort_echt)
+            .ok()
+            .and_then(|v| je_volume.get(&v).copied())
+            .unwrap_or_else(|| belegt(&ort_echt));
         match frei(&ort_echt) {
             Some(f) if f < noetig => befunde.push(fehler(format!(
                 "Zu wenig Platz auf {}: {} frei, {} nötig",
@@ -161,6 +176,22 @@ fn frei(pfad: &Path) -> Option<u64> {
     let mut s: libc::statvfs = unsafe { std::mem::zeroed() };
     // SAFETY: gültiger C-String und Zielstruktur.
     (unsafe { libc::statvfs(c.as_ptr(), &mut s) } == 0).then(|| s.f_bavail as u64 * s.f_frsize as u64)
+}
+
+/// Blockgrösse des Dateisystems (kleinste Einheit, die eine Datei belegt).
+#[cfg(unix)]
+fn blockgroesse(pfad: &Path) -> Option<u64> {
+    use std::os::unix::ffi::OsStrExt;
+    let c = std::ffi::CString::new(pfad.as_os_str().as_bytes()).ok()?;
+    let mut s: libc::statvfs = unsafe { std::mem::zeroed() };
+    // SAFETY: gültiger C-String und Zielstruktur.
+    (unsafe { libc::statvfs(c.as_ptr(), &mut s) } == 0).then_some(s.f_frsize as u64)
+}
+
+/// Unter Windows vorerst ohne Aufrunden (dann gilt die Kartengrösse).
+#[cfg(windows)]
+fn blockgroesse(_pfad: &Path) -> Option<u64> {
+    None
 }
 
 #[cfg(windows)]

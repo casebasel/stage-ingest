@@ -334,6 +334,11 @@ struct VerlaufEintrag {
     sicher: bool,
     grund: String,
     ziele: Vec<VerlaufZiel>,
+    /// Kartengedächtnis (ab 0.1.18): Abdruck aller Dateien und die Clips, siehe `ingest_kern::gedaechtnis`.
+    #[serde(default)]
+    fingerabdruck: String,
+    #[serde(default)]
+    clips: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -352,7 +357,13 @@ fn verlauf_pfad(app: &AppHandle) -> Result<PathBuf, String> {
 
 fn verlauf_anhaengen(app: &AppHandle, e: &KartenErgebnis) -> Result<(), String> {
     use std::io::Write;
+    let karte = e.kopie.quelle.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let dateien: std::collections::BTreeMap<String, u64> =
+        e.kopie.dateien.iter().map(|d| (d.pfad.clone(), d.groesse)).collect();
+    let abdruck = ingest_kern::gedaechtnis::abdruck(&karte, &dateien);
     let eintrag = VerlaufEintrag {
+        fingerabdruck: abdruck.fingerabdruck,
+        clips: abdruck.clips,
         beginn: e.kopie.beginn.to_rfc3339(),
         ende: e.kopie.ende.to_rfc3339(),
         karte: e.kopie.quelle.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
@@ -372,6 +383,32 @@ fn verlauf_anhaengen(app: &AppHandle, e: &KartenErgebnis) -> Result<(), String> 
     let mut f =
         std::fs::OpenOptions::new().create(true).append(true).open(verlauf_pfad(app)?).map_err(|e| e.to_string())?;
     writeln!(f, "{zeile}").map_err(|e| e.to_string())
+}
+
+/// Kartengedächtnis: Wurde diese Karte schon eingelesen, oder wurde sie danach nicht formatiert (neue Clips zu den
+/// schon gesicherten)? Nur ein Hinweis; liest nur das Verzeichnis der Karte.
+#[tauri::command]
+async fn karte_wiedererkennen(
+    app: AppHandle,
+    quelle: PathBuf,
+) -> Result<Option<ingest_kern::gedaechtnis::Wiedererkannt>, String> {
+    let pfad = verlauf_pfad(&app)?;
+    im_hintergrund(move || {
+        let jetzt = ingest_kern::gedaechtnis::erfassen(&quelle).map_err(|e| e.to_string())?;
+        let text = std::fs::read_to_string(pfad).unwrap_or_default();
+        let liste: Vec<VerlaufEintrag> = text.lines().filter_map(|z| serde_json::from_str(z).ok()).collect();
+        Ok(ingest_kern::gedaechtnis::vergleichen(
+            &jetzt,
+            liste.iter().rev().map(|e| ingest_kern::gedaechtnis::Frueher {
+                karte: &e.karte,
+                fingerabdruck: &e.fingerabdruck,
+                clips: &e.clips,
+                beginn: &e.beginn,
+                sicher: e.sicher,
+            }),
+        ))
+    })
+    .await
 }
 
 /// Verlauf, neueste zuerst.
@@ -1485,6 +1522,7 @@ pub fn run() {
             stage_projekt,
             projekt_uebersicht,
             take_technik,
+            karte_wiedererkennen,
             artcmd_laden,
             art_viewer,
             im_art_viewer,

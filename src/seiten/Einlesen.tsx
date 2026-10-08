@@ -1,6 +1,7 @@
 // Einlesen: links die Quellen (eingesteckte Karten werden erkannt und angeboten), in der Mitte der Auftrag
 // (Karte → Ziele → Dreh → Einlesen), während des Laufs der Fortschritt pro Ziel, danach das Urteil über die ganze Breite.
 import { useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 import {
@@ -453,6 +454,7 @@ function Auftrag({ pflicht, zurEinrichtung, laufwerke }: { pflicht: boolean; zur
         )}
       </section>
 
+      {q && !lauf.laeuft && <KartenGedaechtnis pfad={q.pfad} />}
       <section className="block" aria-labelledby="t-dreh">
         <div className="block-kopf">
           <h2 id="t-dreh">Dreh</h2>
@@ -1319,5 +1321,44 @@ function Dateiliste() {
         </table>
       </div>
     </section>
+  );
+}
+
+type Wiedererkannt =
+  | { art: "gleich"; beginn: string; sicher: boolean }
+  | { art: "nichtFormatiert"; beginn: string; sicher: boolean; bekannt: number; neue: number };
+
+/** Kartengedächtnis: schon eingelesen, oder danach nicht formatiert (neue Clips zu schon gesicherten)? Nur Hinweis. */
+function KartenGedaechtnis({ pfad }: { pfad: string }) {
+  const [w, setW] = useState<Wiedererkannt | null>(null);
+  useEffect(() => {
+    let aus = false;
+    setW(null);
+    invoke<Wiedererkannt | null>("karte_wiedererkennen", { quelle: pfad })
+      .then((x) => !aus && setW(x))
+      .catch(() => {});
+    return () => {
+      aus = true;
+    };
+  }, [pfad]);
+  if (!w) return null;
+  const wann = new Date(w.beginn).toLocaleString("de-CH", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  return (
+    <div className="gedaechtnis" role="status">
+      {w.art === "gleich" ? (
+        <Status ton={w.sicher ? "warn" : "leise"}>
+          Diese Karte wurde am {wann} schon eingelesen{w.sicher ? " und ist sicher" : ", damals ohne Freigabe"}. Noch einmal
+          einlesen ist nur nötig, wenn eine Kopie fehlt.
+        </Status>
+      ) : (
+        <Status ton="warn">
+          Karte wurde nach dem Einlesen am {wann} nicht formatiert: {w.bekannt} Clips von damals sind noch drauf,{" "}
+          <b>
+            {w.neue} {w.neue === 1 ? "Clip ist neu" : "Clips sind neu"} und noch nirgends gesichert
+          </b>
+          . Jetzt einlesen.
+        </Status>
+      )}
+    </div>
   );
 }

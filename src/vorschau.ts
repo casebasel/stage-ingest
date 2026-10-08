@@ -239,6 +239,7 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
     ordner: "RHEINUFER",
   }),
   artcmd_laden: () => "/Users/beispiel/Library/Application Support/ch.filmstudiobasel.stage-ingest/art-cmd/art-cmd_1.0.0_macos_universal/bin/art-cmd",
+  karte_wiedererkennen: () => ({ art: "nichtFormatiert", beginn: "2026-10-28T10:12:00+01:00", sicher: true, bekannt: 12, neue: 3 }),
   take_technik: (p) =>
     ((p.anfragen as { datei: string }[]) ?? []).map((_, i) => ({
       codec: "ProRes 4444 XQ", aufloesung: "3840x2160", bildrate: "25", bilder: String(1250 + i * 75), dauer: `0:${50 + i * 3}.0`,
