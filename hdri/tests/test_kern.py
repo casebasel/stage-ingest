@@ -150,3 +150,20 @@ def test_heic_wird_abgelehnt(tmp_path):
     (tmp_path / "metadata.json").write_text(json.dumps({"format_version": 1, "hdri": {"format": "heic"}, "frames": [{}]}))
     with pytest.raises(AufnahmeFehler, match="nur DNG"):
         laden(tmp_path)
+
+
+def test_waechter_erkennt_unreal():
+    from hdri_dienst.waechter import stage_aktiv
+
+    assert stage_aktiv(["explorer.exe", "UnrealEditor.exe".lower()]) == "unrealeditor.exe"
+    assert stage_aktiv(["explorer.exe", "chrome.exe"]) is None
+
+
+def test_server_schreibt_nur_jobs():
+    from hdri_dienst.server import Server, ServerFehler
+
+    s = Server("https://beispiel.invalid", "k", "e", "p")
+    with pytest.raises(ServerFehler, match="schreibt hdri.zustand nicht"):
+        s._anwenden([{"tabelle": "hdri", "feld": "zustand"}])
+    with pytest.raises(ServerFehler, match="schreibt hdri_job.geloescht nicht"):
+        s._anwenden([{"tabelle": "hdri_job", "feld": "geloescht"}])

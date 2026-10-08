@@ -57,6 +57,32 @@ def verarbeiten(ordner: Path, aus: Path | None, hoehe: int | None, halb: bool) -
     return ziel
 
 
+def zugang_pruefen(datei: Path) -> int:
+    """Nur lesen: Anmeldung, Kennzeichen des Kontos, offene Aufnahmen, Zustand von nDisplay. Zeigt keine Geheimnisse."""
+    from .server import Server, ServerFehler
+    from .waechter import stage_aktiv
+
+    try:
+        s = Server.aus_datei(datei)
+        s.token()
+        print(f"Anmeldung ok: {s.email} (Dienst-Konto, app = hdri)")
+        alle = s.lesen("hdri?geloescht=eq.false&select=id,zustand,format")
+        print(f"Aufnahmen sichtbar: {len(alle)} ({', '.join(sorted({a['zustand'] for a in alle})) or 'keine'})")
+        for a in s.offene_aufnahmen():
+            n = len(s.lesen(f"hdri_frame?hdri_id=eq.{a['id']}&geloescht=eq.false&select=id"))
+            print(f"  offen: {a['id']} · {a.get('format')} · {n} Bilder")
+        try:
+            print(f"Jobs lesbar: {len(s.lesen('hdri_job?select=id'))}")
+        except ServerFehler as e:
+            print(f"Jobs nicht lesbar (Migration 0019 fehlt?): {e}")
+    except ServerFehler as e:
+        print(f"Zugang nicht ok: {e}", file=sys.stderr)
+        return 2
+    p = stage_aktiv()
+    print(f"nDisplay/Unreal: {'läuft (' + p + ')' if p else 'läuft nicht'}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="hdri_dienst")
     sub = p.add_subparsers(dest="befehl", required=True)
@@ -65,7 +91,11 @@ def main(argv: list[str] | None = None) -> int:
     v.add_argument("--aus", type=Path)
     v.add_argument("--hoehe", type=int, help="Höhe des Panoramas in Pixeln (Breite = 2 × Höhe)")
     v.add_argument("--halb", action="store_true", help="DNGs in halber Auflösung entwickeln (schneller)")
+    z = sub.add_parser("zugang", help="Zugang zur Supabase prüfen (nur lesen)")
+    z.add_argument("--datei", type=Path, default=Path(r"D:\hdri-dienst\zugang.env"))
     args = p.parse_args(argv)
+    if args.befehl == "zugang":
+        return zugang_pruefen(args.datei)
     try:
         verarbeiten(args.ordner, args.aus, args.hoehe, args.halb)
     except AufnahmeFehler as e:
