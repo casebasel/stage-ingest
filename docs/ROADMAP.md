@@ -43,6 +43,12 @@ Gebaut ist der Kern (siehe KONZEPT Kapitel 14). Offen, in dieser Reihenfolge:
 - **HDRI-Vorschau:** Der HDRI-Dienst lädt `hdri/<hdri_id>/vorschau.jpg` hoch und trägt den Pfad in
   `hdri_job.ergebnis.vorschau_speicher` ein (gebaut e54ea57; wartet auf Migration 0021). **Beim späteren Löschen der
   Rohdaten nach der Freigabe `ergebnis.jpg` ausnehmen** (0015/0020 erlauben das Löschen jeder Datei der Aufnahme).
+- **Studio im Baum** (Systemkarte „Übersicht, Studio-Spiegel, VFX“): Drehort STUDIO mit gespiegelten Einstellungen und
+  Studio-Takes der Stage; Studio-Karten zusätzlich in `karte`/`clip` mit `clip.studio_take_id` (nicht `take_id`).
+  Studio-Takes darf der Ingest **bewerten und mit Notiz versehen** (nur diese zwei Felder, Recht kommt mit 0022).
+- **VFX-Rücklauf** (`plate_version`, Entwurf Plate Assistant SCHEMA-STUDIO-VFX 1.3): Version 0 = Kamera-Clip ohne
+  Transcode (Abspielfassung von Hand); VFX-Fassungen 1, 2 … mit Pfad relativ zum Projektordner, Prüfsumme/MHL,
+  Farbraum, Zustand geliefert/freigegeben/verworfen.
 - **Schritt 2 (wartet auf Rechte vom Plate Assistant):** Takes bewerten + Notiz, Take (und Plate) aus einem Clip
   anlegen, Plates vorab planen, Umbenennen/Verschieben/Papierkorb. Jüngste Änderung gewinnt, Löschen nur Papierkorb.
 - **Umbenennen samt Kurzname** (Drehort und Projekt): Ordner auf allen erreichbaren Zielen umbenennen, Pfade in
