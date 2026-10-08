@@ -157,24 +157,31 @@ def _pyramide_laplace(bild: np.ndarray, stufen: int) -> list[np.ndarray]:
     return lap
 
 
-def panorama_multiband(positionen: list[Position], hoehe: int, stufen: int | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def panorama_multiband(
+    positionen: list[Position], hoehe: int, stufen: int | None = None, karten=None, besitzer: np.ndarray | None = None
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Wie `panorama`, aber Nähte nach dem Multiband-Verfahren (Burt & Adelson): Jede Stelle gehört dem Bild, das sie
     am mittigsten sieht (scharfe Details aus genau einem Bild, keine Geister); die groben Frequenzen werden über
     breite Übergänge gemischt, damit Helligkeitsstufen und Nähte in ruhigen Flächen (Decke, Wände) verschwinden.
     Gemischt wird im Logarithmus der Strahldichte, damit helle Lichter nicht überschwingen.
+
+    `karten` (je Bild mx, my, w) und `besitzer` kann `naehte.panorama_genaeht` vorgeben (verschobene Bilder,
+    Graph-Cut-Nähte); ohne sie gilt die Abbildung aus der Lage und die mittigste Zuordnung.
     """
     if stufen is None:
         # gröbste Stufe etwa 32 Pixel hoch: breite Übergänge, aber nie kleiner als das Bild trägt
         stufen = int(max(2, min(7, np.log2(max(hoehe, 2) / 32) + 1)))
     welt = richtungen(hoehe)
     groesse = (hoehe, 2 * hoehe)
+    vorgabe_karten = karten
     karten = []
     beste = np.full(groesse, -1.0, dtype=np.float32)
+    vorgabe_besitzer = besitzer
     besitzer = np.full(groesse, -1, dtype=np.int16)
     abdeckung = np.zeros(groesse, dtype=np.float32)
     # 1. Durchgang: Gültigkeit und Mittigkeit je Bild, Besitzer je Pixel.
     for k, p in enumerate(positionen):
-        mx, my, w = abbildung(p.kamera, p.lage, welt)
+        mx, my, w = vorgabe_karten[k] if vorgabe_karten is not None else abbildung(p.kamera, p.lage, welt)
         gueltig = cv2.remap((p.bild.max(axis=2) > 0).astype(np.float32), mx, my, interpolation=cv2.INTER_LINEAR,
                             borderMode=cv2.BORDER_CONSTANT) > 0.99
         w = np.where(gueltig, w, 0.0).astype(np.float32)
@@ -183,6 +190,12 @@ def panorama_multiband(positionen: list[Position], hoehe: int, stufen: int | Non
         neu = punkte > beste
         beste[neu], besitzer[neu] = punkte[neu], k
         karten.append((mx, my, w > 0))
+    if vorgabe_besitzer is not None:
+        # nur wo das Bild auch wirklich etwas sieht; sonst bleibt die mittige Zuordnung
+        gilt = np.zeros(groesse, bool)
+        for k, (_, _, g) in enumerate(karten):
+            gilt |= (vorgabe_besitzer == k) & g
+        besitzer = np.where(gilt, vorgabe_besitzer, besitzer).astype(np.int16)
     # 2. Durchgang: Laplace-Pyramiden (Logarithmus) gewichtet mit geglätteten Besitzmasken, je Ebene normiert.
     summe = None
     gewichte = None

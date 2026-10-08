@@ -47,3 +47,19 @@ Verglichen wird das Licht in den geclippten Pixeln mit der Messung.
 2. DiffHDR auf geclippte Bereiche der gemessenen EXR (nicht auf ein 8-bit-Bild), nur wo `clip` = 1.
 3. Personen: Maske aus den Überlappungen (Bewegung zwischen Positionen) statt von Hand.
 4. Aussen-HDRI mit Sonne aufnehmen und DiffHDR dort prüfen.
+
+## Stitching in Innenräumen (Untersuchung 08.10.2026)
+
+Am Wohnzimmer (iPhone 13 mini, 18 Positionen, aus der Hand):
+
+- **Unverbundene Positionen:** 4–6 von 18 Positionen finden keine gemeinsamen Merkmale (obere Reihe +29° sieht
+  weisse Wand und Decke), in der Küche hat nur jedes zweite Nachbarpaar Treffer. Sie bleiben auf der IMU-Lage.
+- **Aufnahmemuster:** Zwei Reihen auf +29° und −28° legen den Horizont (Fenster, Türen, Möbel) an den Bildrand und
+  auf die Naht zwischen den Reihen. Vorschlag an den Plate Assistant: Reihe auf 0°, Reihen auf ±60°.
+- **Falsche Treffer** an gleichförmigen Mustern (Regal, Teppich) bei IMU-Grenze 20°; mit 6° plausibel.
+- **Brennweite:** im DNG 1,54 mm; die Entzerrung vergrössert die Mitte um 3,5 %; gemessener Massstab gegenüber Apples
+  Sichtfeld 1,118 (Küche). Frei gelassen weicht er bei schlechter Verbindung aus (1,28).
+- **Nähte um Objekte (Graph-Cut) und lokaler Fluss** allein bringen wenig (Nahtfehler 11,4 → 8,6) und verschlimmern
+  grosse Versätze. Erst sinnvoll, wenn alle Positionen verbunden sind.
+- Grösster Hebel laut Befund: Live-Registrierung in der App (gemessene relative Drehung je Auslösung) und das neue
+  Muster. Versuchsmodule `naehte.py`, `flaechig.py` liegen bereit, laufen aber nicht im Dienst.

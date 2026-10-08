@@ -120,8 +120,13 @@ def treffer(
 #: gibt Doppelkanten. 0,3 an zwei echten Aufnahmen (Küche, Wohnzimmer, 08.10.2026) gewählt: Horizont gerade,
 #: Restfehler 0,15° bzw. 0,35°.
 BINDUNG = np.array([0.3, 0.3, 0.02])
-#: Bereich für den Massstab der Brennweite gegenüber Apples Sichtfeld (gemessen am iPhone 13 Pro: ~1,10).
+#: Bereich für den Massstab der Brennweite gegenüber Apples Sichtfeld. Gemessen am iPhone 13 mini (Ultraweitwinkel
+#: 1,54 mm laut DNG, entzerrt): 1,118 bei der Küche mit genug Merkmalen; davon 1,035 aus der Entzerrung selbst (Faktor
+#: in der Bildmitte). Frei gelassen weicht er bei schlecht verbundenen Aufnahmen aus (Wohnzimmer: 1,28). Ein fester
+#: Wert pro Objektiv (`KALIBRIERUNG`, `naehte`/`flaechig`) ist im Versuch, bis ein HDRI im neuen Muster vorliegt.
 MASSSTAB = (0.95, 1.15)
+#: Gemessene Massstäbe je Objektiv (EXIF LensModel), noch nicht im Dienst verwendet.
+KALIBRIERUNG = {"iPhone 13 mini back camera 1.54mm f/2.4": 1.118}
 
 
 def ausgleichen(positionen: list[Position], paare, bindung: np.ndarray = BINDUNG) -> tuple[list[Position], dict]:
@@ -145,7 +150,7 @@ def ausgleichen(positionen: list[Position], paare, bindung: np.ndarray = BINDUNG
 
     anzahl = sum(len(x[2]) for x in paare)
     x0 = np.zeros(3 * n + 1)
-    x0[-1] = np.log(1.05)
+    x0[-1] = np.log(np.sqrt(MASSSTAB[0] * MASSSTAB[1]))
     unten = np.full(3 * n + 1, -np.inf)
     oben = np.full(3 * n + 1, np.inf)
     unten[-1], oben[-1] = np.log(MASSSTAB[0]), np.log(MASSSTAB[1])
