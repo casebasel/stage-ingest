@@ -411,8 +411,13 @@ impl Plate {
                 ("fps" | "sensor_fps", _) => return Err(format!("{f}: eine Zahl grösser als 0 oder leer")),
                 // 0025: JSON-Zahl 1..9 (Text „3“ lehnt der Server ab), leer = Standard 2.
                 ("kopien", Value::Null) => {}
-                ("kopien", Value::Number(n)) if n.as_i64().is_some_and(|k| (1..=9).contains(&k)) => {}
-                ("kopien", _) => return Err("Kopien: eine ganze Zahl von 1 bis 9 oder leer".into()),
+                ("kopien", Value::Number(n)) if n.as_i64().is_some_and(|k| (2..=9).contains(&k)) => {}
+                ("kopien", _) => {
+                    return Err(
+                        "Kopien: eine ganze Zahl von 2 bis 9 oder leer (1 nur als Testschwelle in der Einrichtung)"
+                            .into(),
+                    )
+                }
                 ("aufloesung_px", Value::String(t)) if !pixel_gueltig(t) => {
                     return Err("Auflösung in Pixeln als Breite x Höhe, z. B. 3840x2160".into())
                 }
@@ -657,7 +662,9 @@ fn projekte_aus(v: &Value) -> Vec<Projekt> {
             firma: text_oder_nichts(&p["firma"]),
             regie: text_oder_nichts(&p["regie"]),
             dop: text_oder_nichts(&p["dop"]),
-            kopien: p["kopien"].as_i64().filter(|k| (1..=9).contains(k)),
+            // 1 am Projekt gilt nie (Abstimmung mit dem Plate Assistant, 09.10.2026): eine einzige Kopie ist nur die
+            // lokale Testschwelle; sonst würde eine Karte nach einer Kopie zum Formatieren frei. Dann gilt der Standard 2.
+            kopien: p["kopien"].as_i64().filter(|k| (2..=9).contains(k)),
         })
         .collect()
 }
@@ -844,9 +851,9 @@ mod tests {
         assert_eq!(p[0].kurzname, "HAPPY_END");
         assert_eq!(p[0].kopien, None, "ohne Wert gilt der Standard 2");
         let k = projekte_aus(
-            &json!([{"id":"a","name":"A","kurzname":"A","kopien":3}, {"id":"b","name":"B","kurzname":"B","kopien":12}]),
+            &json!([{"id":"a","name":"A","kurzname":"A","kopien":3}, {"id":"b","name":"B","kurzname":"B","kopien":12}, {"id":"c","name":"C","kurzname":"C","kopien":1}]),
         );
-        assert_eq!((k[0].kopien, k[1].kopien), (Some(3), None), "nur 1..9");
+        assert_eq!((k[0].kopien, k[1].kopien, k[2].kopien), (Some(3), None, None), "nur 2..9; 1 nie vom Projekt");
         let d = drehs_aus(&json!([{"id":"01D","name":"Rheinufer","datum":"2026-10-28","produktion":"Happy End"}]));
         assert_eq!(d[0].projekt_id, None);
         assert_eq!(d[0].produktion, "Happy End");

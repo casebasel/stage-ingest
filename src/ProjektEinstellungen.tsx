@@ -61,7 +61,7 @@ export function ProjektEinstellungen({ projekt, schliessen }: { projekt: Projekt
     const lang = (Object.keys(w) as (keyof Werte)[]).find((k) => w[k].trim().length > 200);
     if (lang) return "Höchstens 200 Zeichen pro Feld.";
     const k = w.kopien.trim();
-    if (k && !/^[1-9]$/.test(k)) return "Kopien vor der Freigabe: eine Zahl von 1 bis 9 (leer = 2).";
+    if (k && !/^[2-9]$/.test(k)) return "Kopien vor der Freigabe: eine Zahl von 2 bis 9 (leer = 2). Eine einzige Kopie nur als Testschwelle in der Einrichtung.";
     const px = pixel(w.aufloesung_px);
     if (px && !/^[1-9][0-9]{0,5}x[1-9][0-9]{0,5}$/.test(px)) return "Auflösung in Pixeln als Breite x Höhe, z. B. 3840x2160.";
     return null;
