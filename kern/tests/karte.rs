@@ -7,7 +7,7 @@ use std::sync::atomic::AtomicBool;
 use ingest_kern::freigabe::{beurteilen, Umfang};
 use ingest_kern::geraet::{Art, Kennung};
 use ingest_kern::kopie::{kopieren, Auftrag, Meldung};
-use ingest_kern::pruefen::{zurueckpruefen, Abweichung};
+use ingest_kern::pruefen::{zurueckpruefen, zurueckpruefen_je_platte, Abweichung};
 use ingest_kern::Fehler;
 
 fn karte(wurzel: &Path) {
@@ -52,6 +52,34 @@ fn ordner_nur_mit_ds_store_gilt_als_leer_und_finder_spuren_sind_nicht_fremd() {
     fs::write(ziel.join("A001R132/._A001C002_261007_R132.mov"), b"appledouble").unwrap();
     let urteile = zurueckpruefen(&kopie, false, &AtomicBool::new(false), |_, _| {}).unwrap();
     assert!(urteile[0].gut(), "{:?}", urteile[0]);
+}
+
+#[test]
+fn zuruecklesen_je_platte_gleichzeitig_mit_gleichem_ergebnis() {
+    let t = tempfile::tempdir().unwrap();
+    karte(&t.path().join("karte"));
+    let ziele: Vec<_> = ["a", "b", "c"].iter().map(|n| t.path().join(n).join("A001R132")).collect();
+    let auftrag = Auftrag { quelle: t.path().join("karte"), ziele: ziele.clone(), ..Default::default() };
+    let kopie = kopieren(&auftrag, &AtomicBool::new(false), |_| {}).unwrap();
+    // Ziel 2 verfälschen: der Fehler muss genau bei Ziel 2 landen, auch wenn gleichzeitig gelesen wird.
+    fs::write(ziele[2].join("A001R132/A001C002_261007_R132.mov"), b"zweiter clxp").unwrap();
+    // Ziele 0 und 2 auf derselben Platte (nacheinander), Ziel 1 auf einer anderen (gleichzeitig).
+    let platte = vec!["p1".to_string(), "p2".to_string(), "p1".to_string()];
+    let mut gemeldet = vec![0usize; 3];
+    let urteile = zurueckpruefen_je_platte(&kopie, false, &platte, &AtomicBool::new(false), |z, p| {
+        if !p.is_empty() {
+            gemeldet[z] += 1
+        }
+    })
+    .unwrap();
+    assert_eq!(urteile.len(), 3);
+    assert!(urteile[0].gut() && urteile[1].gut());
+    assert!(matches!(urteile[2].abweichungen[..], [Abweichung::Pruefsumme { .. }]), "{:?}", urteile[2]);
+    assert!(urteile.iter().zip(&ziele).all(|(u, z)| &u.ordner == z), "Reihenfolge wie die Ziele");
+    assert_eq!(gemeldet, vec![3, 3, 3], "jede Datei je Ziel genau einmal gemeldet");
+    // Abbruch gilt für alle Platten.
+    let abbruch = AtomicBool::new(true);
+    assert!(matches!(zurueckpruefen_je_platte(&kopie, false, &platte, &abbruch, |_, _| {}), Err(Fehler::Abgebrochen)));
 }
 
 #[test]

@@ -37,61 +37,117 @@ impl Urteil {
     }
 }
 
-/// Liest jedes Ziel der Kopie ohne Cache zurück. `melden` bekommt Ziel-Nummer und gelesene Datei.
+/// Liest jedes Ziel der Kopie ohne Cache zurück, eines nach dem anderen. `melden` bekommt Ziel-Nummer und die
+/// eben geprüfte Datei (nach dem Prüfen); ein leerer Pfad heisst „dieses Ziel beginnt jetzt“.
 pub fn zurueckpruefen(
     kopie: &Kopie,
     mit_md5: bool,
     abbruch: &AtomicBool,
+    melden: impl FnMut(usize, &str),
+) -> Ergebnis<Vec<Urteil>> {
+    zurueckpruefen_je_platte(kopie, mit_md5, &vec![String::new(); kopie.ziele.len()], abbruch, melden)
+}
+
+/// Wie [`zurueckpruefen`], aber Ziele auf verschiedenen Platten gleichzeitig: `platte[i]` ist die Kennung der Platte
+/// von Ziel `i`. Ziele derselben Platte (gleiche Kennung) werden nacheinander gelesen, damit eine Festplatte nicht
+/// zwischen zwei Ordnern hin- und herspringt. Bei zwei Platten halbiert das die Zeit des Zurücklesens.
+/// `melden` läuft immer im aufrufenden Thread.
+pub fn zurueckpruefen_je_platte(
+    kopie: &Kopie,
+    mit_md5: bool,
+    platte: &[String],
+    abbruch: &AtomicBool,
     mut melden: impl FnMut(usize, &str),
 ) -> Ergebnis<Vec<Urteil>> {
-    let mut urteile = Vec::new();
-    for (nummer, ziel) in kopie.ziele.iter().enumerate() {
-        let mut urteil = Urteil {
-            ordner: ziel.ordner.clone(),
-            geprueft: 0,
-            abweichungen: Vec::new(),
-            kopierfehler: ziel.fehler.clone(),
-        };
-        if ziel.fehler.is_none() {
-            for datei in &kopie.dateien {
-                if abbruch.load(Ordering::Relaxed) {
-                    return Err(Fehler::Abgebrochen);
-                }
-                melden(nummer, &datei.pfad);
-                let pfad = ziel.ordner.join(&datei.pfad);
-                if !pfad.is_file() {
-                    urteil.abweichungen.push(Abweichung::Fehlt { pfad: datei.pfad.clone() });
-                    continue;
-                }
-                match ohne_cache::pruefsumme(&pfad, mit_md5) {
-                    Err(e) => urteil
-                        .abweichungen
-                        .push(Abweichung::Unlesbar { pfad: datei.pfad.clone(), fehler: e.to_string() }),
-                    Ok((_, ist)) if ist != datei.groesse => urteil.abweichungen.push(Abweichung::Groesse {
-                        pfad: datei.pfad.clone(),
-                        soll: datei.groesse,
-                        ist,
-                    }),
-                    Ok((summe, _))
-                        if summe.xxh128 != datei.pruefsumme.xxh128
-                            || (mit_md5 && summe.md5 != datei.pruefsumme.md5) =>
-                    {
-                        urteil.abweichungen.push(Abweichung::Pruefsumme {
-                            pfad: datei.pfad.clone(),
-                            soll: datei.pruefsumme.xxh128_hex(),
-                            ist: summe.xxh128_hex(),
-                        })
-                    }
-                    Ok(_) => {}
-                }
-                urteil.geprueft += 1;
-            }
-            let erwartet: BTreeSet<&str> = kopie.dateien.iter().map(|d| d.pfad.as_str()).collect();
-            urteil.abweichungen.extend(zusaetzliche(&ziel.ordner, &erwartet));
-        }
-        urteile.push(urteil);
+    let mut gruppen: std::collections::BTreeMap<&str, Vec<usize>> = std::collections::BTreeMap::new();
+    for i in 0..kopie.ziele.len() {
+        gruppen.entry(platte.get(i).map(String::as_str).unwrap_or("")).or_default().push(i);
     }
-    Ok(urteile)
+    let (tx, rx) = crossbeam_channel::unbounded::<(usize, String)>();
+    let mut ergebnisse: Vec<(usize, Ergebnis<Urteil>)> = std::thread::scope(|s| {
+        let faeden: Vec<_> = gruppen
+            .into_values()
+            .map(|ziele| {
+                let tx = tx.clone();
+                s.spawn(move || {
+                    let mut aus = Vec::new();
+                    for i in ziele {
+                        let r = ziel_pruefen(kopie, i, mit_md5, abbruch, |pfad| {
+                            let _ = tx.send((i, pfad.to_owned()));
+                        });
+                        let halt = r.is_err();
+                        aus.push((i, r));
+                        if halt {
+                            break;
+                        }
+                    }
+                    aus
+                })
+            })
+            .collect();
+        drop(tx);
+        for (i, pfad) in rx.iter() {
+            melden(i, &pfad);
+        }
+        faeden.into_iter().flat_map(|f| f.join().expect("Prüf-Thread abgestürzt")).collect()
+    });
+    ergebnisse.sort_by_key(|(i, _)| *i);
+    ergebnisse.into_iter().map(|(_, r)| r).collect()
+}
+
+/// Liest ein Ziel vollständig ohne Cache zurück und vergleicht jede Datei mit der Kopie.
+fn ziel_pruefen(
+    kopie: &Kopie,
+    nummer: usize,
+    mit_md5: bool,
+    abbruch: &AtomicBool,
+    mut melden: impl FnMut(&str),
+) -> Ergebnis<Urteil> {
+    let ziel = &kopie.ziele[nummer];
+    let mut urteil = Urteil {
+        ordner: ziel.ordner.clone(),
+        geprueft: 0,
+        abweichungen: Vec::new(),
+        kopierfehler: ziel.fehler.clone(),
+    };
+    if ziel.fehler.is_some() {
+        return Ok(urteil);
+    }
+    melden("");
+    for datei in &kopie.dateien {
+        if abbruch.load(Ordering::Relaxed) {
+            return Err(Fehler::Abgebrochen);
+        }
+        let pfad = ziel.ordner.join(&datei.pfad);
+        if !pfad.is_file() {
+            urteil.abweichungen.push(Abweichung::Fehlt { pfad: datei.pfad.clone() });
+            melden(&datei.pfad);
+            continue;
+        }
+        match ohne_cache::pruefsumme(&pfad, mit_md5) {
+            Err(e) => {
+                urteil.abweichungen.push(Abweichung::Unlesbar { pfad: datei.pfad.clone(), fehler: e.to_string() })
+            }
+            Ok((_, ist)) if ist != datei.groesse => {
+                urteil.abweichungen.push(Abweichung::Groesse { pfad: datei.pfad.clone(), soll: datei.groesse, ist })
+            }
+            Ok((summe, _))
+                if summe.xxh128 != datei.pruefsumme.xxh128 || (mit_md5 && summe.md5 != datei.pruefsumme.md5) =>
+            {
+                urteil.abweichungen.push(Abweichung::Pruefsumme {
+                    pfad: datei.pfad.clone(),
+                    soll: datei.pruefsumme.xxh128_hex(),
+                    ist: summe.xxh128_hex(),
+                })
+            }
+            Ok(_) => {}
+        }
+        urteil.geprueft += 1;
+        melden(&datei.pfad);
+    }
+    let erwartet: BTreeSet<&str> = kopie.dateien.iter().map(|d| d.pfad.as_str()).collect();
+    urteil.abweichungen.extend(zusaetzliche(&ziel.ordner, &erwartet));
+    Ok(urteil)
 }
 
 /// Dateien im Ziel, die nicht von der Karte stammen (ohne die eigenen Ordner des Ingest). Ein unlesbarer

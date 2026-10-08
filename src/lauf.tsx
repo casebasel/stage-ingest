@@ -43,8 +43,10 @@ export type Stand = {
   ausfaelle: { ordner: string; fehler: string }[];
   /** Zahl der Ziele beim Start (die Auswahl kann sich danach ändern). */
   zielZahl: number;
-  /** Dateien in der Reihenfolge des Kopierens; `geprueft` = Zahl der Ziele, die sie schon zurückgelesen haben
-   *  (die Ziele werden nacheinander geprüft). */
+  /** Zurücklesen pro Ziel (Ziele auf verschiedenen Platten laufen gleichzeitig): fertige Dateien, Bytes, Beginn. */
+  pruefJeZiel: Record<number, { nummer: number; bytes: number; beginn: number }>;
+  /** Dateien in der Reihenfolge des Kopierens; `geprueft` = Bitmaske der Ziele, die sie schon zurückgelesen haben
+   *  (Bit i = Ziel i). */
   liste: { pfad: string; groesse: number; geprueft: number }[];
 };
 
@@ -61,6 +63,7 @@ const LEER: Stand = {
   beginn: 0,
   ausfaelle: [],
   zielZahl: 0,
+  pruefJeZiel: {},
   liste: [],
 };
 
@@ -256,15 +259,38 @@ function useLaufHalten() {
       // Bei „Kopie aus Kopie“ bleibt die Phase „nachpruefen“ (Kopf und Einlesen-Seite zeigen keinen Kartenlauf).
       if (f.phase !== "kopieren" && !kaskadeAktiv.current) setPhase(f.phase);
       setStand((s) => {
-        if (f.phase === "pruefen")
+        if (f.phase === "pruefen" && !f.pfad) {
+          // Leerer Pfad: dieses Ziel beginnt mit dem Zurücklesen (Zeit für Tempo und Restzeit).
           return {
             ...s,
-            liste: s.liste.map((d) => (d.pfad === f.pfad ? { ...d, geprueft: Math.max(d.geprueft, f.ziel + 1) } : d)),
-            pruefNummer: f.ziel === s.pruefZiel ? s.pruefNummer + 1 : 1,
-            pruefBeginn: s.pruefNummer === 0 || f.ziel !== s.pruefZiel ? Date.now() : s.pruefBeginn,
+            pruefJeZiel: { ...s.pruefJeZiel, [f.ziel]: { nummer: 0, bytes: 0, beginn: Date.now() } },
+            pruefBeginn: s.pruefBeginn || Date.now(),
+            pruefZiel: f.ziel,
+          };
+        }
+        if (f.phase === "pruefen") {
+          // Gemeldet wird nach dem Prüfen einer Datei; Ziele verschiedener Platten melden durcheinander.
+          const i = s.liste.findIndex((d) => d.pfad === f.pfad);
+          const liste = i < 0 ? s.liste : s.liste.slice();
+          if (i >= 0) liste[i] = { ...liste[i], geprueft: liste[i].geprueft | (1 << f.ziel) };
+          const vorher = s.pruefJeZiel[f.ziel];
+          return {
+            ...s,
+            liste,
+            pruefJeZiel: {
+              ...s.pruefJeZiel,
+              [f.ziel]: {
+                nummer: (vorher?.nummer ?? 0) + 1,
+                bytes: (vorher?.bytes ?? 0) + (i >= 0 ? s.liste[i].groesse : 0),
+                beginn: vorher?.beginn ?? Date.now(),
+              },
+            },
+            pruefNummer: s.pruefNummer + 1,
+            pruefBeginn: s.pruefBeginn || Date.now(),
             pruefZiel: f.ziel,
             pruefPfad: f.pfad,
           };
+        }
         if (f.phase === "nachlesen" || f.phase === "nachpruefen") return { ...s, pruefPfad: f.pfad, pruefNummer: s.pruefNummer + 1 };
         const m = f.meldung;
         switch (m.art) {

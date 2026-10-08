@@ -733,7 +733,9 @@ function Fortschritt() {
             {phase === "kopieren"
               ? "Kopiert an alle Ziele"
               : phase === "pruefen"
-                ? `Liest Ziel ${stand.pruefZiel + 1} von ${stand.zielZahl} zurück`
+                ? stand.zielZahl > 1
+                  ? "Liest die Ziele zurück (verschiedene Platten gleichzeitig)"
+                  : "Liest das Ziel zurück"
                 : abschluss
                   ? "Schliesst ab"
                   : "Liest die Karte ein zweites Mal"}
@@ -803,10 +805,11 @@ function Fortschritt() {
             const aus = ausgefallen(z);
             let ton: Ton = "leise";
             let text = "Wartet auf das Zurücklesen";
-            // Zurückgelesene Bytes dieses Ziels: Dateien, die es schon abgeschlossen hat (die laufende zählt noch nicht).
-            const fertig = stand.liste
-              .filter((d) => d.geprueft > i && !(i === stand.pruefZiel && d.pfad === stand.pruefPfad && phase === "pruefen"))
-              .reduce((n, d) => n + d.groesse, 0);
+            // Zurückgelesen: Dateien und Bytes, die dieses Ziel schon abgeschlossen hat (Ziele auf verschiedenen Platten
+            // laufen gleichzeitig, auf derselben Platte nacheinander).
+            const p = stand.pruefJeZiel[i];
+            const fertig = p?.bytes ?? 0;
+            const durch = !!p && p.nummer >= stand.dateien;
             let teil = 0;
             if (aus) {
               ton = "fehler";
@@ -815,15 +818,17 @@ function Fortschritt() {
               ton = "laeuft";
               text = `Schreibt · ${bytesText(tempo)}/s`;
               teil = anteil;
-            } else if (phase === "pruefen" && i === stand.pruefZiel) {
+            } else if (phase === "pruefen" && p && !durch) {
               ton = "laeuft";
-              const s = Math.max(1, (Date.now() - stand.pruefBeginn) / 1000);
+              const s = Math.max(1, (Date.now() - p.beginn) / 1000);
               const t = fertig / s;
               teil = stand.bytes > 0 ? fertig / stand.bytes : 0;
-              text = `Liest zurück · Datei ${stand.pruefNummer} von ${stand.dateien}${
+              text = `Liest zurück · Datei ${Math.min(p.nummer + 1, stand.dateien)} von ${stand.dateien}${
                 t > 0 ? ` · ${bytesText(t)}/s · noch ${dauerText((stand.bytes - fertig) / t)}` : ""
               }`;
-            } else if (phase !== "pruefen" || i < stand.pruefZiel) {
+            } else if (phase === "pruefen" && !p) {
+              text = "Wartet (gleiche Platte wie ein anderes Ziel)";
+            } else if (phase !== "pruefen" || durch) {
               ton = "ok";
               text = "Zurückgelesen, Ergebnis am Schluss";
               teil = 1;
@@ -1300,10 +1305,8 @@ function Dateiliste() {
                     <td key={t}>
                       {schreibt ? (
                         <Status ton="laeuft">Schreibt</Status>
-                      ) : d.geprueft > t ? (
+                      ) : (d.geprueft >> t) & 1 ? (
                         <Status ton="ok">Geprüft</Status>
-                      ) : phase === "pruefen" && stand.pruefZiel === t && stand.pruefPfad === d.pfad ? (
-                        <Status ton="laeuft">Liest zurück</Status>
                       ) : (
                         <Status ton="leise">Geschrieben</Status>
                       )}

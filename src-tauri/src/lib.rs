@@ -475,7 +475,12 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
         }
         e
     };
-    let mut urteile = pruefen::zurueckpruefen(&kopie, auftrag.mit_md5, abbruch, |ziel, pfad| {
+    // Ziele auf verschiedenen Platten gleichzeitig zurücklesen, auf derselben Platte nacheinander. Unsichere
+    // Kennungen (Platte nicht eindeutig bestimmbar) alle in eine Gruppe: lieber langsamer als eine Festplatte, die
+    // zwischen zwei Ordnern springt. Kennungen und Ziele der Kopie haben dieselbe Reihenfolge (siehe oben).
+    let platte: Vec<String> =
+        kennungen.iter().map(|k| if k.sicher { format!("platte:{}", k.wert) } else { "unsicher".into() }).collect();
+    let mut urteile = pruefen::zurueckpruefen_je_platte(&kopie, auftrag.mit_md5, &platte, abbruch, |ziel, pfad| {
         let _ = app.emit(FORTSCHRITT, Fortschritt::Pruefen { ziel, pfad: pfad.to_string() });
     })
     .map_err(|e| wegraeumen(e.to_string()))?;
