@@ -161,7 +161,14 @@ fn karte_in_datenbank(
     let gut: Vec<usize> = (0..urteile.len()).filter(|&i| urteile[i].gut()).collect();
     let haupt = gut.iter().find(|&&i| kennungen[i].art == geraet::Art::Netz).or(gut.first());
     let ist_clip = |p: &str| clips.iter().any(|c| c.pfad == p);
-    let erste_aufnahme = kopie.dateien.iter().filter(|d| ist_clip(&d.pfad)).map(|d| d.geaendert).min();
+    // Unglaubwürdiges Datum (Kamerauhr nicht gestellt) nicht in die Datenbank; die Warnung steht schon im Bericht.
+    let erste_aufnahme = kopie
+        .dateien
+        .iter()
+        .filter(|d| ist_clip(&d.pfad))
+        .map(|d| d.geaendert)
+        .min()
+        .filter(|t| karte_db::aufnahme_plausibel(*t, kopie.beginn));
     let reel = clips.iter().find_map(|c| soll::arri_reel(&c.pfad).map(|(r, k)| format!("{r}{k}")));
     let kartenname = geraet::kartenname(&auftrag.quelle);
     let karte = karte_db::Karte {
@@ -554,6 +561,21 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
         if !fehler.is_empty() {
             freigabe.hinweise.push(format!("Bewegungsdaten (ART CMD) fehlen: {}", fehler.join("; ")));
         }
+    }
+    // Kamerauhr: Clips mit unglaubwürdigem Datum (z. B. 2012-01-01 bei nicht gestellter Uhr) nur melden, nie einsortieren.
+    if let Some(t) = kopie
+        .dateien
+        .iter()
+        .filter(|d| clips.iter().any(|c| c.pfad == d.pfad))
+        .map(|d| d.geaendert)
+        .min()
+        .filter(|t| !karte_db::aufnahme_plausibel(*t, kopie.beginn))
+    {
+        freigabe.hinweise.push(format!(
+            "Kamerauhr prüfen: Die Clips tragen das Datum {}. Das passt nicht zum Einlesen; wahrscheinlich war die Uhr \
+             der Kamera nicht gestellt. Die Karte ist trotzdem vollständig kopiert; das Ordnerdatum kommt vom Drehort.",
+            t.format("%d.%m.%Y")
+        ));
     }
     // Bericht auf jedes Ziel, auch auf fehlerhafte (dort belegt er den Fehler), soweit schreibbar.
     let version = app.package_info().version.to_string();

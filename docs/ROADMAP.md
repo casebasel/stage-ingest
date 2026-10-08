@@ -43,6 +43,9 @@ Gebaut ist der Kern (siehe KONZEPT Kapitel 14). Offen, in dieser Reihenfolge:
 - **HDRI-Vorschau:** Der HDRI-Dienst lädt `hdri/<hdri_id>/vorschau.jpg` hoch und trägt den Pfad in
   `hdri_job.ergebnis.vorschau_speicher` ein (gebaut e54ea57; wartet auf Migration 0021). **Beim späteren Löschen der
   Rohdaten nach der Freigabe `ergebnis.jpg` ausnehmen** (0015/0020 erlauben das Löschen jeder Datei der Aufnahme).
+- **Kamera-Register** (Systemkarte KAMERAS.md, Schema beim Plate Assistant): Clips über die Seriennummer aus dem Clip
+  einer Kamera zuordnen (`clip.kamera` = Rolle A/B des Projekts, dazu Seriennummer). Unglaubwürdiges Aufnahmedatum
+  (nicht gestellte Kamerauhr, z. B. 2012) erzeugt eine Warnung im Bericht und kein `karte.erste_aufnahme` (gebaut).
 - **Studio im Baum** (Systemkarte „Übersicht, Studio-Spiegel, VFX“): Drehort STUDIO mit gespiegelten Einstellungen und
   Studio-Takes der Stage; Studio-Karten zusätzlich in `karte`/`clip` mit `clip.studio_take_id` (nicht `take_id`).
   Studio-Takes darf der Ingest **bewerten und mit Notiz versehen** (nur diese zwei Felder, Recht kommt mit 0022).

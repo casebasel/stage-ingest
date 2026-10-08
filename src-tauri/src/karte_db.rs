@@ -74,6 +74,16 @@ pub fn kamera(clipname: &str) -> Option<String> {
     ingest_kern::soll::arri_reel(clipname).map(|(r, _)| r[..1].to_ascii_uppercase())
 }
 
+/// Ist das Aufnahmedatum der Clips glaubwürdig? Kameras mit nicht gestellter Uhr schreiben z. B. 2012-01-01
+/// (ALEXA Mini, Systemkarte KAMERAS.md). Unglaubwürdig: vor 2020, mehr als einen Tag nach dem Einlesen oder mehr als
+/// 400 Tage davor. Dann warnt der Ingest und schreibt kein `erste_aufnahme`.
+pub fn aufnahme_plausibel(aufnahme: DateTime<Utc>, eingelesen: DateTime<Utc>) -> bool {
+    let frueheste = DateTime::parse_from_rfc3339("2020-01-01T00:00:00Z").expect("fest").with_timezone(&Utc);
+    aufnahme >= frueheste
+        && aufnahme <= eingelesen + chrono::Duration::days(1)
+        && aufnahme >= eingelesen - chrono::Duration::days(400)
+}
+
 pub fn karte_id(k: &Karte) -> String {
     let kurz = k.projekt_kurzname.to_lowercase();
     match k.reel {
@@ -210,6 +220,15 @@ mod tests {
             clip_id("karte-happy_end-a007r11a", "A007C003_261028_R11A"),
             "clip-happy_end-a007r11a-a007c003_261028_r11a"
         );
+    }
+
+    #[test]
+    fn kamerauhr_2012_ist_unglaubwuerdig() {
+        let jetzt: DateTime<Utc> = "2026-10-28T12:00:00Z".parse().unwrap();
+        assert!(!aufnahme_plausibel("2012-01-01T00:03:00Z".parse().unwrap(), jetzt));
+        assert!(!aufnahme_plausibel("2026-11-02T00:00:00Z".parse().unwrap(), jetzt));
+        assert!(aufnahme_plausibel("2026-10-28T09:41:00Z".parse().unwrap(), jetzt));
+        assert!(aufnahme_plausibel("2026-03-01T09:41:00Z".parse().unwrap(), jetzt));
     }
 
     #[test]
