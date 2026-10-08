@@ -42,8 +42,11 @@ pub struct ClipEintrag {
     pub end_tc: Option<String>,
     /// Take, dem der Clip zugeordnet wurde (Plate Assistant: ULID), falls bekannt.
     pub take_id: Option<String>,
-    /// Wie zugeordnet: `clipname`, `timecode`, `zeitfenster`, sonst leer.
+    /// Wie zugeordnet: `clipname`, `timecode`, `zeitfenster`, `hand` (im Nachhinein im Ingest), sonst leer.
     pub zuordnung: String,
+    /// Von Hand nur einem Drehort zugeordnet (ohne Take), z. B. gedreht ohne App.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dreh_id: Option<String>,
     /// Abweichungen von den Kameraeinstellungen des Projekts (nur Warnung), z. B. „25 fps statt 24 fps“.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub abweichungen: Vec<String>,
@@ -57,6 +60,20 @@ pub struct GefundeneKarte {
     pub dreh_ordner: String,
     pub datei: PathBuf,
     pub inhalt: KartenZusammenfassung,
+}
+
+/// Ordnet einen Clip im Nachhinein von Hand zu (Take oder nur Drehort) und schreibt die Zusammenfassung sicher
+/// zurück. Ohne Take und ohne Drehort wird die Zuordnung wieder entfernt.
+pub fn zuordnen(datei: &Path, clip: &str, take_id: Option<&str>, dreh_id: Option<&str>) -> std::io::Result<()> {
+    let mut z: KartenZusammenfassung = serde_json::from_slice(&std::fs::read(datei)?).map_err(std::io::Error::other)?;
+    let eintrag = z.clips.iter_mut().find(|c| c.name.eq_ignore_ascii_case(clip)).ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::NotFound, format!("Clip {clip} nicht in {}", datei.display()))
+    })?;
+    eintrag.take_id = take_id.map(str::to_owned);
+    eintrag.dreh_id = dreh_id.map(str::to_owned);
+    eintrag.zuordnung = if take_id.is_some() || dreh_id.is_some() { "hand".into() } else { String::new() };
+    let text = serde_json::to_vec_pretty(&z).map_err(std::io::Error::other)?;
+    crate::sicher_schreiben(datei, &text)
 }
 
 /// Schreibt die Zusammenfassung neben den Bericht.
@@ -131,6 +148,7 @@ mod tests {
                 take_id: Some("01T1".into()),
                 zuordnung: "zeitfenster".into(),
                 abweichungen: vec![],
+                dreh_id: None,
             }],
         };
         let bericht = t.path().join("HAPPY_END/2026-10-28_Rheinufer").join(BERICHTE);
@@ -143,5 +161,26 @@ mod tests {
         assert_eq!(k.len(), 1);
         assert!(suchen(t.path(), "ANDERES").0.is_empty());
         assert_eq!(im_dreh(&t.path().join("HAPPY_END/2026-10-28_Rheinufer")), [z]);
+    }
+
+    #[test]
+    fn von_hand_zuordnen() {
+        let t = tempfile::tempdir().unwrap();
+        let mut z: KartenZusammenfassung = serde_json::from_str(
+            r#"{"format":1,"karte":"A001R1AB","beginn":"x","version":"0.1.10","freigegeben":true,
+                "unabhaengigeKopien":2,"grund":"","clips":[{"name":"A001C005_261028_R1AB","startTc":null,
+                "endTc":null,"takeId":null,"zuordnung":""}]}"#,
+        )
+        .unwrap();
+        let datei = schreiben(t.path(), &z).unwrap();
+        zuordnen(&datei, "a001c005_261028_r1ab", None, Some("dreh-happy_end-rheinufer")).unwrap();
+        let neu: KartenZusammenfassung = serde_json::from_slice(&std::fs::read(&datei).unwrap()).unwrap();
+        assert_eq!(neu.clips[0].dreh_id.as_deref(), Some("dreh-happy_end-rheinufer"));
+        assert_eq!(neu.clips[0].zuordnung, "hand");
+        zuordnen(&datei, "A001C005_261028_R1AB", None, None).unwrap();
+        z.clips[0].zuordnung = String::new();
+        let leer: KartenZusammenfassung = serde_json::from_slice(&std::fs::read(&datei).unwrap()).unwrap();
+        assert_eq!(leer, z);
+        assert!(zuordnen(&datei, "GIBTSNICHT", None, None).is_err());
     }
 }

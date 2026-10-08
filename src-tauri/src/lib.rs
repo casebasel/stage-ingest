@@ -525,6 +525,7 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
                         zuordnung: art.to_string(),
                         pfad: c.pfad.clone(),
                         abweichungen: abweichend.get(&name).cloned().unwrap_or_default(),
+                        dreh_id: None,
                         name,
                     }
                 })
@@ -723,6 +724,33 @@ async fn plate_projekt_aendern(
     im_hintergrund(move || p.projekt_aendern(&zugang, &id, &felder)).await
 }
 
+/// „Zu klären“: einen Clip im Nachhinein einem Take oder nur einem Drehort zuordnen. Geschrieben wird in die
+/// Zusammenfassung der Karte auf jedem Ziel (`04_BERICHTE/*_ingest.json`), nie in den Kartenordner (ASC MHL bleibt).
+#[tauri::command]
+async fn clip_zuordnen(
+    dateien: Vec<PathBuf>,
+    clip: String,
+    take_id: Option<String>,
+    dreh_id: Option<String>,
+) -> Result<(), String> {
+    im_hintergrund(move || {
+        let fehler: Vec<String> = dateien
+            .iter()
+            .filter_map(|d| {
+                ingest_kern::uebersicht::zuordnen(d, &clip, take_id.as_deref(), dreh_id.as_deref())
+                    .err()
+                    .map(|e| format!("{}: {e}", d.display()))
+            })
+            .collect();
+        if fehler.is_empty() {
+            Ok(())
+        } else {
+            Err(format!("Nicht auf allen Zielen gespeichert: {}", fehler.join("; ")))
+        }
+    })
+    .await
+}
+
 /// Projektübersicht: Plan aus dem Plate Assistant und eingelesene Karten auf den Zielordnern.
 #[tauri::command]
 async fn projekt_uebersicht(
@@ -887,6 +915,7 @@ pub fn run() {
             plate_drehort_anlegen,
             plate_drehort_kurznamen,
             plate_abmelden,
+            clip_zuordnen,
             stage_projekt,
             projekt_uebersicht,
             abbrechen,

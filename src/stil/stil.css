@@ -1298,6 +1298,12 @@ input[type="checkbox"][role="switch"]:checked::before {
     gap: 16px;
   }
 }
+.projekt-rumpf-voll {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+.tabelle td select {
+  max-width: 260px;
+}
 .inspektor {
   min-height: 0;
   overflow-y: auto;

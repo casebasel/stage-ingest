@@ -18,12 +18,26 @@ pub struct Uebersicht {
     pub drehs: Vec<DrehStand>,
     /// Eingelesene Karten des Projekts (von den Platten).
     pub karten: Vec<GefundeneKarte>,
-    /// Clips auf eingelesenen Karten ohne Take.
-    pub ohne_take: Vec<String>,
+    /// Zu klären: Clips auf eingelesenen Karten ohne Take und ohne Drehort-Zuordnung (eine Zeile pro Clip, über alle
+    /// Ziele zusammengefasst).
+    pub zu_klaeren: Vec<OffenerClip>,
     /// Zusammenfassungen, die nicht lesbar waren.
     pub unlesbar: Vec<PathBuf>,
     /// Hinweis, wenn der Plate Assistant nicht erreichbar war (dann nur die Karten).
     pub hinweis: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OffenerClip {
+    pub clip: String,
+    pub karte: String,
+    pub start_tc: Option<String>,
+    /// Ordner `<Datum>_<Drehort>`, in dem die Karte liegt.
+    pub dreh_ordner: String,
+    pub freigegeben: bool,
+    /// Alle Zusammenfassungen dieser Karte (eine pro Ziel); eine Zuordnung wird in alle geschrieben.
+    pub dateien: Vec<PathBuf>,
 }
 
 #[derive(Debug, Serialize)]
@@ -139,15 +153,26 @@ pub fn zusammenfuehren(
         .filter(|c| c.take_id.is_some())
         .map(|c| c.name.to_uppercase())
         .collect();
-    let ohne_take = karten
-        .iter()
-        .flat_map(|k| k.inhalt.clips.iter().map(move |c| (k, c)))
-        .filter(|(_, c)| {
-            !mit_take.contains(&c.name.to_uppercase()) && !zugeordnete_clips.contains(&c.name.to_uppercase())
-        })
-        .map(|(k, c)| format!("{} ({})", c.name, k.inhalt.karte))
-        .collect();
-    Uebersicht { projekt, drehs, karten, ohne_take, unlesbar, hinweis: None }
+    let mut zu_klaeren: Vec<OffenerClip> = Vec::new();
+    for (k, c) in karten.iter().flat_map(|k| k.inhalt.clips.iter().map(move |c| (k, c))) {
+        let name = c.name.to_uppercase();
+        if mit_take.contains(&name) || zugeordnete_clips.contains(&name) || c.dreh_id.is_some() {
+            continue;
+        }
+        // Dieselbe Karte liegt auf mehreren Zielen: eine Zeile, alle Dateien.
+        match zu_klaeren.iter_mut().find(|o| o.karte == k.inhalt.karte && o.clip.eq_ignore_ascii_case(&c.name)) {
+            Some(o) => o.dateien.push(k.datei.clone()),
+            None => zu_klaeren.push(OffenerClip {
+                clip: c.name.clone(),
+                karte: k.inhalt.karte.clone(),
+                start_tc: c.start_tc.clone(),
+                dreh_ordner: k.dreh_ordner.clone(),
+                freigegeben: k.inhalt.freigegeben,
+                dateien: vec![k.datei.clone()],
+            }),
+        }
+    }
+    Uebersicht { projekt, drehs, karten, zu_klaeren, unlesbar, hinweis: None }
 }
 
 /// Liest Plan und Stand und verbindet beides. Ohne Zugang zum Plate Assistant: nur die Karten.
@@ -215,6 +240,7 @@ mod tests {
                         take_id: None,
                         zuordnung: String::new(),
                         abweichungen: vec![],
+                        dreh_id: None,
                     },
                     ClipEintrag {
                         name: "A001C004_261028_R1AB".into(),
@@ -224,6 +250,7 @@ mod tests {
                         take_id: Some("T2".into()),
                         zuordnung: "zeitfenster".into(),
                         abweichungen: vec![],
+                        dreh_id: None,
                     },
                     ClipEintrag {
                         name: "A001C005_261028_R1AB".into(),
@@ -233,6 +260,7 @@ mod tests {
                         take_id: None,
                         zuordnung: String::new(),
                         abweichungen: vec![],
+                        dreh_id: None,
                     },
                 ],
             },
@@ -260,6 +288,10 @@ mod tests {
         assert_eq!(u.drehs[0].hdri, ["captured"]);
         let karten: Vec<Option<&str>> = plate.takes.iter().map(|t| t.karte.as_deref()).collect();
         assert_eq!(karten, [Some("A001R1AB"), Some("A001R1AB"), None], "T3 fehlt noch: Karte nicht eingelesen");
-        assert_eq!(u.ohne_take, ["A001C005_261028_R1AB (A001R1AB)"]);
+        assert_eq!(u.zu_klaeren.len(), 1);
+        assert_eq!(
+            (u.zu_klaeren[0].clip.as_str(), u.zu_klaeren[0].karte.as_str()),
+            ("A001C005_261028_R1AB", "A001R1AB")
+        );
     }
 }

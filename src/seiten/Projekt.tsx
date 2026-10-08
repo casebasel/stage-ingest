@@ -17,7 +17,22 @@ type Karte = {
   datei: string;
   inhalt: { karte: string; beginn: string; freigegeben: boolean; unabhaengigeKopien: number; clips: unknown[] };
 };
-type Uebersicht = { projekt: ProjektT; drehs: DrehStand[]; karten: Karte[]; ohneTake: string[]; unlesbar: string[]; hinweis: string | null };
+type OffenerClip = {
+  clip: string;
+  karte: string;
+  startTc: string | null;
+  drehOrdner: string;
+  freigegeben: boolean;
+  dateien: string[];
+};
+type Uebersicht = {
+  projekt: ProjektT;
+  drehs: DrehStand[];
+  karten: Karte[];
+  zuKlaeren: OffenerClip[];
+  unlesbar: string[];
+  hinweis: string | null;
+};
 
 const ART: Record<string, string> = { graukugel: "Graukugel", chromkugel: "Chromkugel", cleanplate: "Cleanplate", take: "Take" };
 const BEWERTUNG: Record<string, string> = { circle: "Favorit", gut: "Gut", schlecht: "Schlecht" };
@@ -29,7 +44,7 @@ const HDRI: Record<string, string> = {
   linked: "verknüpft",
 };
 
-type Filter = "alle" | "fehlt" | "offen" | "sicher";
+type Filter = "alle" | "fehlt" | "offen" | "sicher" | "klaeren";
 type Zeile = { dreh: DrehStand; plate: PlateStand; take: TakeStand; ton: Ton; stand: string };
 
 function stand(t: TakeStand): { ton: Ton; stand: string } {
@@ -50,7 +65,7 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
   const [fehler, setFehler] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("alle");
   const [drehFilter, setDrehFilter] = useState("");
-  const [ansicht, setAnsicht] = useState<"takes" | "karten" | "klaerung">("takes");
+  const [ansicht, setAnsicht] = useState<"takes" | "karten">("takes");
   const [gewaehlt, setGewaehlt] = useState<string | null>(null);
   const [einstellen, setEinstellen] = useState(false);
   const [anlegen, setAnlegen] = useState(false);
@@ -83,7 +98,13 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
         (filter === "offen" && z.take.karte && !z.take.freigegeben) ||
         (filter === "sicher" && z.take.freigegeben)),
   );
-  const zahl = { alle: zeilen.length, fehlt: zeilen.filter((z) => !z.take.karte).length, offen: zeilen.filter((z) => z.take.karte && !z.take.freigegeben).length, sicher: zeilen.filter((z) => z.take.freigegeben).length };
+  const zahl: Record<Filter, number> = {
+    alle: zeilen.length,
+    fehlt: zeilen.filter((z) => !z.take.karte).length,
+    offen: zeilen.filter((z) => z.take.karte && !z.take.freigegeben).length,
+    sicher: zeilen.filter((z) => z.take.freigegeben).length,
+    klaeren: u?.zuKlaeren.length ?? 0,
+  };
   const auswahl = zeilen.find((z) => z.take.id === gewaehlt) ?? null;
 
   return (
@@ -242,7 +263,7 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
           </p>
         </div>
       ) : (
-        <div className="projekt-rumpf">
+        <div className={`projekt-rumpf ${filter === "klaeren" && ansicht === "takes" ? "projekt-rumpf-voll" : ""}`}>
           <div className="projekt-liste">
             <div className="reiter" role="tablist" aria-label="Ansicht">
               <button role="tab" aria-selected={ansicht === "takes"} className="reiter-knopf" onClick={() => setAnsicht("takes")}>
@@ -250,9 +271,6 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
               </button>
               <button role="tab" aria-selected={ansicht === "karten"} className="reiter-knopf" onClick={() => setAnsicht("karten")}>
                 Karten ({u.karten.length})
-              </button>
-              <button role="tab" aria-selected={ansicht === "klaerung"} className="reiter-knopf" onClick={() => setAnsicht("klaerung")}>
-                Klärung ({u.ohneTake.length})
               </button>
               {ansicht === "takes" && (
                 <div className="reiter-filter">
@@ -263,6 +281,7 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
                         ["fehlt", "Karte fehlt"],
                         ["offen", "Nicht freigegeben"],
                         ["sicher", "Sicher"],
+                        ["klaeren", "Zu klären"],
                       ] as [Filter, string][]
                     ).map(([id, text]) => (
                       <button key={id} aria-pressed={filter === id} onClick={() => setFilter(id)}>
@@ -284,7 +303,19 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
               )}
             </div>
 
+            {ansicht === "takes" && filter === "klaeren" && (
+              <ZuKlaeren
+                u={u}
+                neuerDrehort={() => {
+                  setDrehortNeu(true);
+                  setAnlegen(false);
+                  setEinstellen(false);
+                }}
+                gespeichert={() => projekt && laden(projekt)}
+              />
+            )}
             {ansicht === "takes" &&
+              filter !== "klaeren" &&
               (sichtbar.length ? (
                 <table className="tabelle tabelle-waehlbar">
                   <thead>
@@ -363,31 +394,9 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
                 <p className="leer-zeile">Auf den Zielen liegt noch keine eingelesene Karte dieses Projekts.</p>
               ))}
 
-            {ansicht === "klaerung" &&
-              (u.ohneTake.length ? (
-                <table className="tabelle">
-                  <thead>
-                    <tr>
-                      <th>Clip ohne Take</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {u.ohneTake.map((c) => (
-                      <tr key={c}>
-                        <td>
-                          <Status ton="warn">
-                            <span className="zahl">{c}</span>
-                          </Status>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ) : (
-                <p className="leer-zeile">Jeder eingelesene Clip ist einem Take zugeordnet.</p>
-              ))}
           </div>
 
+          {!(filter === "klaeren" && ansicht === "takes") && (
           <aside className="inspektor" aria-label="Einzelheiten">
             {auswahl ? (
               <>
@@ -429,8 +438,114 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
               <p className="leiste-leer">Einen Take anklicken: hier erscheinen Plate, Fotos, HDRI und alle Takes dazu.</p>
             )}
           </aside>
+          )}
         </div>
       )}
     </div>
+  );
+}
+
+/** Zu klären: Clips auf den Karten ohne Take. Im Nachhinein einem Take oder nur einem Drehort zuordnen
+ *  (auch einem neu angelegten). Gespeichert in der Zusammenfassung der Karte auf allen Zielen. */
+function ZuKlaeren({ u, neuerDrehort, gespeichert }: { u: Uebersicht; neuerDrehort: () => void; gespeichert: () => void }) {
+  const [wahl, setWahl] = useState<Record<string, { dreh: string; take: string }>>({});
+  const [stand, setStand] = useState<Record<string, { ton: Ton; text: string }>>({});
+  if (u.zuKlaeren.length === 0)
+    return <p className="leer-zeile">Nichts zu klären: Jeder eingelesene Clip ist einem Take oder einem Drehort zugeordnet.</p>;
+
+  async function zuordnen(c: OffenerClip, schluessel: string) {
+    const w = wahl[schluessel];
+    if (!w?.dreh) return;
+    setStand({ ...stand, [schluessel]: { ton: "laeuft", text: "Speichert …" } });
+    try {
+      await invoke("clip_zuordnen", { dateien: c.dateien, clip: c.clip, takeId: w.take || null, drehId: w.dreh });
+      setStand({ ...stand, [schluessel]: { ton: "ok", text: "Zugeordnet" } });
+      gespeichert();
+    } catch (e) {
+      setStand({ ...stand, [schluessel]: { ton: "fehler", text: String(e) } });
+    }
+  }
+
+  return (
+    <table className="tabelle">
+      <thead>
+        <tr>
+          <th>Clip</th>
+          <th>Karte</th>
+          <th>Start</th>
+          <th>Liegt in</th>
+          <th>Drehort</th>
+          <th>Take</th>
+          <th className="spalte-aktion">
+            <span className="unsichtbar">Zuordnen</span>
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {u.zuKlaeren.map((c) => {
+          const schluessel = `${c.karte}|${c.clip}`;
+          const w = wahl[schluessel] ?? { dreh: "", take: "" };
+          const dreh = u.drehs.find((d) => d.id === w.dreh);
+          const st = stand[schluessel];
+          return (
+            <tr key={schluessel}>
+              <td className="zahl">
+                <Status ton="warn">{c.clip}</Status>
+                {st && (
+                  <span className="unterzeile">
+                    <Status ton={st.ton}>{st.text}</Status>
+                  </span>
+                )}
+              </td>
+              <td className="zahl">{c.karte}</td>
+              <td className="zahl">{c.startTc ?? "–"}</td>
+              <td className="zahl leise">{c.drehOrdner}</td>
+              <td>
+                <select
+                  aria-label={`Drehort für ${c.clip}`}
+                  value={w.dreh}
+                  onChange={(e) => {
+                    if (e.target.value === "__neu") return neuerDrehort();
+                    setWahl({ ...wahl, [schluessel]: { dreh: e.target.value, take: "" } });
+                  }}
+                >
+                  <option value="">Drehort wählen …</option>
+                  {u.drehs.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name}
+                      {d.datum && ` · ${d.datum}`}
+                    </option>
+                  ))}
+                  <option value="__neu">+ Neuer Drehort …</option>
+                </select>
+              </td>
+              <td>
+                <select
+                  aria-label={`Take für ${c.clip}`}
+                  value={w.take}
+                  disabled={!dreh}
+                  onChange={(e) => setWahl({ ...wahl, [schluessel]: { ...w, take: e.target.value } })}
+                >
+                  <option value="">Ohne Take (nur Drehort)</option>
+                  {dreh?.plates.flatMap((p) =>
+                    p.takes.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {p.slate || p.name} · Take {t.nummer}
+                        {t.clip ? ` (hat schon ${t.clip})` : ""}
+                      </option>
+                    )),
+                  )}
+                </select>
+              </td>
+              <td className="spalte-aktion">
+                <button className="knopf knopf-klein" disabled={!w.dreh || st?.ton === "laeuft"} onClick={() => zuordnen(c, schluessel)}>
+                  Zuordnen
+                </button>
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
   );
 }

@@ -184,6 +184,7 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
   ],
   plate_soll: () => [],
   plate_projekt_aendern: () => null,
+  clip_zuordnen: () => null,
   plate_drehort_kurznamen: () => ["RHEINUFER", "BRUECKE"],
   plate_drehort_anlegen: (a) => `dreh-happy_end-${String(a.kurzname).toLowerCase()}`,
   plate_projekt_anlegen: (a) => `projekt-${String(a.kurzname).toLowerCase()}`,
@@ -196,7 +197,10 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
     projekt,
     hinweis: null,
     unlesbar: [],
-    ohneTake: ["A001C014_261028_R132 (A001R132)"],
+    zuKlaeren: [
+      { clip: "A001C014_261028_R132", karte: "A001R132", startTc: "14:22:05:10", drehOrdner: "2026-10-28_RHEINUFER", freigegeben: false, dateien: ["/a", "/b"] },
+      { clip: "A001C015_261028_R132", karte: "A001R132", startTc: "14:31:40:02", drehOrdner: "2026-10-28_RHEINUFER", freigegeben: false, dateien: ["/a", "/b"] },
+    ],
     karten: [
       { drehOrdner: "2026-10-28_Rheinufer", datei: "a", inhalt: { karte: "A001R131", beginn: "", freigegeben: true, unabhaengigeKopien: 2, clips: Array(22) } },
       { drehOrdner: "2026-10-28_Rheinufer", datei: "b", inhalt: { karte: "A001R132", beginn: "", freigegeben: false, unabhaengigeKopien: 1, clips: Array(14) } },
