@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openPath } from "@tauri-apps/plugin-opener";
-import { message } from "@tauri-apps/plugin-dialog";
+import { ask, message } from "@tauri-apps/plugin-dialog";
 import { ChevronDown, ChevronRight, Image as Bild, MapPinPlus, Play, Plus, RefreshCw, Settings, X } from "lucide-react";
 import { NeuerDrehort, NeuesProjekt, ProjektEinstellungen } from "../ProjektEinstellungen";
 import { useEinstellungen } from "../einstellungen";
@@ -116,18 +116,35 @@ const GRUNDSPALTEN: Spalte[] = [
 ];
 const FEST = ["take", "abspielen"];
 
-/** Öffnet die Kopie des Clips im Standard-Player des Systems; scheitert das, sagt es das (nie still). */
+/** Spielt die Kopie eines Clips ab, je nach Format: ProRes-MOV/MP4 mit dem Standard-Player (QuickTime), MXF und
+ *  ARRIRAW mit dem ARRI Reference Tool Viewer (QuickTime kann sie nicht). Fehlt der Viewer, bietet die App an, ihn bei
+ *  ARRI zu laden. Scheitert etwas, sagt sie es (nie still). */
 async function abspielen(datei: string) {
+  const klein = datei.toLowerCase();
+  const arri = klein.endsWith(".mxf") || klein.endsWith(".ari") || klein.endsWith(".arx");
   try {
-    await openPath(datei);
+    if (!arri) {
+      await openPath(datei);
+      return;
+    }
+    if (await invoke<string | null>("art_viewer")) {
+      await invoke("im_art_viewer", { datei });
+      return;
+    }
+    const ja = await ask(
+      "MXF und ARRIRAW spielt QuickTime nicht ab. Der kostenlose ARRI Reference Tool Viewer kann es.\n\nJetzt bei ARRI laden (etwa 160 MB) und den Installer von ARRI starten? Es gilt die Lizenz von ARRI.",
+      { title: "Clip abspielen", kind: "info", okLabel: "Laden und installieren", cancelLabel: "Abbrechen" },
+    );
+    if (!ja) return;
+    await invoke("art_viewer_installieren");
+    await message("Der Installer von ARRI ist offen. Nach der Installation den Clip noch einmal abspielen.", {
+      title: "ARRI Reference Tool Viewer",
+      kind: "info",
+    });
   } catch (e) {
-    const mxf = datei.toLowerCase().endsWith(".mxf");
-    await message(
-      `Der Clip liess sich nicht öffnen.\n\n${datei}\n\n${
-        mxf ? "MXF (z. B. ARRIRAW) spielt QuickTime nicht ab; dafür braucht es einen Player wie DaVinci Resolve oder ARRI Reference Tool.\n\n" : ""
-      }${String(e)}`,
-      { title: "Clip abspielen", kind: "error" },
-    ).catch(() => {});
+    await message(`Der Clip liess sich nicht öffnen.\n\n${datei}\n\n${String(e)}`, { title: "Clip abspielen", kind: "error" }).catch(
+      () => {},
+    );
   }
 }
 

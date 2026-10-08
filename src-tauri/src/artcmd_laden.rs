@@ -87,3 +87,64 @@ pub fn laden(datenordner: &Path) -> Result<PathBuf, String> {
     }
     Ok(pfad)
 }
+
+/// ARRI Reference Tool Viewer (spielt ARRIRAW, ARRICORE und ProRes in MXF; QuickTime kann das nicht). Installiert
+/// wird er mit ARRIs eigenem Installer nach `/Applications/ARRI/` (Paketinhalt geprüft 09.10.2026).
+#[cfg(target_os = "macos")]
+const VIEWER_PAKET: Option<&str> = Some(
+    "https://www.arri.com/resource/blob/408742/c45b26aa7ee7fe791fadd51d34785e71/arri-reference-tool-viewer-0-9-0-macos11-clang1200-arm64-data.zip",
+);
+#[cfg(not(target_os = "macos"))]
+const VIEWER_PAKET: Option<&str> = None;
+
+const VIEWER_ORTE: &[&str] =
+    &["/Applications/ARRI/ARRI Reference Tool Viewer.app", "/Applications/ARRI Reference Tool Viewer.app"];
+
+/// Pfad des installierten ART Viewer, falls vorhanden (nur macOS).
+pub fn viewer() -> Option<PathBuf> {
+    VIEWER_ORTE.iter().map(PathBuf::from).find(|p| cfg!(target_os = "macos") && p.is_dir())
+}
+
+/// Öffnet einen Clip im ART Viewer.
+pub fn im_viewer(datei: &Path) -> Result<(), String> {
+    let app = viewer().ok_or("ARRI Reference Tool Viewer ist nicht installiert")?;
+    let aus = std::process::Command::new("open").arg("-a").arg(&app).arg(datei).output().map_err(|e| e.to_string())?;
+    if aus.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&aus.stderr).trim().to_owned())
+    }
+}
+
+/// Lädt den ART Viewer bei ARRI und startet ARRIs Installer (der Benutzer bestätigt dort Lizenz und Passwort).
+pub fn viewer_installieren(cache: &Path) -> Result<(), String> {
+    let url =
+        VIEWER_PAKET.ok_or("Den ART Viewer lädt die App nur auf dem Mac; sonst arri.com → ARRI Reference Tool.")?;
+    let antwort = ureq::get(url).timeout(std::time::Duration::from_secs(900)).call().map_err(|e| {
+        format!("ART Viewer nicht von ARRI ladbar ({e}). Von Hand: arri.com → ARRI Reference Tool → Viewer.")
+    })?;
+    let mut daten = Vec::new();
+    antwort.into_reader().take(HOECHSTENS).read_to_end(&mut daten).map_err(|e| format!("Download abgebrochen: {e}"))?;
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(daten))
+        .map_err(|e| format!("Paket von ARRI nicht lesbar (ARRI hat den Link vielleicht geändert): {e}"))?;
+    let ordner = cache.join("art-viewer");
+    let _ = std::fs::remove_dir_all(&ordner);
+    std::fs::create_dir_all(&ordner).map_err(|e| e.to_string())?;
+    let mut pkg = None;
+    for i in 0..zip.len() {
+        let mut eintrag = zip.by_index(i).map_err(|e| e.to_string())?;
+        let Some(name) = eintrag.enclosed_name().and_then(|p| p.file_name().map(|n| n.to_owned())) else { continue };
+        if eintrag.is_dir() {
+            continue;
+        }
+        let pfad = ordner.join(&name);
+        let mut datei = std::fs::File::create(&pfad).map_err(|e| e.to_string())?;
+        std::io::copy(&mut eintrag, &mut datei).map_err(|e| e.to_string())?;
+        if name.to_string_lossy().ends_with(".pkg") {
+            pkg = Some(pfad);
+        }
+    }
+    let pkg = pkg.ok_or("Im Paket von ARRI fehlt der Installer (.pkg)")?;
+    std::process::Command::new("open").arg(&pkg).status().map_err(|e| format!("Installer startet nicht: {e}"))?;
+    Ok(())
+}

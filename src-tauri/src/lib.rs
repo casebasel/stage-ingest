@@ -1293,6 +1293,25 @@ async fn artcmd_laden(app: AppHandle) -> Result<PathBuf, String> {
     im_hintergrund(move || artcmd_laden::laden(&ordner)).await
 }
 
+/// Ist der ARRI Reference Tool Viewer installiert (für MXF/ARRIRAW)?
+#[tauri::command]
+fn art_viewer() -> Option<PathBuf> {
+    artcmd_laden::viewer()
+}
+
+/// Öffnet einen Clip im ARRI Reference Tool Viewer.
+#[tauri::command]
+async fn im_art_viewer(datei: PathBuf) -> Result<(), String> {
+    im_hintergrund(move || artcmd_laden::im_viewer(&datei)).await
+}
+
+/// Lädt den ART Viewer bei ARRI und startet dessen Installer.
+#[tauri::command]
+async fn art_viewer_installieren(app: AppHandle) -> Result<(), String> {
+    let cache = app.path().app_cache_dir().map_err(|e| e.to_string())?;
+    im_hintergrund(move || artcmd_laden::viewer_installieren(&cache)).await
+}
+
 /// Technische Werte der Clips für die Spalten der Take-Tabellen (aus der Kopie, nur der Kopf; siehe `technik`).
 #[tauri::command]
 async fn take_technik(
@@ -1467,6 +1486,9 @@ pub fn run() {
             projekt_uebersicht,
             take_technik,
             artcmd_laden,
+            art_viewer,
+            im_art_viewer,
+            art_viewer_installieren,
             abbrechen,
             laeuft,
             verlauf,
