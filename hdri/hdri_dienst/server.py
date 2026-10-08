@@ -66,7 +66,8 @@ class Server:
     # --- Netz -------------------------------------------------------------------------------------------------
 
     def _anfrage(self, methode: str, pfad: str, daten=None, token: bool = True, roh: bool = False, zeit: int = 60):
-        kopf = {"apikey": self.anon_key}
+        # Eigene Kennung: Cloudflare weist die Standardkennung „Python-urllib“ ab (Fehler 1010).
+        kopf = {"apikey": self.anon_key, "User-Agent": "StageIngest-HDRI-Dienst/1"}
         if token:
             kopf["Authorization"] = f"Bearer {self.token()}"
         body = None
