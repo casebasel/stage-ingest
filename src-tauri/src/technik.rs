@@ -62,6 +62,27 @@ fn zahl(x: f64, stellen: i32) -> String {
     }
 }
 
+/// Wie [`lesen`]; fehlt die CSV vom Einlesen und ist ART CMD eingestellt, wird sie für diesen Clip erzeugt und im
+/// Zwischenspeicher `cache` abgelegt (Schlüssel aus Pfad, Grösse und Änderungszeit). Die Kopie bleibt unberührt.
+pub fn lesen_mit(a: &Anfrage, art_cmd: Option<&std::path::Path>, cache: &std::path::Path) -> BTreeMap<String, String> {
+    let csv = a.csv.clone().filter(|p| p.is_file()).or_else(|| {
+        let art = art_cmd?;
+        let m = std::fs::metadata(&a.datei).ok()?;
+        let zeit = m.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
+        let schluessel = format!("{}|{}|{zeit}", a.datei.display(), m.len());
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        std::hash::Hash::hash(&schluessel, &mut h);
+        let name = format!("{:016x}.csv", std::hash::Hasher::finish(&h));
+        let ziel = cache.join(name);
+        if !ziel.is_file() {
+            std::fs::create_dir_all(cache).ok()?;
+            artcmd::exportieren(art, &a.datei, &ziel).ok()?;
+        }
+        Some(ziel)
+    });
+    lesen(&Anfrage { datei: a.datei.clone(), csv })
+}
+
 /// Liest alle Werte eines Clips. Was fehlt oder nicht lesbar ist, fehlt auch im Ergebnis.
 pub fn lesen(a: &Anfrage) -> BTreeMap<String, String> {
     let mut w = BTreeMap::new();

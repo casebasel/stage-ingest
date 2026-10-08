@@ -1503,6 +1503,15 @@ input[type="checkbox"][role="switch"]:checked::before {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.spalten-hinweis {
+  margin: 0 4px 6px;
+  padding: 6px 8px;
+  border-radius: var(--rund-klein);
+  background: var(--warn-grund);
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.4;
+}
 .spalten-quelle {
   max-width: 150px;
   overflow: hidden;

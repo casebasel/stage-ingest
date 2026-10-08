@@ -449,7 +449,7 @@ function AlleTakes({
             </button>
           ))}
         </div>
-        <SpaltenMenue alle={sp.alle} an={sp.an} setAn={sp.setAn} offen={sp.menueOffen} setOffen={sp.setMenueOffen} festeIds={FEST} />
+        <SpaltenMenue alle={sp.alle} an={sp.an} setAn={sp.setAn} offen={sp.menueOffen} setOffen={sp.setMenueOffen} festeIds={FEST} ohneArtCmd={sp.ohneArtCmd} />
       </div>
       {sichtbar.length ? (
         <table className="tabelle tabelle-waehlbar">
@@ -647,7 +647,7 @@ function PlateDetail({ dreh, p, drehWaehlen }: { dreh: DrehStand; p: PlateStand;
       <div className="detail-titel-zeile">
         <h3 className="detail-titel">Takes</h3>
         {p.takes.length > 0 && (
-          <SpaltenMenue alle={sp.alle} an={sp.an} setAn={sp.setAn} offen={sp.menueOffen} setOffen={sp.setMenueOffen} festeIds={FEST} />
+          <SpaltenMenue alle={sp.alle} an={sp.an} setAn={sp.setAn} offen={sp.menueOffen} setOffen={sp.setMenueOffen} festeIds={FEST} ohneArtCmd={sp.ohneArtCmd} />
         )}
       </div>
       {p.takes.length ? (

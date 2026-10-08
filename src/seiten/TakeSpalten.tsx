@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Columns3 } from "lucide-react";
-import { gemerkt, merken } from "../einstellungen";
+import { gemerkt, merken, useEinstellungen } from "../einstellungen";
 
 export type TakeMitWerten = {
   id: string;
@@ -135,8 +135,8 @@ const KATALOG: Spalte[] = [
     rechts: true,
     wert: (t) => uhrzeit(pa(t, "take.start_zeit")),
   },
-  paSpalte("neigungIphone", "Neigung iPhone °", "plate.neigung_grad", true),
-  paSpalte("rollenIphone", "Rollen iPhone °", "plate.rollen_grad", true),
+  paSpalte("neigungIphone", "Tilt iPhone °", "plate.neigung_grad", true),
+  paSpalte("rollenIphone", "Roll iPhone °", "plate.rollen_grad", true),
   paSpalte("richtung", "Richtung °", "plate.richtung.azimutGrad", true),
   paSpalte("hoehe", "Kamerahöhe cm", "plate.kamera_hoehe_cm", true),
   paSpalte("abstand", "Abstand cm", "plate.abstand_cm", true),
@@ -235,40 +235,43 @@ export function useTakeSpalten(grund: Spalte[], takes: TakeMitWerten[]) {
   // Technik laden, wenn eine sichtbare Spalte sie braucht oder das Menü offen ist (dann zeigt es auch die rohen Felder).
   const brauchtTechnik =
     menueOffen || an.some((id) => KATALOG.find((s) => s.id === id)?.technik || (id.includes(":") && !id.startsWith("pa:")));
-  const technik = useTechnik(takes, brauchtTechnik);
+  const artCmd = useEinstellungen().artCmd.trim();
+  const technik = useTechnik(takes, brauchtTechnik, artCmd);
   const alle = useMemo(() => [...grund, ...KATALOG, ...weitere(takes, technik)], [grund, takes, technik]);
   // Reihenfolge: wie im Katalog (Grundspalten zuerst), gewählt = sichtbar.
   const sichtbar = alle.filter((s) => an.includes(s.id));
-  return { alle, sichtbar, an, setAn, technik, menueOffen, setMenueOffen };
+  return { alle, sichtbar, an, setAn, technik, menueOffen, setMenueOffen, ohneArtCmd: !artCmd };
 }
 
-// Pro Sitzung: einmal gelesene Werte bleiben (die Kopie ändert sich nicht).
+// Pro Sitzung: einmal gelesene Werte bleiben (die Kopie ändert sich nicht); neu, wenn sich ART CMD ändert.
 const zwischenspeicher: Record<string, Technik> = {};
+let zwischenspeicherArtCmd = "";
 
-function useTechnik(takes: TakeMitWerten[], aktiv: boolean): Record<string, Technik> {
+function useTechnik(takes: TakeMitWerten[], aktiv: boolean, artCmd: string): Record<string, Technik> {
   const [stand, setStand] = useState<Record<string, Technik>>(() => ({
     ...zwischenspeicher,
   }));
   useEffect(() => {
     if (!aktiv) return;
+    if (artCmd !== zwischenspeicherArtCmd) {
+      for (const k of Object.keys(zwischenspeicher)) delete zwischenspeicher[k];
+      zwischenspeicherArtCmd = artCmd;
+    }
     const fehlen = takes.filter((t) => t.datei && !(t.datei in zwischenspeicher));
     const eindeutig = [...new Map(fehlen.map((t) => [t.datei!, t])).values()];
     if (!eindeutig.length) return;
-    let aus = false;
     invoke<Technik[]>("take_technik", {
       anfragen: eindeutig.map((t) => ({ datei: t.datei, csv: t.csv ?? null })),
+      artCmd: artCmd || null,
     })
       .then((liste) => {
         eindeutig.forEach((t, i) => (zwischenspeicher[t.datei!] = liste?.[i] ?? {}));
-        if (!aus) setStand({ ...zwischenspeicher });
+        setStand({ ...zwischenspeicher });
       })
       .catch(() => {
         // Platte nicht erreichbar: Zellen bleiben leer, nächster Versuch beim nächsten Öffnen.
       });
-    return () => {
-      aus = true;
-    };
-  }, [aktiv, takes]);
+  }, [aktiv, takes, artCmd]);
   return stand;
 }
 
@@ -279,6 +282,7 @@ export function SpaltenMenue({
   offen,
   setOffen,
   festeIds,
+  ohneArtCmd = false,
 }: {
   alle: Spalte[];
   an: string[];
@@ -286,6 +290,8 @@ export function SpaltenMenue({
   offen: boolean;
   setOffen: (o: boolean) => void;
   festeIds: string[];
+  /** Tilt/Roll und Objektivwerte aus dem Clip brauchen ARRI ART CMD (Einrichtung). */
+  ohneArtCmd?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [suche, setSuche] = useState("");
@@ -332,6 +338,12 @@ export function SpaltenMenue({
               return (
                 <fieldset key={g}>
                   <legend>{g === "Weitere" ? "Weitere Felder (roh)" : g}</legend>
+                  {g === "Bewegung" && ohneArtCmd && (
+                    <p className="spalten-hinweis">
+                      Tilt und Roll stehen pro Bild im Clip; lesen kann sie nur ARRI ART CMD. In der Einrichtung eintragen, dann
+                      erscheinen sie auch für schon eingelesene Karten. Bis dahin: Werte aus dem Plate Assistant, falls vorhanden.
+                    </p>
+                  )}
                   {teil.map((s) => (
                     <label key={s.id} title={`Quelle: ${s.quelle}`}>
                       <input type="checkbox" checked={an.includes(s.id)} onChange={() => umschalten(s.id)} />

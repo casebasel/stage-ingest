@@ -1283,9 +1283,14 @@ async fn projekt_uebersicht(
 /// Technische Werte der Clips für die Spalten der Take-Tabellen (aus der Kopie, nur der Kopf; siehe `technik`).
 #[tauri::command]
 async fn take_technik(
+    app: AppHandle,
     anfragen: Vec<technik::Anfrage>,
+    art_cmd: Option<PathBuf>,
 ) -> Result<Vec<std::collections::BTreeMap<String, String>>, String> {
-    im_hintergrund(move || Ok(anfragen.iter().map(technik::lesen).collect())).await
+    // Ohne CSV vom Einlesen ruft der Ingest ART CMD selbst auf; die CSV landet im Zwischenspeicher, nie auf der Kopie.
+    let cache = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("artcmd");
+    let art = art_cmd.filter(|p| !p.as_os_str().is_empty());
+    im_hintergrund(move || Ok(anfragen.iter().map(|a| technik::lesen_mit(a, art.as_deref(), &cache)).collect())).await
 }
 
 /// Aktives Filmprojekt der Stage (für den Vorschlag im Studio), `None` ohne.
