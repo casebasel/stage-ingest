@@ -18,7 +18,7 @@ import numpy as np
 
 from . import exr
 from .aufnahme import AufnahmeFehler, laden, panorama_hoehe, positionen_zusammenfuehren
-from .projektion import panorama
+from .projektion import panorama_multiband
 
 
 def vorschau(bild: np.ndarray, pfad: Path) -> None:
@@ -51,7 +51,8 @@ def verarbeiten(ordner: Path, aus: Path | None, hoehe: int | None, halb: bool, v
         positionen, bericht = lage_verfeinern(positionen, melden=lambda t, f: print(f"  {t}", flush=True))
     h = hoehe or panorama_hoehe(positionen)
     print(f"  Panorama {2 * h}×{h}", flush=True)
-    bild, clip, abdeckung = panorama(positionen, h)
+    # Multiband-Nähte: Details scharf aus genau einem Bild, grobe Übergänge weich (keine Geister bei Parallaxe).
+    bild, clip, abdeckung = panorama_multiband(positionen, h)
     ziel = aus or (Path(ordner) / f"{a.hdri.get('id', 'hdri')}_gemessen.exr")
     exr.schreiben(
         ziel,
@@ -59,7 +60,7 @@ def verarbeiten(ordner: Path, aus: Path | None, hoehe: int | None, halb: bool, v
         {"clip": clip, "abdeckung": np.clip(abdeckung, 0, 1)},
         {
             "stage_ingest_hdri": str(a.hdri.get("id")),
-            "stage_ingest_stufe": "gemessen (Merge, Objektivkorrektur aus dem DNG, Lage verfeinert, ohne KI)"
+            "stage_ingest_stufe": "gemessen (Merge, Objektivkorrektur aus dem DNG, Lage verfeinert, Multiband-Nähte, ohne KI)"
             if bericht.get("paare")
             else "gemessen (Merge, Objektivkorrektur aus dem DNG, Lage nur aus der IMU, ohne KI)",
             "stage_ingest_verfeinerung": json.dumps(bericht),

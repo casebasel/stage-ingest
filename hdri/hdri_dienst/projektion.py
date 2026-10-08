@@ -138,3 +138,78 @@ def panorama(positionen: list[Position], hoehe: int) -> tuple[np.ndarray, np.nda
     bild = np.where(bedeckt[..., None], summe / np.where(bedeckt, gewichte, 1.0)[..., None], 0.0)
     maske = np.where(bedeckt, clip / np.where(bedeckt, gewichte, 1.0), 0.0)
     return bild.astype(np.float32), maske.astype(np.float32), abdeckung.astype(np.float32)
+
+
+def _pyramide_gauss(bild: np.ndarray, stufen: int) -> list[np.ndarray]:
+    p = [bild]
+    for _ in range(stufen - 1):
+        p.append(cv2.pyrDown(p[-1]))
+    return p
+
+
+def _pyramide_laplace(bild: np.ndarray, stufen: int) -> list[np.ndarray]:
+    g = _pyramide_gauss(bild, stufen)
+    lap = []
+    for i in range(stufen - 1):
+        hoch = cv2.pyrUp(g[i + 1], dstsize=(g[i].shape[1], g[i].shape[0]))
+        lap.append(g[i] - hoch)
+    lap.append(g[-1])
+    return lap
+
+
+def panorama_multiband(positionen: list[Position], hoehe: int, stufen: int = 6) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Wie `panorama`, aber Nähte nach dem Multiband-Verfahren (Burt & Adelson): Jede Stelle gehört dem Bild, das sie
+    am mittigsten sieht (scharfe Details aus genau einem Bild, keine Geister); die groben Frequenzen werden über
+    breite Übergänge gemischt, damit Helligkeitsstufen und Nähte in ruhigen Flächen (Decke, Wände) verschwinden.
+    Gemischt wird im Logarithmus der Strahldichte, damit helle Lichter nicht überschwingen.
+    """
+    welt = richtungen(hoehe)
+    groesse = (hoehe, 2 * hoehe)
+    karten = []
+    beste = np.full(groesse, -1.0, dtype=np.float32)
+    besitzer = np.full(groesse, -1, dtype=np.int16)
+    abdeckung = np.zeros(groesse, dtype=np.float32)
+    # 1. Durchgang: Gültigkeit und Mittigkeit je Bild, Besitzer je Pixel.
+    for k, p in enumerate(positionen):
+        mx, my, w = abbildung(p.kamera, p.lage, welt)
+        gueltig = cv2.remap((p.bild.max(axis=2) > 0).astype(np.float32), mx, my, interpolation=cv2.INTER_LINEAR,
+                            borderMode=cv2.BORDER_CONSTANT) > 0.99
+        w = np.where(gueltig, w, 0.0).astype(np.float32)
+        abdeckung += w
+        punkte = np.where(w > 0, w * mittigkeit(p.kamera, mx, my) + 1e-6, -1.0).astype(np.float32)
+        neu = punkte > beste
+        beste[neu], besitzer[neu] = punkte[neu], k
+        karten.append((mx, my, w > 0))
+    # 2. Durchgang: Laplace-Pyramiden (Logarithmus) gewichtet mit geglätteten Besitzmasken, je Ebene normiert.
+    summe = None
+    gewichte = None
+    clip = np.zeros(groesse, dtype=np.float32)
+    eps = 1e-6
+    for k, (p, (mx, my, gueltig)) in enumerate(zip(positionen, karten)):
+        maske = (besitzer == k).astype(np.float32)
+        if not maske.any():
+            continue
+        werte = cv2.remap(p.bild, mx, my, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+        lap = _pyramide_laplace(np.log(np.maximum(werte, 0) + eps).astype(np.float32), stufen)
+        gm = _pyramide_gauss(maske, stufen)
+        gg = _pyramide_gauss(gueltig.astype(np.float32), stufen)
+        if summe is None:
+            summe = [np.zeros_like(l, dtype=np.float32) for l in lap]
+            gewichte = [np.zeros(l.shape[:2], dtype=np.float32) for l in lap]
+        for e in range(stufen):
+            # Gewichtet mit der (geglätteten) Gültigkeit: der gespiegelte Rand ausserhalb des Bildes zählt kaum.
+            w = gm[e] * gg[e] ** 4
+            summe[e] += lap[e] * w[..., None]
+            gewichte[e] += w
+        if p.clip is not None:
+            c = cv2.remap(p.clip.astype(np.float32), mx, my, interpolation=cv2.INTER_NEAREST, borderMode=cv2.BORDER_CONSTANT)
+            clip = np.where(maske > 0, c, clip)
+    if summe is None:
+        return np.zeros(groesse + (3,), np.float32), clip, abdeckung
+    lag = [s / np.maximum(g, 1e-6)[..., None] for s, g in zip(summe, gewichte)]
+    log_bild = lag[-1]
+    for e in range(stufen - 2, -1, -1):
+        log_bild = cv2.pyrUp(log_bild, dstsize=(lag[e].shape[1], lag[e].shape[0])) + lag[e]
+    bild = np.exp(log_bild) - eps
+    bild = np.where((besitzer >= 0)[..., None], np.maximum(bild, 0), 0.0)
+    return bild.astype(np.float32), clip, abdeckung

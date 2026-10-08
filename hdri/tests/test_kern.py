@@ -204,3 +204,24 @@ def test_zweite_ausloesung_wird_ausgerichtet():
     vorher = np.abs(zweites[innen] - erstes[innen]).mean()
     nachher = np.abs(gedreht[innen] - erstes[innen]).mean()
     assert nachher < vorher * 0.3, (vorher, nachher)
+
+
+def test_multiband_wie_panorama():
+    """Multiband-Nähte geben dieselbe Strahldichte wie das einfache Mischen (künstliche Szene, ohne Parallaxe)."""
+    from hdri_dienst.projektion import panorama_multiband
+
+    hoehe = 128
+    gt = szene(hoehe)
+    kamera = Kamera(breite=160, hoehe=120, hfov_grad=100, vfov_grad=80)
+    positionen = []
+    for pitch, schritte in ((0, 6), (45, 4), (-45, 4), (90, 1)):
+        for i in range(schritte):
+            r = lage(360 / schritte * i, pitch)
+            reihe = [Belichtung(aufnehmen(gt, kamera, r, f), zeit_s=f / 4, iso=400) for f in (0.0005, 0.02, 0.5, 4.0)]
+            hdr, clip = zusammenfuehren(reihe)
+            positionen.append(Position(hdr, r, kamera, clip))
+    bild, maske, abdeckung = panorama_multiband(positionen, hoehe, stufen=4)
+    bewertbar = (abdeckung > 0.5) & (gt.max(axis=2) < 100)
+    fehler = np.abs(bild - gt)[bewertbar] / np.maximum(gt[bewertbar], 0.05)
+    assert np.median(fehler) < 0.03, np.median(fehler)
+    assert maske[gt.max(axis=2) > 100].mean() > 0.5
