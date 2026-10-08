@@ -63,7 +63,10 @@ function Gerust() {
           <span className="marke-name">Stage Ingest</span>
           <span className="marke-version zahl">{version}</span>
           {TESTBAU && (
-            <span className="marke-test zahl" title="Testbau vom Mac (scripts/testen.sh); das nächste Update bringt die offizielle Version">
+            <span
+              className="marke-test zahl"
+              title="Testbau vom Mac (scripts/testen.sh). Gibt es auf GitHub eine neuere Version, erscheint oben das Update; es ersetzt den Testbau."
+            >
               Test {TESTBAU}
             </span>
           )}
@@ -112,7 +115,7 @@ function Gerust() {
           </button>
         </div>
       </header>
-      <Aktualisierung update={update} pflicht={pflicht} laeuft={lauf.laeuft} />
+      <Aktualisierung update={update} pflicht={pflicht} laeuft={lauf.laeuft} testbau={!!TESTBAU} />
       <div className="inhalt">
         {seite === "einlesen" && <Einlesen pflicht={pflicht} zurEinrichtung={zurEinrichtung} />}
         {seite === "projekt" && <Projekt zurEinrichtung={zurEinrichtung} />}

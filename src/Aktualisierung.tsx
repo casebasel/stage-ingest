@@ -58,7 +58,18 @@ export function useAktualisierung() {
   return { update, pflicht, version };
 }
 
-export function Aktualisierung({ update, pflicht, laeuft }: { update: Update | null; pflicht: boolean; laeuft: boolean }) {
+export function Aktualisierung({
+  update,
+  pflicht,
+  laeuft,
+  testbau = false,
+}: {
+  update: Update | null;
+  pflicht: boolean;
+  laeuft: boolean;
+  /** Testbau vom Mac: das Update ist der Weg zurück zur offiziellen Version (nur wenn GitHub Neueres hat). */
+  testbau?: boolean;
+}) {
   const [installiert, setInstalliert] = useState(false);
   const [fehler, setFehler] = useState<string | null>(null);
   if (!update) return null;
@@ -78,7 +89,9 @@ export function Aktualisierung({ update, pflicht, laeuft }: { update: Update | n
   return (
     <div className={`aktualisierung ${pflicht ? "aktualisierung-pflicht" : ""}`} role="status">
       <span>
-        <strong>{pflicht ? "Pflicht-Update" : "Update verfügbar"}</strong> <span className="zahl">{update.version}</span>
+        <strong>{pflicht ? "Pflicht-Update" : testbau ? "Offizielle Version verfügbar" : "Update verfügbar"}</strong>{" "}
+        <span className="zahl">{update.version}</span>
+        {testbau && " · ersetzt den Testbau"}
         {pflicht && " · Bericht, Ordnerstruktur oder Schnittstelle haben sich geändert. Neue Karten erst nach dem Update."}
         {laeuft && " · Installieren nach dem Kopieren."}
         {fehler && <span className="text-fehler"> · {fehler}</span>}
