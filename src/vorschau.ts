@@ -251,8 +251,9 @@ export function einrichten() {
   marke.setAttribute("role", "note");
   Object.assign(marke.style, {
     position: "fixed",
-    bottom: "10px",
-    right: "12px",
+    top: "10px",
+    left: "50%",
+    transform: "translateX(-50%)",
     zIndex: "50",
     padding: "4px 10px",
     font: "500 12px/1.4 var(--schrift)",

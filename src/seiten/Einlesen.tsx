@@ -120,7 +120,10 @@ function Quellen({ laufwerke, zielBasis }: { laufwerke: Laufwerk[]; zielBasis: s
 
   async function ordnerWaehlen() {
     const pfad = await open({ directory: true, title: "Karte oder Reel-Ordner wählen" });
-    if (typeof pfad === "string") lauf.quelleWaehlen({ pfad, name: name(pfad), laufwerk: false });
+    if (typeof pfad !== "string") return;
+    // Ist der Ordner ein eingestecktes Laufwerk, dieses wählen (dann auch mit Auswerfen), nicht einen zweiten Eintrag.
+    const lw = laufwerke.find((l) => ohneEnde(l.pfad) === ohneEnde(pfad));
+    lauf.quelleWaehlen(lw ? alsQuelle(lw) : { pfad, name: name(pfad), laufwerk: false });
   }
 
   const zeile = (l: Laufwerk) => {
