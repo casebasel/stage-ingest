@@ -22,8 +22,6 @@ const SEITEN: { id: Seite; text: string; Zeichen: typeof Settings }[] = [
   { id: "einrichtung", text: "Einrichtung", Zeichen: Settings },
 ];
 
-// Testbau von scripts/testen.sh: Commit-Nummer, sonst leer (Releases von GitHub).
-const TESTBAU = (import.meta.env.VITE_TESTBAU as string | undefined) ?? "";
 export function App() {
   return (
     <EinstellungenGeben>
@@ -62,14 +60,6 @@ function Gerust() {
         <div className="marke">
           <span className="marke-name">Stage Ingest</span>
           <span className="marke-version zahl">{version}</span>
-          {TESTBAU && (
-            <span
-              className="marke-test zahl"
-              title="Testbau vom Mac (scripts/testen.sh). Gibt es auf GitHub eine neuere Version, erscheint oben das Update; es ersetzt den Testbau."
-            >
-              Test {TESTBAU}
-            </span>
-          )}
         </div>
         <ProjektWahl />
         <nav className="seiten" aria-label="Seiten">
@@ -115,7 +105,7 @@ function Gerust() {
           </button>
         </div>
       </header>
-      <Aktualisierung update={update} pflicht={pflicht} laeuft={lauf.laeuft} testbau={!!TESTBAU} />
+      <Aktualisierung update={update} pflicht={pflicht} laeuft={lauf.laeuft} />
       <div className="inhalt">
         {seite === "einlesen" && <Einlesen pflicht={pflicht} zurEinrichtung={zurEinrichtung} />}
         {seite === "projekt" && <Projekt zurEinrichtung={zurEinrichtung} />}
