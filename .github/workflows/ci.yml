@@ -11,6 +11,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  hdri:
+    # HDRI-Dienst (läuft auf Ada, Windows): Tests unter Windows, wie im Betrieb.
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Pakete
+        run: python -m pip install -r hdri/requirements.txt pytest
+      - name: Tests
+        working-directory: hdri
+        run: python -m pytest -q tests
+
   kern:
     # Der Kern muss auf allen drei Systemen bestehen: das Lesen ohne Cache ist pro System anders gebaut.
     strategy:

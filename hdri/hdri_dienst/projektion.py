@@ -157,12 +157,15 @@ def _pyramide_laplace(bild: np.ndarray, stufen: int) -> list[np.ndarray]:
     return lap
 
 
-def panorama_multiband(positionen: list[Position], hoehe: int, stufen: int = 6) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def panorama_multiband(positionen: list[Position], hoehe: int, stufen: int | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Wie `panorama`, aber Nähte nach dem Multiband-Verfahren (Burt & Adelson): Jede Stelle gehört dem Bild, das sie
     am mittigsten sieht (scharfe Details aus genau einem Bild, keine Geister); die groben Frequenzen werden über
     breite Übergänge gemischt, damit Helligkeitsstufen und Nähte in ruhigen Flächen (Decke, Wände) verschwinden.
     Gemischt wird im Logarithmus der Strahldichte, damit helle Lichter nicht überschwingen.
     """
+    if stufen is None:
+        # gröbste Stufe etwa 32 Pixel hoch: breite Übergänge, aber nie kleiner als das Bild trägt
+        stufen = int(max(2, min(7, np.log2(max(hoehe, 2) / 32) + 1)))
     welt = richtungen(hoehe)
     groesse = (hoehe, 2 * hoehe)
     karten = []
