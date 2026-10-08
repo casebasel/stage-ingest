@@ -15,3 +15,8 @@ einstellungen.lokal.json
 
 # Bildschirmfotos der Gestaltungsprüfung (lokal)
 .impeccable/review/
+
+# HDRI-Dienst: Umgebung und Testausgaben
+hdri/.venv/
+hdri/**/__pycache__/
+hdri/.pytest_cache/

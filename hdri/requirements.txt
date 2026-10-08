@@ -1,0 +1,4 @@
+numpy>=2.0
+opencv-python-headless>=4.10
+rawpy>=0.22
+OpenEXR>=3.3

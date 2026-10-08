@@ -1,0 +1,152 @@
+"""Künstliche Szene mit bekanntem Licht: aufnehmen wie das iPhone (Positionen × Belichtungen, gesättigt), dann
+zusammenführen und zum Panorama legen; das Ergebnis muss dem Original entsprechen."""
+
+import numpy as np
+import pytest
+
+from hdri_dienst import exr
+from hdri_dienst.merge import Belichtung, zusammenfuehren
+from hdri_dienst.projektion import Kamera, Position, panorama, quaternion_zu_matrix, richtungen
+
+# Kamera → Welt bei Yaw 0, Pitch 0: Kamera x → Welt x, Kamera y (oben) → Welt z, Blick −z → Welt y.
+R0 = np.array([[1.0, 0, 0], [0, 0, -1], [0, 1, 0]])
+
+
+def lage(yaw_grad: float, pitch_grad: float) -> np.ndarray:
+    """Lage aus Yaw (nach rechts, zu +x) und Pitch (nach oben)."""
+    p, y = np.radians(pitch_grad), np.radians(-yaw_grad)
+    rx = np.array([[1, 0, 0], [0, np.cos(p), -np.sin(p)], [0, np.sin(p), np.cos(p)]])
+    rz = np.array([[np.cos(y), -np.sin(y), 0], [np.sin(y), np.cos(y), 0], [0, 0, 1]])
+    return rz @ rx @ R0
+
+
+def szene(hoehe: int) -> np.ndarray:
+    """Panorama mit sanftem Himmelsverlauf, farbigen Flächen und einer sehr hellen „Sonne“."""
+    w = richtungen(hoehe)
+    himmel = 0.2 + 0.8 * np.clip(w[..., 2], 0, 1)
+    bild = np.stack([himmel * 0.6, himmel * 0.8, himmel], axis=-1)
+    bild[..., 0] += 0.5 * (np.sin(4 * np.arctan2(w[..., 0], w[..., 1])) > 0.5)  # rote Streifen am Horizont
+    sonne = np.arccos(np.clip(w @ np.array([0.3, 0.5, 0.81]) / np.linalg.norm([0.3, 0.5, 0.81]), -1, 1)) < 0.05
+    bild[sonne] = 2000.0
+    return bild.astype(np.float32)
+
+
+def aufnehmen(gt: np.ndarray, kamera: Kamera, r: np.ndarray, faktor: float) -> np.ndarray:
+    """Lochkamera-Bild der Szene, belichtet und bei 1 gesättigt (wie der Sensor)."""
+    import cv2
+
+    u, v = np.meshgrid(np.arange(kamera.breite) + 0.5, np.arange(kamera.hoehe) + 0.5)
+    strahl = np.stack([(u - kamera.breite / 2) / kamera.fx, -(v - kamera.hoehe / 2) / kamera.fy, -np.ones_like(u)], -1)
+    strahl /= np.linalg.norm(strahl, axis=-1, keepdims=True)
+    welt = strahl @ r.T
+    h = gt.shape[0]
+    az = np.arctan2(welt[..., 0], welt[..., 1])
+    hw = np.arcsin(np.clip(welt[..., 2], -1, 1))
+    mx = ((az / (2 * np.pi) + 0.5) * 2 * h - 0.5).astype(np.float32)
+    my = ((0.5 - hw / np.pi) * h - 0.5).astype(np.float32)
+    bild = cv2.remap(gt, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
+    return np.clip(bild * faktor, 0, 1).astype(np.float32)
+
+
+def test_quaternion():
+    assert np.allclose(quaternion_zu_matrix((1, 0, 0, 0)), np.eye(3))
+    # 90° um z: x → y
+    r = quaternion_zu_matrix((np.cos(np.pi / 4), 0, 0, np.sin(np.pi / 4)))
+    assert np.allclose(r @ [1, 0, 0], [0, 1, 0])
+
+
+def test_merge_linear_und_clip():
+    wahr = np.array([[[0.01, 0.5, 30.0]]], dtype=np.float32) * np.ones((4, 4, 1), np.float32)
+    reihe = [Belichtung(np.clip(wahr * f, 0, 1), zeit_s=f, iso=100) for f in (0.01, 0.1, 1.0, 10.0)]
+    hdr, clip = zusammenfuehren(reihe)
+    assert np.allclose(hdr, wahr, rtol=0.02)
+    assert not clip.any()
+    # Sonne: auch in der kürzesten Belichtung gesättigt → Maske, Wert = Untergrenze
+    hell = np.full((2, 2, 3), 1000.0, np.float32)
+    hdr2, clip2 = zusammenfuehren([Belichtung(np.clip(hell * f, 0, 1), f, 100) for f in (0.01, 0.1)])
+    assert clip2.all() and np.allclose(hdr2, 100.0)
+
+
+def test_panorama_aus_aufnahmen():
+    hoehe = 128
+    gt = szene(hoehe)
+    kamera = Kamera(breite=160, hoehe=120, hfov_grad=100, vfov_grad=80)
+    positionen = []
+    for pitch, schritte in ((0, 6), (45, 4), (-45, 4), (90, 1)):
+        for i in range(schritte):
+            r = lage(360 / schritte * i, pitch)
+            reihe = [Belichtung(aufnehmen(gt, kamera, r, f), zeit_s=f / 4, iso=400) for f in (0.0005, 0.02, 0.5, 4.0)]
+            hdr, clip = zusammenfuehren(reihe)
+            positionen.append(Position(hdr, r, kamera, clip))
+    bild, maske, abdeckung = panorama(positionen, hoehe)
+    assert bild.shape == (hoehe, 2 * hoehe, 3)
+    bewertbar = (abdeckung > 0.5) & (gt.max(axis=2) < 100)
+    # Ränder der Interpolation abziehen: mittlere relative Abweichung unter 3 %
+    fehler = np.abs(bild - gt)[bewertbar] / np.maximum(gt[bewertbar], 0.05)
+    assert np.median(fehler) < 0.03, np.median(fehler)
+    # Sonne wird als gesättigt markiert
+    assert maske[gt.max(axis=2) > 100].mean() > 0.5
+    # Nadir ohne Aufnahme bleibt ein erkennbares Loch
+    assert (abdeckung[-3:, :] == 0).all()
+
+
+def test_exr_hin_und_zurueck(tmp_path):
+    bild = np.random.default_rng(1).random((8, 16, 3)).astype(np.float32) * 100
+    maske = np.zeros((8, 16), np.float32)
+    maske[2, 3] = 1
+    exr.schreiben(tmp_path / "x.exr", bild, {"clip": maske}, {"stage_ingest": "test"})
+    rgb, rest = exr.lesen(tmp_path / "x.exr")
+    assert np.array_equal(rgb, bild)
+    assert np.array_equal(rest["clip.Y"], maske)
+    assert not (tmp_path / "x.exr.teil").exists()
+
+
+def matrix_zu_quaternion(r: np.ndarray) -> list[float]:
+    w = np.sqrt(max(0.0, 1 + r[0, 0] + r[1, 1] + r[2, 2])) / 2
+    x = np.copysign(np.sqrt(max(0.0, 1 + r[0, 0] - r[1, 1] - r[2, 2])) / 2, r[2, 1] - r[1, 2])
+    y = np.copysign(np.sqrt(max(0.0, 1 - r[0, 0] + r[1, 1] - r[2, 2])) / 2, r[0, 2] - r[2, 0])
+    z = np.copysign(np.sqrt(max(0.0, 1 - r[0, 0] - r[1, 1] + r[2, 2])) / 2, r[1, 0] - r[0, 1])
+    return [w, x, y, z]
+
+
+def test_aufnahme_von_ordner_bis_exr(tmp_path):
+    """Wie vom Plate Assistant: metadata.json + Bilder je Position und EV; Befehl `verarbeiten` schreibt EXR + JPG."""
+    import json
+
+    from hdri_dienst.__main__ import main
+
+    gt = szene(128)
+    kamera = Kamera(breite=120, hoehe=160, hfov_grad=80, vfov_grad=100)  # Hochformat
+    frames = []
+    position = 0
+    for pitch, schritte in ((0, 6), (45, 4), (-45, 4), (90, 1)):
+        for i in range(schritte):
+            r = lage(360 / schritte * i, pitch)
+            assert np.allclose(quaternion_zu_matrix(matrix_zu_quaternion(r)), r)
+            for ev, f in ((-4, 0.002), (0, 0.05), (4, 0.8)):
+                name = f"p{position}e{ev}"
+                np.save(tmp_path / f"{name}.npy", aufnehmen(gt, kamera, r, f))
+                frames.append(
+                    {"id": name, "position": position, "ev": ev, "lage_quaternion": matrix_zu_quaternion(r),
+                     "belichtung_s": f, "iso": 100, "pfad": f"h1/{name}.npy"}
+                )
+            position += 1
+    meta = {"format_version": 1, "hdri": {"id": "h1", "format": "dng", "hfov_grad": 80, "vfov_grad": 100}, "frames": frames}
+    (tmp_path / "metadata.json").write_text(json.dumps(meta))
+    assert main(["verarbeiten", str(tmp_path), "--hoehe", "128"]) == 0
+    bild, rest = exr.lesen(tmp_path / "h1_gemessen.exr")
+    assert bild.shape == (128, 256, 3) and "clip.Y" in rest and "abdeckung.Y" in rest
+    assert (tmp_path / "h1_gemessen.jpg").exists()
+    bewertbar = (rest["abdeckung.Y"] > 0.5) & (gt.max(axis=2) < 100)
+    fehler = np.abs(bild - gt)[bewertbar] / np.maximum(gt[bewertbar], 0.05)
+    assert np.median(fehler) < 0.03
+
+
+def test_heic_wird_abgelehnt(tmp_path):
+    import json
+
+    from hdri_dienst.aufnahme import AufnahmeFehler, laden
+
+    (tmp_path / "metadata.json").write_text(json.dumps({"format_version": 1, "hdri": {"format": "heic"}, "frames": [{}]}))
+    with pytest.raises(AufnahmeFehler, match="nur DNG"):
+        laden(tmp_path)
