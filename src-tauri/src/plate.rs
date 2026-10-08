@@ -103,6 +103,9 @@ pub struct DrehKurz {
     pub projekt_id: Option<String>,
     /// Alter Projektname als Text (bleibt, bis alle umgestellt sind).
     pub produktion: String,
+    /// Fester Kurzname des Drehorts (ab Migration 0017): Ordnername und Slate-Präfix (`RHEINUFER-03`).
+    #[serde(default)]
+    pub kurzname: Option<String>,
 }
 
 /// Passwort im Schlüsselbund ablegen (überschreibt ein altes).
@@ -193,9 +196,12 @@ impl Plate {
     /// Drehorte der letzten `tage` Tage (ohne gelöschte), neueste zuerst. Ohne `projekt_id` (vor 0009) geht es trotzdem.
     pub fn drehs(&self, z: &Zugang, tage: i64) -> Result<Vec<DrehKurz>, String> {
         let ab = (chrono::Utc::now() - chrono::Duration::days(tage)).format("%Y-%m-%d");
-        let basis = format!("dreh?geloescht=eq.false&datum=gte.{ab}&order=datum.desc,name.asc");
+        // Drehorte ohne Datum (ab Stufe C freiwillig) gehören immer dazu.
+        let basis =
+            format!("dreh?geloescht=eq.false&or=(datum.gte.{ab},datum.is.null)&order=datum.desc.nullsfirst,name.asc");
         let v = self
-            .lesen(z, &format!("{basis}&select=id,name,datum,produktion,projekt_id"))
+            .lesen(z, &format!("{basis}&select=id,name,datum,produktion,projekt_id,kurzname"))
+            .or_else(|_| self.lesen(z, &format!("{basis}&select=id,name,datum,produktion,projekt_id")))
             .or_else(|_| self.lesen(z, &format!("{basis}&select=id,name,datum,produktion")))?;
         Ok(drehs_aus(&v))
     }
@@ -468,6 +474,7 @@ fn drehs_aus(v: &Value) -> Vec<DrehKurz> {
             datum: text(&d["datum"]),
             projekt_id: d["projekt_id"].as_str().map(str::to_owned),
             produktion: text(&d["produktion"]),
+            kurzname: text_oder_nichts(&d["kurzname"]),
         })
         .collect()
 }

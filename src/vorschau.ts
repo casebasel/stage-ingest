@@ -133,9 +133,9 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
   kartenziele: (a) => {
     const quelle = String(a.quelle);
     const karte = quelle.split("/").filter(Boolean).pop() ?? "Karte";
-    const d = a.dreh as { projekt: string; kurzname?: string | null; datum: string; name: string } | null;
+    const d = a.dreh as { projekt: string; kurzname?: string | null; datum: string; name: string; ortKurzname?: string | null } | null;
     return (a.basis as string[]).map((b) =>
-      d ? `${b}/${d.kurzname || kurz(d.projekt) || "OHNE_PROJEKT"}/${d.datum}_${d.name}/01_KAMERA/${karte}` : `${b}/${karte}`,
+      d ? `${b}/${d.kurzname || kurz(d.projekt) || "OHNE_PROJEKT"}/${d.datum}_${d.ortKurzname || d.name}/01_KAMERA/${karte}` : `${b}/${karte}`,
     );
   },
   vorab_pruefen: (a) => {
@@ -179,7 +179,7 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
   },
   plate_projekte: () => [projekt, { id: "projekt-moevenpick", name: "Mövenpick Spot", kurzname: "MOEVENPICK", aktiv: false }],
   plate_drehs: () => [
-    { id: "d1", name: "Rheinufer", datum: "2026-10-28", projektId: projekt.id, produktion: "" },
+    { id: "d1", name: "Rheinufer", datum: "2026-10-28", projektId: projekt.id, produktion: "", kurzname: "RHEINUFER" },
     { id: "d2", name: "Münsterplatz", datum: "2026-10-28", projektId: projekt.id, produktion: "" },
   ],
   plate_soll: () => [],

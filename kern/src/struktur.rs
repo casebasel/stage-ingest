@@ -31,6 +31,10 @@ pub struct Dreh {
     /// `JJJJ-MM-TT`
     pub datum: String,
     pub name: String,
+    /// Fester Kurzname des Drehorts (`dreh.kurzname`, Systemkarte 237050d, ab Migration 0017, z. B. `RHEINUFER`,
+    /// `STUDIO`). Er ist der Ordnername; ohne ihn gilt wie bisher `name`.
+    #[serde(default)]
+    pub ort_kurzname: Option<String>,
 }
 
 /// Macht einen Namen für Ordner auf exFAT, NTFS, APFS und SMB tauglich: verbotene Zeichen weg,
@@ -92,10 +96,11 @@ pub fn kurzname(projekt: &str) -> String {
     kurzname_vorschlag(projekt).unwrap_or_else(|| "OHNE_PROJEKT".into())
 }
 
-/// Ordner des Drehs: `<basis>/<KURZNAME>/<Datum>_<Dreh>`.
+/// Ordner des Drehs: `<basis>/<KURZNAME>/<Datum>_<DREHORT-KURZNAME>` (ohne festen Drehort-Kurznamen: Name des Drehorts).
 pub fn drehordner(basis: &Path, dreh: &Dreh) -> PathBuf {
     let kurz = dreh.kurzname.clone().filter(|k| !k.is_empty()).unwrap_or_else(|| kurzname(&dreh.projekt));
-    basis.join(ordnername(&kurz)).join(format!("{}_{}", ordnername(&dreh.datum), ordnername(&dreh.name)))
+    let ort = dreh.ort_kurzname.as_deref().filter(|k| !k.trim().is_empty()).unwrap_or(&dreh.name);
+    basis.join(ordnername(&kurz)).join(format!("{}_{}", ordnername(&dreh.datum), ordnername(ort)))
 }
 
 /// Zielordner einer Karte im Dreh: `<Dreh>/01_KAMERA/<Karte>`.
@@ -165,12 +170,24 @@ mod tests {
 
     #[test]
     fn struktur_und_bericht() {
-        let d =
-            Dreh { projekt: "Happy End".into(), kurzname: None, datum: "2026-10-28".into(), name: "Rheinufer".into() };
+        let mut d = Dreh {
+            projekt: "Happy End".into(),
+            kurzname: None,
+            datum: "2026-10-28".into(),
+            name: "Rheinufer".into(),
+            ort_kurzname: None,
+        };
         let z = kartenziel(Path::new("/nas/Footage"), &d, "A001R132");
         assert_eq!(z, Path::new("/nas/Footage/HAPPY_END/2026-10-28_Rheinufer/01_KAMERA/A001R132"));
         assert_eq!(berichtordner(&z), Path::new("/nas/Footage/HAPPY_END/2026-10-28_Rheinufer/04_BERICHTE"));
         assert_eq!(metadatenordner(&z), Path::new("/nas/Footage/HAPPY_END/2026-10-28_Rheinufer/05_METADATEN"));
+        // Mit festem Drehort-Kurznamen (ab 0017) heisst der Ordner danach, auch wenn der Name sich ändert.
+        d.ort_kurzname = Some("RHEINUFER".into());
+        d.name = "Rheinufer Kleinbasel".into();
+        assert_eq!(
+            kartenziel(Path::new("/nas/Footage"), &d, "A001R132"),
+            Path::new("/nas/Footage/HAPPY_END/2026-10-28_RHEINUFER/01_KAMERA/A001R132")
+        );
         // Ohne Struktur bleibt der Bericht neben dem Kartenordner.
         assert_eq!(berichtordner(Path::new("/ssd/A001R132")), Path::new("/ssd"));
     }

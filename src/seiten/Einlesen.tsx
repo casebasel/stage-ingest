@@ -413,7 +413,7 @@ function Auftrag({ pflicht, zurEinrichtung, laufwerke }: { pflicht: boolean; zur
         <p className="ablage">
           {lauf.dreh ? (
             <>
-              Ablage <span className="zahl">{lauf.dreh.kurzname ?? kurz(lauf.dreh.projekt)}/{lauf.dreh.datum}_{lauf.dreh.name}/01_KAMERA/{q?.name ?? "…"}</span>
+              Ablage <span className="zahl">{lauf.dreh.kurzname ?? kurz(lauf.dreh.projekt)}/{lauf.dreh.datum}_{lauf.dreh.ortKurzname || lauf.dreh.name}/01_KAMERA/{q?.name ?? "…"}</span>
             </>
           ) : (
             "Ohne Projekt und Drehort kommt die Karte direkt in den Zielordner."

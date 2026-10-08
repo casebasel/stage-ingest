@@ -36,7 +36,15 @@ export const ARTEN: [string, string][] = [
   ["test", "Studiotest / R&D"],
   ["sonstiges", "Sonstiges"],
 ];
-export type DrehKurz = { id: string; name: string; datum: string; projektId: string | null; produktion: string };
+export type DrehKurz = {
+  id: string;
+  name: string;
+  datum: string;
+  projektId: string | null;
+  produktion: string;
+  /** Fester Kurzname des Drehorts (ab Migration 0017): Ordnername. */
+  kurzname?: string | null;
+};
 
 export const KURZNAME = /^[A-Z0-9]+(_[A-Z0-9]+)*$/;
 

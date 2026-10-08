@@ -94,9 +94,15 @@ function useLaufHalten() {
 
   const dreh: Dreh | null =
     projektText.trim() && drehName.trim()
-      ? { projekt: projektText.trim(), kurzname: paProjekt?.kurzname ?? null, datum: drehDatum, name: drehName.trim() }
+      ? {
+          projekt: projektText.trim(),
+          kurzname: paProjekt?.kurzname ?? null,
+          datum: drehDatum,
+          name: drehName.trim(),
+          ortKurzname: paDreh?.kurzname ?? null,
+        }
       : null;
-  const drehSchluessel = dreh ? `${dreh.projekt}|${dreh.kurzname}|${dreh.datum}|${dreh.name}` : "";
+  const drehSchluessel = dreh ? `${dreh.projekt}|${dreh.kurzname}|${dreh.datum}|${dreh.name}|${dreh.ortKurzname}` : "";
 
   // Soll-Liste der Stage (im Studio).
   const [soll, setSoll] = useState<{ liste: SollClip[]; fehler: string | null; zeit: number } | null>(null);
