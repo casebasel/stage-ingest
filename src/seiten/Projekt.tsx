@@ -147,6 +147,9 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
           <button
             className="knopf"
             aria-pressed={drehortNeu}
+            // Erst wenn der Server Drehort-Kurznamen kennt (Migration 0017; danach hat jeder Drehort einen).
+            disabled={!konto.drehs.some((d) => d.kurzname)}
+            title={konto.drehs.some((d) => d.kurzname) ? undefined : "Kommt mit der Migration 0017 des Plate Assistant"}
             onClick={() => {
               setDrehortNeu(!drehortNeu);
               setAnlegen(false);

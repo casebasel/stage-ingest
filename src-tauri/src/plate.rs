@@ -391,8 +391,10 @@ impl Plate {
                 "tabelle": "dreh",
                 "datensatz": id,
                 "feld": "_anlegen",
-                "wert": { "name": name.trim(), "kurzname": kurzname, "datum": datum, "projekt_id": projekt.id,
-                          "produktion": projekt.name, "geloescht": false,
+                // Grenzen laut 0017: name ≤ 1000, produktion ≤ 120 Zeichen.
+                "wert": { "name": name.trim().chars().take(1000).collect::<String>(), "kurzname": kurzname, "datum": datum,
+                          "projekt_id": projekt.id, "produktion": projekt.name.chars().take(120).collect::<String>(),
+                          "geloescht": false,
                           "erstellt_am": jetzt.to_rfc3339_opts(chrono::SecondsFormat::Millis, true) },
                 "zeit": jetzt.timestamp_micros(),
             }]
@@ -402,8 +404,12 @@ impl Plate {
             "uebernommen" | "aelter" | "doppelt" => Ok(id),
             e => {
                 let grund = v[0]["grund"].as_str().unwrap_or(e).to_owned();
-                Err(if grund.contains("kurzname") || grund.contains("column") {
-                    format!("Drehort nicht angelegt: {grund}. Fehlt noch die Migration 0017?")
+                // Gründe laut 0017 (plate-assistant supabase/tests/drehort_test.sql).
+                Err(if grund == "kurzname_vergeben" {
+                    format!("{kurzname} ist im Projekt schon bei einem anderen Drehort vergeben. Bitte einen anderen wählen.")
+                } else if grund.contains("Unbekanntes Feld") {
+                    "Die Datenbank kennt Drehort-Kurznamen noch nicht (Migration 0017 fehlt). Bitte noch nicht anlegen."
+                        .into()
                 } else {
                     format!("Drehort nicht angelegt: {grund}")
                 })
