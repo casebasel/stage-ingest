@@ -188,3 +188,19 @@ def test_opcodes_des_iphone():
     gitter[50, 50] = 1
     e = opcodes.verzerrung_anwenden(gitter, verz)
     assert e[50, 50, 0] > 0.5
+
+
+def test_zweite_ausloesung_wird_ausgerichtet():
+    """Ab Build 12 hat jede Auslösung ihre Lage: ein um 1,5° verdrehtes Bild wird auf die erste Lage gedreht."""
+    from hdri_dienst.aufnahme import ausrichten
+
+    gt = szene(512)
+    kamera = Kamera(breite=300, hoehe=400, hfov_grad=80, vfov_grad=100)
+    r1, r2 = lage(10, 20), lage(11.2, 20.9)
+    erstes = aufnehmen(gt, kamera, r1, 0.3)
+    zweites = aufnehmen(gt, kamera, r2, 0.3)
+    gedreht = ausrichten(zweites, kamera, r2, r1)
+    innen = (slice(60, 340), slice(60, 240))
+    vorher = np.abs(zweites[innen] - erstes[innen]).mean()
+    nachher = np.abs(gedreht[innen] - erstes[innen]).mean()
+    assert nachher < vorher * 0.3, (vorher, nachher)

@@ -83,18 +83,6 @@ class Rohbild:
     vignette: object | None = None
 
 
-def korrigieren(bild: np.ndarray, roh: Rohbild) -> np.ndarray:
-    """Objektivkorrektur (Randabdunklung, dann Entzerrung) und Drehung in die Anzeige-Ausrichtung."""
-    from . import opcodes
-
-    if roh.vignette is not None:
-        bild = opcodes.vignette_anwenden(bild, roh.vignette)
-    if roh.verzerrung is not None:
-        bild = opcodes.verzerrung_anwenden(bild, roh.verzerrung)
-    k = {0: 0, 3: 2, 5: 1, 6: -1}.get(roh.drehung, 0)
-    return np.ascontiguousarray(np.rot90(bild, k=k)) if k else bild
-
-
 def roh_laden(pfad: Path, halb: bool = False) -> Rohbild:
     """DNG linear entwickeln (keine Gamma-Kurve, keine Aufhellung, Weissabgleich der Aufnahme), in Sensor-Ausrichtung,
     dazu die Korrekturen aus `OpcodeList3`. `.npy` (Tests): unverändert, ohne Korrekturen."""
@@ -124,61 +112,78 @@ def roh_laden(pfad: Path, halb: bool = False) -> Rohbild:
     return Rohbild(rgb.astype(np.float32) / 65535.0, drehung, verz, vign)
 
 
-def bild_laden(pfad: Path, halb: bool = False) -> np.ndarray:
-    """Lineares RGB (float32, 0..1, 1 = Weisspunkt) in Anzeige-Ausrichtung (Orientation-Tag angewendet).
+def geometrie(bild: np.ndarray, roh: Rohbild) -> np.ndarray:
+    """Nur Geometrie: Entzerrung und Drehung in die Anzeige-Ausrichtung (keine Helligkeit)."""
+    from . import opcodes
 
-    DNG über LibRaw: keine Gamma-Kurve, keine automatische Aufhellung, Weissabgleich der Aufnahme (fest je Session).
-    `.npy` (für Tests): wird unverändert geladen.
-    """
-    pfad = Path(pfad)
-    if pfad.suffix.lower() == ".npy":
-        return np.load(pfad).astype(np.float32)
-    import rawpy
+    if roh.verzerrung is not None:
+        bild = opcodes.verzerrung_anwenden(bild, roh.verzerrung)
+    k = {0: 0, 3: 2, 5: 1, 6: -1}.get(roh.drehung, 0)
+    return np.ascontiguousarray(np.rot90(bild, k=k)) if k else bild
 
-    with rawpy.imread(str(pfad)) as raw:
-        rgb = raw.postprocess(
-            gamma=(1, 1),
-            no_auto_bright=True,
-            output_bps=16,
-            use_camera_wb=True,
-            half_size=halb,
-            output_color=rawpy.ColorSpace.sRGB,  # Primärfarben sRGB/Rec.709, linear
-        )
-    return rgb.astype(np.float32) / 65535.0
+
+def _k(kamera: Kamera) -> np.ndarray:
+    """Kameramatrix für unsere Konvention (x rechts, y oben, Blick −z): [u·w, v·w, w] = K · v_kamera."""
+    return np.array(
+        [[kamera.fx, 0.0, -kamera.breite / 2], [0.0, -kamera.fy, -kamera.hoehe / 2], [0.0, 0.0, -1.0]]
+    )
+
+
+def ausrichten(bild: np.ndarray, kamera: Kamera, lage_bild: np.ndarray, lage_ziel: np.ndarray) -> np.ndarray:
+    """Bild einer zweiten Auslösung auf die Lage der ersten drehen (reine Drehung: Homographie K·Rbᵀ·Rz·K⁻¹)."""
+    import cv2
+
+    if np.allclose(lage_bild, lage_ziel, atol=1e-6):
+        return bild
+    k = _k(kamera)
+    h = k @ lage_bild.T @ lage_ziel @ np.linalg.inv(k)  # Zielpixel → Pixel im Bild
+    return cv2.warpPerspective(
+        bild, h, (bild.shape[1], bild.shape[0]), flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP, borderMode=cv2.BORDER_CONSTANT
+    )
 
 
 def positionen_zusammenfuehren(a: Aufnahme, halb: bool = False, melden=None) -> list[Position]:
-    """Je Position die Belichtungsreihe zusammenführen und mit Lage und Kamera versehen."""
+    """Je Position die Belichtungsreihe zusammenführen und mit Lage und Kamera versehen.
+
+    Jedes Bild wird zuerst entzerrt und gedreht (Geometrie), dann auf die Lage des ersten Bildes der Position
+    ausgerichtet: Ab Build 12 trägt jede Auslösung ihre eigene Lage (bis ~1,5° Unterschied innerhalb einer
+    Position). Die Randabdunklung wird erst nach dem Zusammenführen korrigiert, damit Sättigung und Gewichte für
+    die Rohwerte des Sensors gelten; ihre Verstärkung geht dafür durch dieselbe Geometrie.
+    """
+    from . import opcodes
+
     h = a.hdri
     gruppen = a.positionen()
     if not any((a.ordner / Path(f["pfad"]).name).exists() for f in a.frames):
         raise AufnahmeFehler("Keines der Bilder ist da")
     aus: list[Position] = []
     for n, (pos, frames) in enumerate(gruppen.items()):
-        reihe = []
         vorhanden = [f for f in frames if (a.ordner / Path(f["pfad"]).name).exists()]
         if not vorhanden:
             if melden:
                 melden(f"Position {pos}: keine Bilder da, ausgelassen", (n + 1) / len(gruppen))
             continue
-        roh = None
+        reihe, kamera, lage_ziel, roh = [], None, None, None
         for f in vorhanden:
-            roh = roh_laden(datei(a, f), halb=halb)
-            bild = roh.bild
             zeit, iso = f.get("belichtung_s"), f.get("iso")
             if not zeit or not iso:
                 raise AufnahmeFehler(f"Position {pos}: Belichtungszeit oder ISO fehlt")
-            reihe.append(Belichtung(bild, float(zeit), float(iso)))
+            roh = roh_laden(datei(a, f), halb=halb)
+            bild = geometrie(roh.bild, roh)
+            lage = quaternion_zu_matrix(tuple(f["lage_quaternion"]))
+            if kamera is None:
+                hoehe, breite = bild.shape[:2]
+                # Sichtfeld: hfov = kurze Seite, vfov = lange Seite (Hochformat). Liegt das Bild quer, tauschen.
+                kurz, lang = float(h["hfov_grad"]), float(h["vfov_grad"])
+                hfov, vfov = (kurz, lang) if breite <= hoehe else (lang, kurz)
+                kamera, lage_ziel = Kamera(breite, hoehe, hfov, vfov), lage
+            reihe.append(Belichtung(ausrichten(bild, kamera, lage, lage_ziel), float(zeit), float(iso)))
         hdr, clip = zusammenfuehren(reihe)
-        # Objektivkorrektur erst nach dem Zusammenführen: Sättigung und Gewichte gelten für die Rohwerte des Sensors.
-        hdr = korrigieren(hdr, roh)
-        clip = korrigieren(clip.astype(np.float32), Rohbild(clip, roh.drehung, roh.verzerrung, None)) > 0.5
-        hoehe, breite = hdr.shape[:2]
-        # Sichtfeld: hfov = kurze Seite, vfov = lange Seite (Hochformat). Liegt das Bild quer, tauschen.
-        kurz, lang = float(h["hfov_grad"]), float(h["vfov_grad"])
-        hfov, vfov = (kurz, lang) if breite <= hoehe else (lang, kurz)
-        q = vorhanden[0]["lage_quaternion"]
-        aus.append(Position(hdr, quaternion_zu_matrix(tuple(q)), Kamera(breite, hoehe, hfov, vfov), clip))
+        if roh.vignette is not None:
+            eins = np.ones(roh.bild.shape[:2] + (1,), np.float32)
+            verstaerkung = geometrie(opcodes.vignette_anwenden(eins, roh.vignette)[..., 0], roh)
+            hdr = (hdr * verstaerkung[..., None]).astype(np.float32)
+        aus.append(Position(hdr, lage_ziel, kamera, clip))
         if melden:
             melden(f"Position {pos} zusammengeführt", (n + 1) / len(gruppen))
     return aus
