@@ -166,6 +166,15 @@ def laufen(datei: Path, wurzel: Path, takt_s: int, halb: bool) -> int:
                 hid = a["id"]
                 ziel = wurzel / "ergebnisse" / hid
                 if (ziel / "bericht.json").exists():
+                    # Schon gerechnet (z. B. bevor es hdri_job gab): den Job nachtragen, damit die App es sieht.
+                    b = json.loads((ziel / "bericht.json").read_text(encoding="utf-8"))
+                    if b.get("exr_gemessen") and jobs_da:
+                        job(hid, {"zustand": "processed", "stufe": "fertig", "fortschritt": 1.0, "rechner": "Ada",
+                                  "fertig_am": b.get("fertig"),
+                                  "ergebnis": {"exr_gemessen": f"{hid}/{b['exr_gemessen']}", "vorschau": f"{hid}/{b['vorschau']}"}},
+                            anlegen=True)
+                        if jobs_da:
+                            log(f"{hid}: Job nachgetragen (processed)")
                     continue
                 if a.get("format") != "dng":
                     log(f"{hid}: Format {a.get('format')}, nicht messbar, übersprungen")
