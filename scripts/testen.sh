@@ -27,6 +27,17 @@ if [ ! -f node_modules/.stand ] || ! cmp -s package-lock.json node_modules/.stan
   cp package-lock.json node_modules/.stand
 fi
 
+# Vorbelegung der Anmeldung (wie im Release die GitHub-Variablen): nur lokal auf dem Mac, nie im Repo.
+VORBELEGUNG="$HOME/.config/stage-ingest/vorbelegung.env"
+if [ -f "$VORBELEGUNG" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$VORBELEGUNG"
+  set +a
+else
+  echo "Hinweis: $VORBELEGUNG fehlt, die Anmeldung fragt dann nach Adresse und Schlüssel (docs/TESTEN.md)."
+fi
+
 COMMIT="$(git rev-parse --short HEAD)"
 echo "› Bauen (Test $COMMIT); beim ersten Mal einige Minuten, danach meist 1–3"
 VITE_TESTBAU="$COMMIT" npx tauri build --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}'

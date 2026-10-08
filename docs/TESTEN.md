@@ -15,6 +15,15 @@ Läuft die App, bricht das Skript ab: vorher sicherstellen, dass nichts kopiert 
 3. Node 22: Installer von nodejs.org (LTS) oder `brew install node@22`
 4. Das Repo holen: `git clone https://github.com/casebasel/stage-ingest.git ~/stage-ingest`
 
+5. Vorbelegung der Anmeldung (sonst fragt der Testbau nach Adresse und Schlüssel): die Werte der GitHub-Variablen
+   `SUPABASE_ADRESSE` und `SUPABASE_ANON_KEY` (Repo → Settings → Secrets and variables → Actions → Variables) in
+   `~/.config/stage-ingest/vorbelegung.env` eintragen, nur auf dem Mac:
+
+   ```
+   VITE_SUPABASE_ADRESSE=<Wert von SUPABASE_ADRESSE>
+   VITE_SUPABASE_ANON_KEY=<Wert von SUPABASE_ANON_KEY>
+   ```
+
 ## Testen
 
 ```bash
