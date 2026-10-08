@@ -107,6 +107,9 @@ pub struct Projekt {
     pub regie: Option<String>,
     #[serde(default)]
     pub dop: Option<String>,
+    /// Unabhängige Kopien vor der Freigabe (Migration 0025, 1..9; leer = Standard 2), gilt in allen drei Apps.
+    #[serde(default)]
+    pub kopien: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -220,7 +223,9 @@ impl Plate {
         // Mit den Kameraeinstellungen (ab Migration 0016); vorher ohne diese Spalten.
         let mit = "projekt?select=id,name,kurzname,aktiv,fps,sensor_fps,sensor_modus,codec,aufloesung,aufloesung_px,art,firma,regie,dop&geloescht=eq.false&order=name.asc";
         let ohne = "projekt?select=id,name,kurzname,aktiv&geloescht=eq.false&order=name.asc";
-        match self.lesen(z, mit).or_else(|_| self.lesen(z, ohne)) {
+        // Mit Kopienzahl (ab 0025); ältere Server ohne diese Spalte.
+        let mit_kopien = mit.replace("dop&", "dop,kopien&");
+        match self.lesen(z, &mit_kopien).or_else(|_| self.lesen(z, mit)).or_else(|_| self.lesen(z, ohne)) {
             Ok(v) => Ok(projekte_aus(&v)),
             Err(e) if e.contains(" 404") || e.contains("PGRST205") || e.contains("does not exist") => Ok(vec![]),
             Err(e) => Err(e),
@@ -385,6 +390,7 @@ impl Plate {
             "codec",
             "aufloesung",
             "aufloesung_px",
+            "kopien",
         ];
         if let Some(f) = felder.keys().find(|f| !ERLAUBT.contains(&f.as_str())) {
             return Err(format!("Feld „{f}“ wird hier nicht geändert"));
@@ -401,6 +407,10 @@ impl Plate {
                 ("fps" | "sensor_fps", Value::Null) => {}
                 ("fps" | "sensor_fps", Value::Number(n)) if n.as_f64().is_some_and(|x| x > 0.0) => {}
                 ("fps" | "sensor_fps", _) => return Err(format!("{f}: eine Zahl grösser als 0 oder leer")),
+                // 0025: JSON-Zahl 1..9 (Text „3“ lehnt der Server ab), leer = Standard 2.
+                ("kopien", Value::Null) => {}
+                ("kopien", Value::Number(n)) if n.as_i64().is_some_and(|k| (1..=9).contains(&k)) => {}
+                ("kopien", _) => return Err("Kopien: eine ganze Zahl von 1 bis 9 oder leer".into()),
                 ("aufloesung_px", Value::String(t)) if !pixel_gueltig(t) => {
                     return Err("Auflösung in Pixeln als Breite x Höhe, z. B. 3840x2160".into())
                 }
@@ -645,6 +655,7 @@ fn projekte_aus(v: &Value) -> Vec<Projekt> {
             firma: text_oder_nichts(&p["firma"]),
             regie: text_oder_nichts(&p["regie"]),
             dop: text_oder_nichts(&p["dop"]),
+            kopien: p["kopien"].as_i64().filter(|k| (1..=9).contains(k)),
         })
         .collect()
 }
@@ -829,6 +840,11 @@ mod tests {
         let p =
             projekte_aus(&json!([{"id":"projekt-happy_end","name":"Happy End","kurzname":"HAPPY_END","aktiv":true}]));
         assert_eq!(p[0].kurzname, "HAPPY_END");
+        assert_eq!(p[0].kopien, None, "ohne Wert gilt der Standard 2");
+        let k = projekte_aus(
+            &json!([{"id":"a","name":"A","kurzname":"A","kopien":3}, {"id":"b","name":"B","kurzname":"B","kopien":12}]),
+        );
+        assert_eq!((k[0].kopien, k[1].kopien), (Some(3), None), "nur 1..9");
         let d = drehs_aus(&json!([{"id":"01D","name":"Rheinufer","datum":"2026-10-28","produktion":"Happy End"}]));
         assert_eq!(d[0].projekt_id, None);
         assert_eq!(d[0].produktion, "Happy End");

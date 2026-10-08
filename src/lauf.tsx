@@ -2,6 +2,7 @@
 // und der Kopf überall zeigt, was gerade läuft.
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { message } from "@tauri-apps/plugin-dialog";
 import {
   abbrechen as kernAbbrechen,
   aufFortschritt,
@@ -96,8 +97,22 @@ function useLaufHalten() {
   // Das gewählte Projekt gilt für alle Seiten und überlebt Seitenwechsel und Neustart (gemerkt wird die ID).
   useEffect(() => {
     if (paProjekt) merken("paProjekt", paProjekt.id);
-    e.setAktivesProjekt(paProjekt?.id ?? null);
-  }, [paProjekt?.id]);
+    e.setAktivesProjekt(paProjekt?.id ?? null, paProjekt?.kopien ?? null);
+  }, [paProjekt?.id, paProjekt?.kopien]);
+  // Eine geänderte Kopienzahl gilt für das Projekt in allen drei Apps (projekt.kopien, Migration 0025).
+  useEffect(() => {
+    const p = paProjekt;
+    e.kopienSpeichern.current =
+      p && konto.verbindung === "verbunden"
+        ? (n: number) =>
+            konto.projektAendern(p.id, { kopien: n }).catch((err) =>
+              message(`Kopienzahl nicht im Projekt gespeichert (gilt nur auf diesem Rechner):\n${String(err)}`, {
+                title: "Kopien vor der Freigabe",
+                kind: "warning",
+              }).catch(() => {}),
+            )
+        : null;
+  }, [paProjekt?.id, konto.verbindung]);
   useEffect(() => {
     const id = paProjekt?.id ?? gemerkt("paProjekt", "");
     const p = id ? konto.projekte.find((x) => x.id === id) : undefined;

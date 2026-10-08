@@ -7,7 +7,18 @@ import { ARTEN, drehsVon, useKonto, type Projekt } from "./konto";
 import { Feld, Status } from "./teile";
 
 type Werte = Record<
-  "name" | "art" | "firma" | "regie" | "dop" | "fps" | "sensor_fps" | "sensor_modus" | "codec" | "aufloesung" | "aufloesung_px",
+  | "name"
+  | "art"
+  | "firma"
+  | "regie"
+  | "dop"
+  | "fps"
+  | "sensor_fps"
+  | "sensor_modus"
+  | "codec"
+  | "aufloesung"
+  | "aufloesung_px"
+  | "kopien",
   string
 >;
 
@@ -29,6 +40,7 @@ function ausProjekt(p: Projekt): Werte {
     codec: p.codec ?? "",
     aufloesung: p.aufloesung ?? "",
     aufloesung_px: p.aufloesungPx ?? "",
+    kopien: p.kopien == null ? "" : String(p.kopien),
   };
 }
 
@@ -48,6 +60,8 @@ export function ProjektEinstellungen({ projekt, schliessen }: { projekt: Projekt
     // Feldgrenzen der Datenbank (Migration 0016, Systemkarte ee5bc62): Texte höchstens 200 Zeichen.
     const lang = (Object.keys(w) as (keyof Werte)[]).find((k) => w[k].trim().length > 200);
     if (lang) return "Höchstens 200 Zeichen pro Feld.";
+    const k = w.kopien.trim();
+    if (k && !/^[1-9]$/.test(k)) return "Kopien vor der Freigabe: eine Zahl von 1 bis 9 (leer = 2).";
     const px = pixel(w.aufloesung_px);
     if (px && !/^[1-9][0-9]{0,5}x[1-9][0-9]{0,5}$/.test(px)) return "Auflösung in Pixeln als Breite x Höhe, z. B. 3840x2160.";
     return null;
@@ -60,6 +74,8 @@ export function ProjektEinstellungen({ projekt, schliessen }: { projekt: Projekt
     for (const k of geaendert) {
       const t = w[k].trim();
       if (k === "fps" || k === "sensor_fps") felder[k] = t ? Number(t.replace(",", ".")) : null;
+      // Als JSON-Zahl (0025 lehnt Text ab); leer = Standard 2.
+      else if (k === "kopien") felder[k] = t ? Number(t) : null;
       else if (k === "aufloesung_px") felder[k] = pixel(t) || null;
       else felder[k] = t || null;
     }
@@ -76,7 +92,7 @@ export function ProjektEinstellungen({ projekt, schliessen }: { projekt: Projekt
   const eingabe = (k: keyof Werte, label: string, platzhalter = "") => (
     <input
       aria-label={label}
-      className={k === "fps" || k === "sensor_fps" || k === "aufloesung_px" ? "zahl" : ""}
+      className={k === "fps" || k === "sensor_fps" || k === "aufloesung_px" || k === "kopien" ? "zahl" : ""}
       value={w[k]}
       placeholder={platzhalter}
       onChange={(e) => setW({ ...w, [k]: e.target.value })}
@@ -120,6 +136,12 @@ export function ProjektEinstellungen({ projekt, schliessen }: { projekt: Projekt
       <Feld name="Auflösung" hilfe="Name wie in der Kamera.">{eingabe("aufloesung", "Auflösung", "z. B. 4K UHD")}</Feld>
       <Feld name="Auflösung in Pixeln" hilfe="Breite x Höhe; damit prüft der Ingest die Clips.">
         {eingabe("aufloesung_px", "Auflösung in Pixeln", "z. B. 3840x2160")}
+      </Feld>
+      <Feld
+        name="Kopien vor der Freigabe"
+        hilfe="Unabhängige, geprüfte Kopien auf verschiedenen Platten, bevor eine Karte als sicher gilt. Leer = 2; Netflix verlangt 3."
+      >
+        {eingabe("kopien", "Kopien vor der Freigabe", "2")}
       </Feld>
       <div className="knopfreihe einstellungen-knoepfe">
         {stand && <Status ton={stand.ton}>{stand.text}</Status>}

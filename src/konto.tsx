@@ -23,6 +23,8 @@ export type Projekt = {
   firma?: string | null;
   regie?: string | null;
   dop?: string | null;
+  /** Unabhängige Kopien vor der Freigabe (0025, 1..9; leer = 2). */
+  kopien?: number | null;
 };
 
 /** Arten laut Systemkarte; der Server prüft die Liste. */

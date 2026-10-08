@@ -1,7 +1,7 @@
 // Einstellungen pro Rechner (Seite Einrichtung und Ziele beim Einlesen). Nur Bequemlichkeit: fehlt der Speicher,
 // gilt der Standard. Die Freigabe-Schwelle wird nie unter 2 gemerkt: eine abgesenkte Schwelle gilt nur bis zum
 // Neustart und nur nach Bestätigung.
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 
 export function gemerkt<T>(schluessel: string, standard: T): T {
   try {
@@ -37,12 +37,24 @@ function useEinstellungenHalten() {
   const [kopienAllgemein, setKopienAllgemein] = useState(() => Math.min(9, Math.max(1, gemerkt("mindestKopien", 2))));
   useEffect(() => merken("mindestKopien", kopienAllgemein), [kopienAllgemein]);
   const [kopienJeProjekt, setKopienJeProjekt] = useGemerkt<Record<string, number>>("kopienJeProjekt", {});
-  const [aktivesProjekt, setAktivesProjekt] = useState<string | null>(null);
-  const mindestKopien = (aktivesProjekt && kopienJeProjekt[aktivesProjekt]) || kopienAllgemein;
+  const [aktiv, setAktiv] = useState<{ id: string | null; kopien: number | null }>({ id: null, kopien: null });
+  const aktivesProjekt = aktiv.id;
+  const setAktivesProjekt = (id: string | null, kopien: number | null = null) => setAktiv({ id, kopien });
+  // Reihenfolge: Testschwelle 1 (nur dieser Rechner) > Wert des Projekts in der gemeinsamen Datenbank (projekt.kopien,
+  // gilt in allen drei Apps) > früher hier gemerkter Wert des Projekts > allgemeiner Wert.
+  const lokal = aktivesProjekt ? kopienJeProjekt[aktivesProjekt] : undefined;
+  const mindestKopien = lokal === 1 ? 1 : (aktiv.kopien ?? lokal ?? kopienAllgemein);
+  // Vom Projekt-Lauf gesetzt: schreibt eine geänderte Zahl (ab 2) in die gemeinsame Datenbank.
+  const kopienSpeichern = useRef<((n: number) => void) | null>(null);
   const setMindestKopien = (n: number) => {
     const wert = Math.min(9, Math.max(1, n));
-    if (aktivesProjekt) setKopienJeProjekt({ ...kopienJeProjekt, [aktivesProjekt]: wert });
-    else setKopienAllgemein(wert);
+    if (aktivesProjekt) {
+      setKopienJeProjekt({ ...kopienJeProjekt, [aktivesProjekt]: wert });
+      if (wert >= 2) {
+        setAktiv({ id: aktivesProjekt, kopien: wert });
+        kopienSpeichern.current?.(wert);
+      }
+    } else setKopienAllgemein(wert);
   };
   const [stageAdresse, setStageAdresse] = useGemerkt("stageAdresse", "");
   const [artCmd, setArtCmd] = useGemerkt("artCmd", "");
@@ -58,6 +70,7 @@ function useEinstellungenHalten() {
     /** Projekt, für das `mindestKopien` gilt (setzt `lauf` beim Wählen oben links). */
     aktivesProjekt,
     setAktivesProjekt,
+    kopienSpeichern,
     stageAdresse,
     setStageAdresse,
     artCmd,
