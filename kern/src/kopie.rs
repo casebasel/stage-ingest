@@ -24,6 +24,12 @@ use crate::{ohne_cache, Ergebnis, Fehler, BLOCK, TEIL_ENDUNG};
 const NICHT_VON_DER_KAMERA: &[&str] =
     &[".Spotlight-V100", ".fseventsd", ".Trashes", ".TemporaryItems", "System Volume Information", ".DS_Store"];
 
+/// Vom Betriebssystem angelegt (Finder, Explorer, Spotlight), sagt nichts über die Kopie: nie kopiert, im Ziel beim
+/// Anlegen, Nachprüfen und Zurücklesen nicht mitgezählt. Eine Regel für alle Stellen.
+pub fn vom_system(name: &str) -> bool {
+    NICHT_VON_DER_KAMERA.contains(&name) || name.starts_with("._") || name == "Thumbs.db" || name == "desktop.ini"
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Auftrag {
     /// Wurzel der Karte (oder ein Ordner darin).
@@ -324,13 +330,13 @@ pub fn ueberblick_dateien(quelle: &Path) -> Ergebnis<std::collections::BTreeMap<
     Ok(inhalt(quelle)?.1.into_iter().collect())
 }
 
-/// Legt den Zielordner an. Ein bestehender, nicht leerer Ordner wird nie überschrieben.
+/// Legt den Zielordner an. Ein bestehender, nicht leerer Ordner wird nie überschrieben; was nur das Betriebssystem
+/// hineingelegt hat (z. B. `.DS_Store` nach dem Öffnen im Finder), zählt als leer, wie in `zielstand`.
 fn ziel_vorbereiten(ziel: &Path) -> Ergebnis<()> {
     if ziel.exists() {
         let leer = std::fs::read_dir(ziel)
             .map_err(|e| Fehler::ZielSchreiben { pfad: ziel.into(), quelle: e })?
-            .next()
-            .is_none();
+            .all(|e| e.is_ok_and(|e| vom_system(&e.file_name().to_string_lossy())));
         if !leer {
             return Err(Fehler::ZielExistiert(ziel.into()));
         }
@@ -346,13 +352,12 @@ fn inhalt(quelle: &Path) -> Ergebnis<Inhalt> {
     let mut ordner = Vec::new();
     let mut dateien = Vec::new();
     let mut ausgelassen = Vec::new();
-    let gang =
-        walkdir::WalkDir::new(quelle).min_depth(1).follow_links(false).sort_by_file_name().into_iter().filter_entry(
-            |e| {
-                let name = e.file_name().to_string_lossy();
-                !NICHT_VON_DER_KAMERA.contains(&name.as_ref()) && !name.starts_with("._")
-            },
-        );
+    let gang = walkdir::WalkDir::new(quelle)
+        .min_depth(1)
+        .follow_links(false)
+        .sort_by_file_name()
+        .into_iter()
+        .filter_entry(|e| !vom_system(&e.file_name().to_string_lossy()));
     for eintrag in gang {
         let eintrag = eintrag.map_err(|e| Fehler::QuelleLesen {
             pfad: e.path().map(Path::to_path_buf).unwrap_or_else(|| quelle.into()),

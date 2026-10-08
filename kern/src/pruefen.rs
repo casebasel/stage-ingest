@@ -98,11 +98,11 @@ pub fn zurueckpruefen(
 /// Ordner im Ziel ist selbst eine Abweichung: er könnte fremde Dateien verstecken.
 fn zusaetzliche(ordner: &Path, erwartet: &BTreeSet<&str>) -> Vec<Abweichung> {
     let mut aus = Vec::new();
-    let gang = walkdir::WalkDir::new(ordner)
-        .min_depth(1)
-        .sort_by_file_name()
-        .into_iter()
-        .filter_entry(|e| e.depth() != 1 || !EIGENE_ORDNER.contains(&e.file_name().to_string_lossy().as_ref()));
+    let gang = walkdir::WalkDir::new(ordner).min_depth(1).sort_by_file_name().into_iter().filter_entry(|e| {
+        let name = e.file_name().to_string_lossy();
+        // Eigene Ordner und was das Betriebssystem anlegt (Finder öffnet die Kopie: `.DS_Store`) sind nicht fremd.
+        (e.depth() != 1 || !EIGENE_ORDNER.contains(&name.as_ref())) && !crate::kopie::vom_system(&name)
+    });
     for e in gang {
         match e {
             Err(f) => aus.push(Abweichung::Unlesbar {

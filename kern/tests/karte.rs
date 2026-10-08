@@ -37,6 +37,24 @@ fn platten(n: usize) -> Vec<Kennung> {
 }
 
 #[test]
+fn ordner_nur_mit_ds_store_gilt_als_leer_und_finder_spuren_sind_nicht_fremd() {
+    let t = tempfile::tempdir().unwrap();
+    karte(&t.path().join("karte"));
+    // Ziel im Finder angelegt und geöffnet: nur `.DS_Store` darin.
+    let ziel = t.path().join("nas/A001R132");
+    fs::create_dir_all(&ziel).unwrap();
+    fs::write(ziel.join(".DS_Store"), b"finder").unwrap();
+    let auftrag = Auftrag { quelle: t.path().join("karte"), ziele: vec![ziel.clone()], ..Default::default() };
+    let kopie = kopieren(&auftrag, &AtomicBool::new(false), |_| {}).unwrap();
+    assert!(kopie.ziele[0].fehler.is_none(), "{:?}", kopie.ziele[0].fehler);
+    // Finder öffnet die Kopie vor dem Zurücklesen: das ist keine fremde Datei.
+    fs::write(ziel.join("A001R132/.DS_Store"), b"finder").unwrap();
+    fs::write(ziel.join("A001R132/._A001C002_261007_R132.mov"), b"appledouble").unwrap();
+    let urteile = zurueckpruefen(&kopie, false, &AtomicBool::new(false), |_, _| {}).unwrap();
+    assert!(urteile[0].gut(), "{:?}", urteile[0]);
+}
+
+#[test]
 fn karte_an_zwei_ziele_kopieren_und_freigeben() {
     let t = tempfile::tempdir().unwrap();
     karte(&t.path().join("karte"));

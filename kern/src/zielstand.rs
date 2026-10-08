@@ -25,7 +25,7 @@ pub enum Stand {
 
 /// Dateien, die das Betriebssystem in Ordner legt und die nichts über die Kopie aussagen.
 fn unwichtig(name: &str) -> bool {
-    name == ".DS_Store" || name.starts_with("._") || name == "Thumbs.db" || name == "desktop.ini"
+    crate::kopie::vom_system(name)
 }
 
 /// Dateien (relativer Pfad mit `/` → Grösse) unterhalb von `ordner`, ohne die eigenen Ordner des Ingest.
