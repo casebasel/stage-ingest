@@ -1726,3 +1726,32 @@ input[type="checkbox"][role="switch"]:checked::before {
   flex-wrap: wrap;
   gap: 8px;
 }
+
+.kopien-wahl {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  color: var(--text-2);
+  font-size: 12px;
+}
+.kopien-wahl select {
+  height: 26px;
+  font-size: 12px;
+}
+.urteil-grund {
+  max-width: 72ch;
+  color: var(--text);
+}
+
+.ziel-konflikt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+.weniger-frage {
+  display: grid;
+  gap: 8px;
+  max-width: 640px;
+}

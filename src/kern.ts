@@ -5,7 +5,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 export type Pruefsumme = { xxh128: string; md5: string | null };
 
 export type Datei = { pfad: string; groesse: number; geaendert: string; pruefsumme: Pruefsumme };
-export type Ziel = { ordner: string; fehler: string | null };
+export type Ziel = { ordner: string; fehler: string | null; vorhanden?: boolean };
 export type Kopie = { quelle: string; dateien: Datei[]; ordner: string[]; ziele: Ziel[]; beginn: string; ende: string };
 
 export type Abweichung =
@@ -75,6 +75,10 @@ export type KartenAuftrag = {
   plateProjekt?: { id: string; kurzname: string } | null;
   kamera?: { fps: number | null; codec: string | null; aufloesungPx: string | null } | null;
   projektAngaben?: { firma: string | null; regie: string | null; dop: string | null } | null;
+  /** Bestehende, abweichende Zielordner zur Seite legen (umbenennen, nie löschen). */
+  zurSeite?: string[];
+  /** Bewusst mit weniger Zielen als verlangten Kopien gestartet. */
+  wenigerKopienBestaetigt?: boolean;
 };
 
 export type SollClip = {
@@ -169,3 +173,7 @@ export type EinlesenVorschau = {
 };
 export const einlesenVorschau = (zugang: unknown, projekt: unknown, quelle: string) =>
   invoke<EinlesenVorschau>("einlesen_vorschau", { zugang, projekt, quelle });
+
+/** Zustand eines Zielordners vor dem Einlesen (kern/zielstand.rs). */
+export type ZielStand = { art: "neu" } | { art: "vorhanden"; dateien: number } | { art: "abweichend"; grund: string };
+export const zieleStand = (quelle: string, ziele: string[]) => invoke<ZielStand[]>("ziele_stand", { quelle, ziele });

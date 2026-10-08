@@ -78,8 +78,8 @@ export function Einrichtung({ wahl, setWahl }: { wahl: Wahl; setWahl: (w: Wahl) 
           {schwelleFrage && (
             <div className="rueckfrage" role="alertdialog" aria-label="Schwelle senken">
               <Status ton="warn">
-                Freigabe schon bei einer einzigen Kopie? Fällt diese Platte aus, ist das Material weg. Nur für Tests; gilt bis
-                zum Neustart.
+                Freigabe schon bei einer einzigen Kopie? Fällt diese Platte aus, ist das Material weg. Nur für Tests; bleibt
+                gemerkt, bis du sie wieder erhöhst (oben steht dann „Testschwelle“).
               </Status>
               <div className="knopfreihe">
                 <button

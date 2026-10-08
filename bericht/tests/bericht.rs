@@ -20,6 +20,7 @@ fn bericht_wird_gesetzt() {
         quelle: karte,
         ziele: vec![t.path().join("nas/A001R132"), t.path().join("ssd/A001R132")],
         mit_md5: true,
+        ..Default::default()
     };
     let kopie = kopieren(&auftrag, &AtomicBool::new(false), |_| {}).unwrap();
     let urteile = zurueckpruefen(&kopie, true, &AtomicBool::new(false), |_, _| {}).unwrap();

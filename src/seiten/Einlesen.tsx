@@ -257,8 +257,12 @@ function Auftrag({ pflicht, zurEinrichtung, laufwerke }: { pflicht: boolean; zur
     lauf.phase === "fehler" && lauf.fehler ? e.ziele.findIndex((z) => lauf.fehler!.includes(ohneEnde(z))) : -1;
   const istKnapp = (g: ZielGeraet | undefined) => g?.frei != null && q?.bytes != null && g.frei < q.bytes;
   // Ein Ziel mit zu wenig Platz oder mit Fehler zählt nicht als Kopie (lieber nein als ein falsches Ja).
+  const stand = (i: number) => lauf.zielStaende[i];
+  // Eine frühere, vollständige Kopie braucht keinen Platz; ein abweichender Ordner zählt nur, wenn er zur Seite gelegt wird.
+  const knappHier = (i: number) => stand(i)?.art !== "vorhanden" && istKnapp(geraete[i]);
+  const gesperrtHier = (i: number) => stand(i)?.art === "abweichend" && !lauf.zurSeite.includes(lauf.ziele[i]);
   const { zeilen, unabhaengig } = zaehlung(
-    e.ziele.map((_, i) => (i === betroffen || istKnapp(geraete[i]) ? null : geraete[i])),
+    e.ziele.map((_, i) => (i === betroffen || knappHier(i) || gesperrtHier(i) ? null : geraete[i])),
   );
   const genug = unabhaengig >= e.mindestKopien;
 
@@ -267,6 +271,8 @@ function Auftrag({ pflicht, zurEinrichtung, laufwerke }: { pflicht: boolean; zur
     if (typeof pfad === "string" && !e.ziele.includes(pfad)) e.setZiele([...e.ziele, pfad]);
   }
 
+  const [wenigFrage, setWenigFrage] = useState(false);
+  useEffect(() => setWenigFrage(false), [q?.pfad, e.ziele.join("|"), e.mindestKopien]);
   // Ohne einen einzigen Treffer erst nachfragen (iPhone noch nicht synchronisiert?), dann nach <Datum>_OHNE_DREHORT.
   const [trotzdem, setTrotzdem] = useState(false);
   useEffect(() => setTrotzdem(false), [q?.pfad]);
@@ -323,9 +329,23 @@ function Auftrag({ pflicht, zurEinrichtung, laufwerke }: { pflicht: boolean; zur
           {e.ziele.length > 0 && (
             <Status ton={genug ? "ok" : "warn"}>
               {unabhaengig} von {e.mindestKopien} unabhängigen Kopien
-              {e.mindestKopien < 2 && " (Testschwelle)"}
             </Status>
           )}
+          <label className="kopien-wahl">
+            <span>Freigabe ab</span>
+            <select
+              value={e.mindestKopien}
+              disabled={lauf.laeuft}
+              onChange={(ev) => e.setMindestKopien(Number(ev.target.value))}
+              aria-label="Unabhängige Kopien für die Freigabe"
+            >
+              {[1, 2, 3, 4].map((n) => (
+                <option key={n} value={n}>
+                  {n} {n === 1 ? "Kopie (nur Test)" : "Kopien"}
+                </option>
+              ))}
+            </select>
+          </label>
           <button className="knopf knopf-klein" onClick={zielHinzufuegen}>
             <Plus size={14} strokeWidth={2} aria-hidden /> Ziel hinzufügen
           </button>
@@ -352,7 +372,9 @@ function Auftrag({ pflicht, zurEinrichtung, laufwerke }: { pflicht: boolean; zur
             <tbody>
               {e.ziele.map((z, i) => {
                 const g = geraete[i];
-                const knapp = istKnapp(g);
+                const knapp = knappHier(i);
+                const st = stand(i);
+                const zielPfad = lauf.ziele[i];
                 const zaehlt: { ton: Ton; text: string } =
                   i === betroffen
                     ? { ton: "fehler", text: "Betroffen, siehe Meldung oben" }
@@ -368,6 +390,30 @@ function Auftrag({ pflicht, zurEinrichtung, laufwerke }: { pflicht: boolean; zur
                         <span className="unterzeile">
                           <ArrowRight size={12} strokeWidth={2} aria-hidden />
                           <Pfad pfad={lauf.ziele[i].slice(ohneEnde(z).length + 1)} />
+                        </span>
+                      )}
+                      {st?.art === "vorhanden" && (
+                        <span className="unterzeile">
+                          <Status ton="ok">Diese Karte liegt hier schon vollständig · wird nicht neu geschrieben, nur nachgeprüft</Status>
+                        </span>
+                      )}
+                      {st?.art === "abweichend" && zielPfad && (
+                        <span className="unterzeile ziel-konflikt">
+                          {lauf.zurSeite.includes(zielPfad) ? (
+                            <>
+                              <Status ton="warn">Wird zur Seite gelegt (umbenannt in …_ALT_Datum_Zeit, nichts gelöscht) und neu kopiert</Status>
+                              <button className="verweis" onClick={() => lauf.zurSeiteUmschalten(zielPfad)}>
+                                Rückgängig
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <Status ton="fehler">Ordner existiert schon, passt aber nicht zu dieser Karte: {st.grund}</Status>
+                              <button className="knopf knopf-klein" onClick={() => lauf.zurSeiteUmschalten(zielPfad)}>
+                                Zur Seite legen und neu kopieren
+                              </button>
+                            </>
+                          )}
                         </span>
                       )}
                     </td>
@@ -454,10 +500,37 @@ function Auftrag({ pflicht, zurEinrichtung, laufwerke }: { pflicht: boolean; zur
             </span>
           )}
         </div>
-        <button className="knopf knopf-haupt knopf-gross" disabled={!bereit} onClick={lauf.einlesen}>
-          <HardDrive size={18} strokeWidth={1.75} aria-hidden />
-          {lauf.phase === "fehler" ? "Nochmals einlesen" : "Einlesen"}
-        </button>
+        {wenigFrage ? (
+          <div className="weniger-frage" role="alertdialog" aria-label="Weniger Kopien als verlangt">
+            <Status ton="warn">
+              Verlangt sind {e.mindestKopien} unabhängige Kopien, möglich ist hier nur {unabhaengig}. Die Karte wird nicht
+              freigegeben und darf nicht formatiert werden. Die fehlende Kopie kannst du später ergänzen.
+            </Status>
+            <div className="knopfreihe">
+              <button
+                className="knopf knopf-gefahr"
+                onClick={() => {
+                  setWenigFrage(false);
+                  lauf.einlesen(true);
+                }}
+              >
+                Mit nur {unabhaengig} {unabhaengig === 1 ? "Kopie" : "Kopien"} einlesen
+              </button>
+              <button className="knopf" onClick={() => setWenigFrage(false)}>
+                Abbrechen
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            className="knopf knopf-haupt knopf-gross"
+            disabled={!bereit}
+            onClick={() => (genug ? lauf.einlesen(false) : setWenigFrage(true))}
+          >
+            <HardDrive size={18} strokeWidth={1.75} aria-hidden />
+            {lauf.phase === "fehler" ? "Nochmals einlesen" : genug ? "Einlesen" : `Einlesen (nur ${unabhaengig} von ${e.mindestKopien} Kopien)`}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -803,6 +876,7 @@ function Urteil({ ergebnis, laufwerke }: { ergebnis: KartenErgebnis; laufwerke: 
   const lauf = useLauf();
   const { freigabe, urteile, kennungen, abgleich } = ergebnis;
   const fehlerhaft = urteile.some((u) => u.kopierfehler || u.abweichungen.length > 0);
+  const nurKopienFehlen = !freigabe.sicher && !fehlerhaft && freigabe.unabhaengige_kopien < freigabe.mindest_kopien;
   // Rot heisst Datenverlust droht: jede nicht freigegebene Karte (gemeinsames Design).
   const ton = freigabe.sicher ? "ok" : "rot";
   const karte = lauf.letzteQuelle;
@@ -847,6 +921,16 @@ function Urteil({ ergebnis, laufwerke }: { ergebnis: KartenErgebnis; laufwerke: 
           <p>
             {karte?.name ?? name(ergebnis.kopie.quelle)} · {freigabe.grund}
           </p>
+          {!freigabe.sicher && !fehlerhaft && freigabe.unabhaengige_kopien < freigabe.mindest_kopien && (
+            <p className="urteil-grund">
+              Alle Dateien sind fehlerfrei kopiert und geprüft. Es fehlt nur{" "}
+              {freigabe.mindest_kopien - freigabe.unabhaengige_kopien === 1
+                ? "eine weitere unabhängige Kopie"
+                : `${freigabe.mindest_kopien - freigabe.unabhaengige_kopien} weitere unabhängige Kopien`}
+              . Sobald eine weitere Platte da ist: „Kopie ergänzen“. Die vorhandene Kopie wird dann nur nachgeprüft, nicht neu
+              geschrieben. {steckt ? "" : "Dafür die Karte wieder einstecken; sie ist ja nicht formatiert."}
+            </p>
+          )}
           <p className="urteil-kennwerte">
             {ergebnis.kopie.dateien.length} Dateien · {bytesText(summe)} · XXH3-128
             {ergebnis.kopie.dateien.some((d) => d.pruefsumme.md5) && " + MD5"}
@@ -904,8 +988,18 @@ function Urteil({ ergebnis, laufwerke }: { ergebnis: KartenErgebnis; laufwerke: 
             </button>
           )}
           {!freigabe.sicher && karte && (
+            // Fehlen nur Kopien: „Kopie ergänzen“. Zurück zum Auftrag; die vorhandene Kopie wird dort erkannt und nur
+            // nachgeprüft, ein weiteres Ziel kommt dazu. Sonst: nochmals einlesen.
             <button className="knopf knopf-gross" onClick={() => lauf.quelleWaehlen(karte)}>
-              <RotateCcw size={16} strokeWidth={1.75} aria-hidden /> Nochmals einlesen
+              {nurKopienFehlen ? (
+                <>
+                  <Plus size={16} strokeWidth={1.75} aria-hidden /> Kopie ergänzen
+                </>
+              ) : (
+                <>
+                  <RotateCcw size={16} strokeWidth={1.75} aria-hidden /> Nochmals einlesen
+                </>
+              )}
             </button>
           )}
           {bericht && (

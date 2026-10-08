@@ -63,12 +63,14 @@ impl Verfahren {
 type Kinder<'a> = (Vec<(&'a str, &'a crate::kopie::Datei)>, Vec<&'a str>);
 
 /// Angaben zur Generation, die nicht aus der Kopie kommen.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Angaben {
     pub werkzeug: String,
     pub version: String,
     /// Zeitpunkt des Vorgangs; gleich für alle Ziele (Dateiname und `creationdate`).
     pub zeit: DateTime<Utc>,
+    /// Frühere Kopie nur nachgeprüft, nicht geschrieben: `process` = `in-place` statt `transfer` (Spezifikation 5.6).
+    pub nur_pruefen: bool,
 }
 
 /// Schreibt die nächste Generation in `<ziel>/ascmhl/`. Gibt den Pfad der neuen `.mhl` zurück.
@@ -104,6 +106,23 @@ pub fn schreiben(ziel: &Path, kopie: &Kopie, angaben: &Angaben) -> io::Result<Pa
     crate::ohne_cache::sicher_schreiben(&ordner.join(KETTE), kette_xml(&kette).as_bytes())?;
     crate::ohne_cache::ordner_sichern(ziel)?;
     Ok(pfad)
+}
+
+/// Dateien der Kopie, deren Prüfsumme nicht zur früheren Historie in `<ziel>/ascmhl/` passt (nur Dateien, die dort
+/// schon einen Hash haben). Beim Nachprüfen einer früheren Kopie heisst eine Abweichung: andere Karte oder
+/// veränderte Daten; die Kopie zählt dann nicht.
+pub fn abweichungen_zur_historie(ziel: &Path, kopie: &Kopie) -> io::Result<Vec<String>> {
+    let h = historie_lesen(&ziel.join(ORDNER))?;
+    let mut aus = Vec::new();
+    for d in &kopie.dateien {
+        let jetzt = [(Verfahren::Xxh128, Some(d.pruefsumme.xxh128_hex())), (Verfahren::Md5, d.pruefsumme.md5_hex())];
+        if jetzt.iter().any(|(v, h_jetzt)| {
+            h_jetzt.as_ref().is_some_and(|hj| h.hashes.get(&(d.pfad.clone(), *v)).is_some_and(|alt| alt != hj))
+        }) {
+            aus.push(d.pfad.clone());
+        }
+    }
+    Ok(aus)
 }
 
 /// Dateien und Ordner, die ins MHL gehören: alles ausser der Historie selbst.
@@ -177,7 +196,8 @@ fn hashliste(
     x += &format!("    <creationdate>{}</creationdate>\n", zeitpunkt(&angaben.zeit));
     x += &format!("    <hostname>{}</hostname>\n", esc(&gethostname::gethostname().to_string_lossy()));
     x += &format!("    <tool version=\"{}\">{}</tool>\n", esc(&angaben.version), esc(&angaben.werkzeug));
-    x += "  </creatorinfo>\n  <processinfo>\n    <process>transfer</process>\n    <roothash>\n";
+    let prozess = if angaben.nur_pruefen { "in-place" } else { "transfer" };
+    x += &format!("  </creatorinfo>\n  <processinfo>\n    <process>{prozess}</process>\n    <roothash>\n");
     x += &paar("", "      ");
     x += "    </roothash>\n    <ignore>\n";
     for p in IGNORIEREN {
@@ -504,7 +524,8 @@ mod tests {
             beginn: Utc::now(),
             ende: Utc::now(),
         };
-        let angaben = Angaben { werkzeug: "Stage Ingest".into(), version: "test".into(), zeit: Utc::now() };
+        let angaben =
+            Angaben { werkzeug: "Stage Ingest".into(), version: "test".into(), zeit: Utc::now(), nur_pruefen: false };
         let xml = hashliste(&kopie, &[Verfahren::Md5, Verfahren::Xxh128], &HashMap::new(), &angaben);
         for erwartet in [
             "3c516b751c69e9c45e80e1053ca15eb0", // Wurzel content xxh128

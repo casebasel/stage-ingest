@@ -16,7 +16,7 @@ fn ziel_liegt_nach_dem_kopieren_nicht_im_cache() {
     let groesse = 64 * 1024 * 1024;
     fs::write(karte.join("A001C001.mov"), vec![0x5au8; groesse]).unwrap();
     let ziel = t.path().join("ziel/karte");
-    let auftrag = Auftrag { quelle: karte, ziele: vec![ziel.clone()], mit_md5: false };
+    let auftrag = Auftrag { quelle: karte, ziele: vec![ziel.clone()], mit_md5: false, ..Default::default() };
     kopieren(&auftrag, &AtomicBool::new(false), |_| {}).unwrap();
 
     let datei = fs::File::open(ziel.join("A001C001.mov")).unwrap();

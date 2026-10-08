@@ -30,14 +30,19 @@ fn warnung(text: String) -> Befund {
     Befund { stufe: Stufe::Warnung, text }
 }
 
-/// Prüft den Auftrag. `bytes` ist die Grösse der Karte (aus [`crate::kopie::groesse`]).
+/// Prüft den Auftrag. `bytes` ist die Grösse der Karte (aus [`crate::kopie::groesse`]). `zur_seite`: bestehende,
+/// abweichende Zielordner, die vor dem Kopieren zur Seite gelegt werden (vom Benutzer bestätigt).
 pub fn vorpruefen(auftrag: &Auftrag, bytes: u64) -> Vec<Befund> {
+    vorpruefen_mit(auftrag, bytes, &[])
+}
+
+pub fn vorpruefen_mit(auftrag: &Auftrag, bytes: u64, zur_seite: &[std::path::PathBuf]) -> Vec<Befund> {
     let mut befunde = Vec::new();
     let quelle = match std::fs::canonicalize(&auftrag.quelle) {
         Ok(q) => q,
         Err(e) => return vec![fehler(format!("Karte nicht lesbar: {e}"))],
     };
-    if auftrag.ziele.is_empty() {
+    if auftrag.ziele.is_empty() && auftrag.vorhandene.is_empty() {
         befunde.push(fehler("Kein Ziel gewählt".into()));
     }
     match crate::kopie::ueberblick(&quelle) {
@@ -82,8 +87,16 @@ pub fn vorpruefen(auftrag: &Auftrag, bytes: u64) -> Vec<Befund> {
         if std::fs::canonicalize(ziel).is_ok_and(|z| quelle.starts_with(z)) {
             befunde.push(fehler(format!("Karte liegt im Ziel: {}", ziel.display())));
         }
-        if ziel.exists() && std::fs::read_dir(ziel).map(|mut d| d.next().is_some()).unwrap_or(true) {
-            befunde.push(fehler(format!("Zielordner existiert schon und ist nicht leer: {}", ziel.display())));
+        if zur_seite.iter().any(|z| z == ziel) {
+            befunde.push(warnung(format!(
+                "Bestehender, unvollständiger Ordner wird zur Seite gelegt (umbenannt, nicht gelöscht) und neu kopiert: {}",
+                ziel.display()
+            )));
+        } else if !matches!(crate::zielstand::bestimmen(&quelle, ziel), crate::zielstand::Stand::Neu) {
+            befunde.push(fehler(format!(
+                "Zielordner existiert schon und passt nicht zu dieser Karte: {}. In der Ziel-Liste „Zur Seite legen“ wählen.",
+                ziel.display()
+            )));
         }
         let noetig = geraet::volume_kennung(&ort_echt).ok().and_then(|v| je_volume.get(&v).copied()).unwrap_or(bytes);
         match frei(&ort_echt) {
@@ -108,6 +121,15 @@ pub fn vorpruefen(auftrag: &Auftrag, bytes: u64) -> Vec<Befund> {
                 ziel.display()
             ))),
             Err(e) => befunde.push(fehler(format!("Ziel nicht lesbar: {}: {e}", ziel.display()))),
+        }
+    }
+    // Frühere, vollständige Kopien: nichts zu schreiben, aber sie müssen erreichbar sein und zählen für die
+    // Unabhängigkeit wie jedes Ziel.
+    for ziel in &auftrag.vorhandene {
+        match geraet::kennung(ziel) {
+            Ok(k) if k.sicher => kennungen.entry(k.wert).or_default().push(ziel),
+            Ok(_) => {}
+            Err(e) => befunde.push(fehler(format!("Vorhandene Kopie nicht lesbar: {}: {e}", ziel.display()))),
         }
     }
     for ziele in kennungen.values().filter(|z| z.len() > 1) {
@@ -158,7 +180,12 @@ mod tests {
     use std::fs;
 
     fn auftrag(q: &Path, ziele: &[&Path]) -> Auftrag {
-        Auftrag { quelle: q.into(), ziele: ziele.iter().map(|z| z.to_path_buf()).collect(), mit_md5: false }
+        Auftrag {
+            quelle: q.into(),
+            ziele: ziele.iter().map(|z| z.to_path_buf()).collect(),
+            mit_md5: false,
+            ..Default::default()
+        }
     }
 
     #[test]

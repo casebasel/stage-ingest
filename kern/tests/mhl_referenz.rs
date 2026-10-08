@@ -34,7 +34,7 @@ fn verify(ascmhl_debug: &str, ordner: &Path) {
 }
 
 fn angaben() -> Angaben {
-    Angaben { werkzeug: "Stage Ingest".into(), version: "test".into(), zeit: Utc::now() }
+    Angaben { werkzeug: "Stage Ingest".into(), version: "test".into(), zeit: Utc::now(), nur_pruefen: false }
 }
 
 #[test]
@@ -43,7 +43,8 @@ fn neue_historie_besteht_verify() {
     let t = tempfile::tempdir().unwrap();
     karte(&t.path().join("A001R132"));
     let ziel = t.path().join("ziel/A001R132");
-    let a = Auftrag { quelle: t.path().join("A001R132"), ziele: vec![ziel.clone()], mit_md5: true };
+    let a =
+        Auftrag { quelle: t.path().join("A001R132"), ziele: vec![ziel.clone()], mit_md5: true, ..Default::default() };
     let kopie = kopieren(&a, &AtomicBool::new(false), |_| {}).unwrap();
     mhl::schreiben(&ziel, &kopie, &angaben()).unwrap();
     verify(&r, &ziel);
@@ -69,7 +70,7 @@ fn mitgebrachte_historie_wird_fortgesetzt() {
     assert!(st.success());
 
     let ziel = t.path().join("ziel/A001R132");
-    let a = Auftrag { quelle: karte_pfad, ziele: vec![ziel.clone()], mit_md5: false };
+    let a = Auftrag { quelle: karte_pfad, ziele: vec![ziel.clone()], mit_md5: false, ..Default::default() };
     let kopie = kopieren(&a, &AtomicBool::new(false), |_| {}).unwrap();
     let neu = mhl::schreiben(&ziel, &kopie, &angaben()).unwrap();
     assert!(neu.file_name().unwrap().to_string_lossy().starts_with("0002_A001R132_"));
@@ -84,7 +85,8 @@ fn nachpruefen_findet_veraenderung_und_fremde_datei() {
     let t = tempfile::tempdir().unwrap();
     karte(&t.path().join("A001R132"));
     let ziel = t.path().join("ziel/A001R132");
-    let a = Auftrag { quelle: t.path().join("A001R132"), ziele: vec![ziel.clone()], mit_md5: true };
+    let a =
+        Auftrag { quelle: t.path().join("A001R132"), ziele: vec![ziel.clone()], mit_md5: true, ..Default::default() };
     let kopie = kopieren(&a, &AtomicBool::new(false), |_| {}).unwrap();
     mhl::schreiben(&ziel, &kopie, &angaben()).unwrap();
 
@@ -131,7 +133,12 @@ fn karte_die_von_ihrer_eigenen_historie_abweicht_wird_erkannt() {
     // Nach dem Versiegeln verändert sich eine Datei auf der Karte, eine andere verschwindet.
     fs::write(karte_pfad.join("A001R132.ale"), b"Heading anders\n").unwrap();
     fs::remove_file(karte_pfad.join("Clips/Ä Umlaut & Sonderzeichen.txt")).unwrap();
-    let a = Auftrag { quelle: karte_pfad, ziele: vec![t.path().join("ziel/A001R132")], mit_md5: false };
+    let a = Auftrag {
+        quelle: karte_pfad,
+        ziele: vec![t.path().join("ziel/A001R132")],
+        mit_md5: false,
+        ..Default::default()
+    };
     let kopie = kopieren(&a, &AtomicBool::new(false), |_| {}).unwrap();
     let abw = mhl::historie_abgleichen(&kopie).unwrap();
     assert_eq!(abw.len(), 2, "{abw:?}");

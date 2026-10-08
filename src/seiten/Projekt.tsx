@@ -490,7 +490,9 @@ function KartenListe({ karten }: { karten: Karte[] }) {
                 <td className="rechts zahl">{k.inhalt.clips.length}</td>
                 <td>
                   <Status ton={k.inhalt.freigegeben ? "ok" : "rot"}>
-                    {k.inhalt.freigegeben ? `Sicher · ${k.inhalt.unabhaengigeKopien} Kopien` : "Nicht freigegeben"}
+                    {k.inhalt.freigegeben
+                      ? `Sicher · ${k.inhalt.unabhaengigeKopien} Kopien`
+                      : `Nicht freigegeben · ${k.inhalt.unabhaengigeKopien} ${k.inhalt.unabhaengigeKopien === 1 ? "Kopie" : "Kopien"} · beim Einlesen ergänzen`}
                   </Status>
                 </td>
               </tr>

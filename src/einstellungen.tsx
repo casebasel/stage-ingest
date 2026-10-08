@@ -32,8 +32,9 @@ function useEinstellungenHalten() {
   const [ziele, setZiele] = useGemerkt<string[]>("ziele", []);
   const [mitMd5, setMitMd5] = useGemerkt("mitMd5", false);
   const [zweimalLesen, setZweimalLesen] = useGemerkt("zweimalLesen", false);
-  const [mindestKopien, setMindestKopien] = useState(() => Math.max(2, gemerkt("mindestKopien", 2)));
-  useEffect(() => merken("mindestKopien", Math.max(2, mindestKopien)), [mindestKopien]);
+  // Auch die Testschwelle 1 bleibt gemerkt (Marlon, 08.10.2026); die Kopfleiste zeigt sie dann immer als Warnung.
+  const [mindestKopien, setMindestKopien] = useState(() => Math.min(9, Math.max(1, gemerkt("mindestKopien", 2))));
+  useEffect(() => merken("mindestKopien", mindestKopien), [mindestKopien]);
   const [stageAdresse, setStageAdresse] = useGemerkt("stageAdresse", "");
   const [artCmd, setArtCmd] = useGemerkt("artCmd", "");
   return {

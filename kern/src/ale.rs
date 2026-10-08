@@ -80,7 +80,12 @@ mod tests {
     fn ale_aus_den_testclips() {
         let karte = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/daten");
         let t = tempfile::tempdir().unwrap();
-        let a = crate::kopie::Auftrag { quelle: karte, ziele: vec![t.path().join("A005R56E")], mit_md5: false };
+        let a = crate::kopie::Auftrag {
+            quelle: karte,
+            ziele: vec![t.path().join("A005R56E")],
+            mit_md5: false,
+            ..Default::default()
+        };
         let k = crate::kopie::kopieren(&a, &AtomicBool::new(false), |_| {}).unwrap();
         let clips = clips_lesen(&k, &t.path().join("A005R56E"));
         assert_eq!(clips.len(), 2);

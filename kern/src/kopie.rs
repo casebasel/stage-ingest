@@ -24,13 +24,16 @@ use crate::{ohne_cache, Ergebnis, Fehler, BLOCK, TEIL_ENDUNG};
 const NICHT_VON_DER_KAMERA: &[&str] =
     &[".Spotlight-V100", ".fseventsd", ".Trashes", ".TemporaryItems", "System Volume Information", ".DS_Store"];
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Auftrag {
     /// Wurzel der Karte (oder ein Ordner darin).
     pub quelle: PathBuf,
     /// Zielordner, je einer pro Ziel. Sie dürfen nicht existieren oder müssen leer sein.
     pub ziele: Vec<PathBuf>,
     pub mit_md5: bool,
+    /// Frühere, vollständige Kopien dieser Karte (`zielstand::Stand::Vorhanden`). Sie werden nie beschrieben und
+    /// nie weggeräumt, nur am Ende als Ziele angehängt, damit das Zurücklesen sie gegen die Karte prüft.
+    pub vorhandene: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -47,6 +50,9 @@ pub struct Ziel {
     pub ordner: PathBuf,
     /// `None`, wenn alle Dateien geschrieben und auf die Platte gebracht wurden.
     pub fehler: Option<String>,
+    /// Frühere Kopie, in diesem Lauf nicht geschrieben, nur nachgeprüft.
+    #[serde(default)]
+    pub vorhanden: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -132,7 +138,7 @@ fn senden(
 }
 
 pub fn kopieren(auftrag: &Auftrag, abbruch: &AtomicBool, mut melden: impl FnMut(Meldung)) -> Ergebnis<Kopie> {
-    if auftrag.ziele.is_empty() {
+    if auftrag.ziele.is_empty() && auftrag.vorhandene.is_empty() {
         return Err(Fehler::KeinZiel);
     }
     for ziel in &auftrag.ziele {
@@ -252,7 +258,7 @@ pub fn kopieren(auftrag: &Auftrag, abbruch: &AtomicBool, mut melden: impl FnMut(
             geaendert: zeit(geaendert),
             pruefsumme: rechner.fertig(),
         });
-        if zustaende.iter().all(|z| z.lock().expect("Zustand").is_some()) {
+        if !zustaende.is_empty() && zustaende.iter().all(|z| z.lock().expect("Zustand").is_some()) {
             // Weiterlesen bringt nichts; eine halbe Dateiliste darf nicht wie eine ganze Karte aussehen.
             let gruende = zustaende.iter().filter_map(|z| z.lock().expect("Zustand").clone()).collect::<Vec<_>>();
             ergebnis = Err(Fehler::AlleZieleAusgefallen(gruende.join("; ")));
@@ -278,6 +284,7 @@ pub fn kopieren(auftrag: &Auftrag, abbruch: &AtomicBool, mut melden: impl FnMut(
     if ergebnis.is_err() {
         // Halbe Kopie ist wertlos und würde den nächsten Versuch blockieren. Die Zielordner waren vor
         // diesem Lauf leer oder neu (ziel_vorbereiten), enthalten also nur, was dieser Lauf geschrieben hat.
+        // Vorhandene Kopien (`auftrag.vorhandene`) stehen nicht in `ziele` und bleiben unberührt.
         for ziel in &auftrag.ziele {
             let _ = std::fs::remove_dir_all(ziel);
         }
@@ -288,7 +295,8 @@ pub fn kopieren(auftrag: &Auftrag, abbruch: &AtomicBool, mut melden: impl FnMut(
         .ziele
         .iter()
         .zip(&zustaende)
-        .map(|(o, z)| Ziel { ordner: o.clone(), fehler: z.lock().expect("Zustand").clone() })
+        .map(|(o, z)| Ziel { ordner: o.clone(), fehler: z.lock().expect("Zustand").clone(), vorhanden: false })
+        .chain(auftrag.vorhandene.iter().map(|o| Ziel { ordner: o.clone(), fehler: None, vorhanden: true }))
         .collect();
     Ok(Kopie { quelle: auftrag.quelle.clone(), dateien, ordner, ausgelassen, ziele, beginn, ende: Utc::now() })
 }
@@ -309,6 +317,11 @@ pub struct Ueberblick {
 pub fn ueberblick(quelle: &Path) -> Ergebnis<Ueberblick> {
     let (_, dateien, ausgelassen) = inhalt(quelle)?;
     Ok(Ueberblick { bytes: dateien.iter().map(|(_, g)| g).sum(), dateien: dateien.len(), ausgelassen })
+}
+
+/// Dateien der Quelle (relativer Pfad mit `/` → Grösse), wie sie kopiert würden.
+pub fn ueberblick_dateien(quelle: &Path) -> Ergebnis<std::collections::BTreeMap<String, u64>> {
+    Ok(inhalt(quelle)?.1.into_iter().collect())
 }
 
 /// Legt den Zielordner an. Ein bestehender, nicht leerer Ordner wird nie überschrieben.

@@ -30,6 +30,7 @@ pub mod soll;
 pub mod struktur;
 pub mod uebersicht;
 pub mod vorpruefen;
+pub mod zielstand;
 
 pub use fehler::{Ergebnis, Fehler};
 

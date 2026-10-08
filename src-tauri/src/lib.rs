@@ -67,6 +67,23 @@ struct KartenAuftrag {
     /// Produktionsfirma, Regie, DoP des Projekts (Projekt-Einstellungen): für Bericht und Zusammenfassung.
     #[serde(default)]
     projekt_angaben: Option<ProjektAngaben>,
+    /// Bestehende, abweichende Zielordner, die der Benutzer zur Seite legen lässt (umbenennen, nie löschen).
+    #[serde(default)]
+    zur_seite: Vec<PathBuf>,
+    /// Der Benutzer hat bestätigt, mit weniger Zielen als verlangten Kopien einzulesen (steht im Bericht).
+    #[serde(default)]
+    weniger_kopien_bestaetigt: bool,
+}
+
+/// Teilt die Ziele: zu schreibende (neu, leer oder zur Seite zu legen) und frühere, vollständige Kopien dieser
+/// Karte, die nur nachgeprüft werden (`zielstand`). Jedes Mal frisch bestimmt, nie aus der Oberfläche übernommen.
+fn ziele_aufteilen(auftrag: &KartenAuftrag) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    auftrag.ziele.iter().cloned().partition(|z| {
+        !matches!(
+            ingest_kern::zielstand::bestimmen(&auftrag.quelle, z),
+            ingest_kern::zielstand::Stand::Vorhanden { .. }
+        )
+    })
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -366,9 +383,10 @@ fn verlauf(app: AppHandle) -> Result<Vec<VerlaufEintrag>, String> {
 }
 
 fn befunde(auftrag: &KartenAuftrag) -> Vec<Befund> {
-    let k = Auftrag { quelle: auftrag.quelle.clone(), ziele: auftrag.ziele.clone(), mit_md5: auftrag.mit_md5 };
+    let (schreiben, vorhandene) = ziele_aufteilen(auftrag);
+    let k = Auftrag { quelle: auftrag.quelle.clone(), ziele: schreiben, mit_md5: auftrag.mit_md5, vorhandene };
     match kopie::groesse(&auftrag.quelle) {
-        Ok(bytes) => vorpruefen::vorpruefen(&k, bytes),
+        Ok(bytes) => vorpruefen::vorpruefen_mit(&k, bytes, &auftrag.zur_seite),
         Err(e) => vec![Befund { stufe: Stufe::Fehler, text: e.to_string() }],
     }
 }
@@ -404,9 +422,25 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
     if let Some(f) = befunde(auftrag).into_iter().find(|b| b.stufe == Stufe::Fehler) {
         return Err(f.text);
     }
+    // Ziele aufteilen: frühere, vollständige Kopien werden nur nachgeprüft, nie beschrieben und nie weggeräumt.
+    let (schreiben, vorhandene) = ziele_aufteilen(auftrag);
+    // Vom Benutzer bestätigt: abweichende Ordner zur Seite legen (umbenennen, nichts löschen), dann neu kopieren.
+    let mut zur_seite_gelegt = Vec::new();
+    for z in schreiben.iter().filter(|z| auftrag.zur_seite.contains(z)) {
+        if matches!(
+            ingest_kern::zielstand::bestimmen(&auftrag.quelle, z),
+            ingest_kern::zielstand::Stand::Abweichend { .. }
+        ) {
+            let neu = ingest_kern::zielstand::zur_seite_legen(z, chrono::Local::now())
+                .map_err(|e| format!("{} nicht zur Seite gelegt: {e}", z.display()))?;
+            zur_seite_gelegt.push(format!("{} → {}", z.display(), neu.display()));
+        }
+    }
+    // Reihenfolge wie in der Kopie: erst die geschriebenen Ziele, dann die vorhandenen (Urteile und Kennungen
+    // gehören Index für Index zusammen).
+    let reihenfolge: Vec<PathBuf> = schreiben.iter().chain(&vorhandene).cloned().collect();
     // Kennungen vor dem Kopieren: die Platte muss eingehängt sein, sonst gar nicht erst anfangen.
-    let kennungen = auftrag
-        .ziele
+    let kennungen = reihenfolge
         .iter()
         .map(|z| {
             let ort = struktur::vorhandener_vorfahr(z).unwrap_or(z);
@@ -421,15 +455,21 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
             }
         }
     }
-    let k = Auftrag { quelle: auftrag.quelle.clone(), ziele: auftrag.ziele.clone(), mit_md5: auftrag.mit_md5 };
+    let k = Auftrag {
+        quelle: auftrag.quelle.clone(),
+        ziele: schreiben.clone(),
+        mit_md5: auftrag.mit_md5,
+        vorhandene: vorhandene.clone(),
+    };
     let kopie = kopie::kopieren(&k, abbruch, |meldung| {
         let _ = app.emit(FORTSCHRITT, Fortschritt::Kopieren { meldung });
     })
     .map_err(|e| e.to_string())?;
     // Abbruch oder Fehler nach dem Kopieren: die Zielordner hat dieser Lauf neu angelegt (vorher leer oder
     // nicht vorhanden); ungeprüft sind sie wertlos und würden den nächsten Versuch blockieren.
+    // Nur die in diesem Lauf geschriebenen Ziele; frühere Kopien bleiben immer unberührt.
     let wegraeumen = |e: String| {
-        for z in &auftrag.ziele {
+        for z in &schreiben {
             let _ = std::fs::remove_dir_all(z);
         }
         e
@@ -455,18 +495,38 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
         }
     }
 
+    // Frühere Kopien: Die Karte muss auch zur früheren Prüfsumme in deren ASC MHL passen. Sonst ist es eine
+    // andere Karte oder die Daten haben sich verändert; dann zählt die Kopie nicht (Branchenpraxis, Recherche 08.10.).
+    for (u, z) in urteile.iter_mut().zip(&kopie.ziele).filter(|(u, z)| z.vorhanden && u.gut()) {
+        match mhl::abweichungen_zur_historie(&z.ordner, &kopie) {
+            Ok(a) if a.is_empty() => {}
+            Ok(a) => {
+                u.kopierfehler = Some(format!(
+                    "Passt nicht zur früheren Prüfsumme dieser Kopie ({} Dateien, z. B. {}): andere Karte oder veränderte Daten",
+                    a.len(),
+                    a[0]
+                ))
+            }
+            Err(e) => u.kopierfehler = Some(format!("ASC MHL der früheren Kopie nicht lesbar: {e}")),
+        }
+    }
+
     // ASC MHL nur auf gut geprüfte Ziele. Scheitert es, zählt das Ziel nicht für die Freigabe.
     let angaben = mhl::Angaben {
         werkzeug: "Stage Ingest".into(),
         version: app.package_info().version.to_string(),
         zeit: kopie.beginn,
+        nur_pruefen: false,
     };
     let mhl = urteile
         .iter_mut()
-        .map(|u| {
+        .zip(&kopie.ziele)
+        .map(|(u, z)| {
             if !u.gut() {
                 return None;
             }
+            // Frühere Kopie: neue Generation „in-place“ mit `verified` (nichts geschrieben, nur nachgeprüft).
+            let angaben = mhl::Angaben { nur_pruefen: z.vorhanden, ..angaben.clone() };
             match mhl::schreiben(&u.ordner, &kopie, &angaben) {
                 Ok(p) => Some(p),
                 Err(e) => {
@@ -484,6 +544,23 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
         historie_abweichungen,
     };
     let mut freigabe = freigabe::beurteilen(&urteile, &kennungen, auftrag.mindest_kopien, umfang);
+    for (u, z) in urteile.iter().zip(&kopie.ziele).filter(|(_, z)| z.vorhanden) {
+        freigabe.hinweise.push(if u.gut() {
+            format!("Frühere Kopie nicht neu geschrieben, vollständig nachgeprüft und gezählt: {}", z.ordner.display())
+        } else {
+            format!("Frühere Kopie weicht von der Karte ab und zählt nicht: {}", z.ordner.display())
+        });
+    }
+    for z in &zur_seite_gelegt {
+        freigabe.hinweise.push(format!("Unvollständiger Ordner zur Seite gelegt (nichts gelöscht): {z}"));
+    }
+    if auftrag.weniger_kopien_bestaetigt {
+        freigabe.hinweise.push(format!(
+            "Bewusst mit weniger Zielen als den verlangten {} Kopien gestartet (bestätigt am {}).",
+            auftrag.mindest_kopien,
+            chrono::Local::now().format("%d.%m.%Y %H:%M")
+        ));
+    }
     // Clip-Angaben aus der ersten guten Kopie (geprüft, nicht von der Karte): für ALE und Timecode-Zuordnung.
     let clips = urteile.iter().find(|u| u.gut()).map(|u| ale::clips_lesen(&kopie, &u.ordner)).unwrap_or_default();
     let abgleich = (!auftrag.soll.is_empty()).then(|| soll::abgleichen(&kopie, &auftrag.soll, &clips));
@@ -950,6 +1027,12 @@ fn vorschau_jpg(roh: &[u8], breite: u32) -> Result<Vec<u8>, String> {
     Ok(aus.into_inner())
 }
 
+/// Zustand jedes Zielordners für die Oberfläche: neu, frühere vollständige Kopie oder abweichend.
+#[tauri::command]
+async fn ziele_stand(quelle: PathBuf, ziele: Vec<PathBuf>) -> Result<Vec<ingest_kern::zielstand::Stand>, String> {
+    im_hintergrund(move || Ok(ziele.iter().map(|z| ingest_kern::zielstand::bestimmen(&quelle, z)).collect())).await
+}
+
 /// Vor dem Kopieren: Clips der Karte den Drehorten des Projekts zuordnen (Ordner = Drehort mit den meisten Clips).
 #[tauri::command]
 async fn einlesen_vorschau(
@@ -1118,6 +1201,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             bild_vorschau,
             einlesen_vorschau,
+            ziele_stand,
             vorab_pruefen,
             karte_einlesen,
             ziel_nachpruefen,
@@ -1186,8 +1270,10 @@ mod gemeinsamer_test {
             art_cmd: None,
             kamera: None,
             projekt_angaben: None,
+            zur_seite: vec![],
+            weniger_kopien_bestaetigt: false,
         };
-        let k = Auftrag { quelle: karte, ziele: auftrag.ziele.clone(), mit_md5: false };
+        let k = Auftrag { quelle: karte, ziele: auftrag.ziele.clone(), mit_md5: false, ..Default::default() };
         let kopie = kopie::kopieren(&k, &AtomicBool::new(false), |_| {}).unwrap();
         let urteile = pruefen::zurueckpruefen(&kopie, false, &AtomicBool::new(false), |_, _| {}).unwrap();
         let kennungen: Vec<Kennung> = auftrag.ziele.iter().map(|z| geraet::kennung(z).unwrap()).collect();

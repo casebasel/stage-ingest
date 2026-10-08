@@ -44,6 +44,7 @@ fn karte_an_zwei_ziele_kopieren_und_freigeben() {
         quelle: t.path().join("karte"),
         ziele: vec![t.path().join("nas/A001R132"), t.path().join("platte/A001R132")],
         mit_md5: true,
+        ..Default::default()
     };
     let mut meldungen = Vec::new();
     let kopie = kopieren(&auftrag, &AtomicBool::new(false), |m| meldungen.push(m)).unwrap();
@@ -75,8 +76,12 @@ fn karte_an_zwei_ziele_kopieren_und_freigeben() {
 fn verfaelschtes_byte_und_fremde_datei_werden_gefunden() {
     let t = tempfile::tempdir().unwrap();
     karte(&t.path().join("karte"));
-    let auftrag =
-        Auftrag { quelle: t.path().join("karte"), ziele: vec![t.path().join("a"), t.path().join("b")], mit_md5: false };
+    let auftrag = Auftrag {
+        quelle: t.path().join("karte"),
+        ziele: vec![t.path().join("a"), t.path().join("b")],
+        mit_md5: false,
+        ..Default::default()
+    };
     let kopie = kopieren(&auftrag, &AtomicBool::new(false), |_| {}).unwrap();
 
     let clip = t.path().join("b/A001R132/A001C001_261007_R132.mov");
@@ -112,7 +117,12 @@ fn bestehendes_ziel_wird_nie_ueberschrieben() {
     karte(&t.path().join("karte"));
     fs::create_dir_all(t.path().join("ziel")).unwrap();
     fs::write(t.path().join("ziel/alt.mov"), b"alt").unwrap();
-    let auftrag = Auftrag { quelle: t.path().join("karte"), ziele: vec![t.path().join("ziel")], mit_md5: false };
+    let auftrag = Auftrag {
+        quelle: t.path().join("karte"),
+        ziele: vec![t.path().join("ziel")],
+        mit_md5: false,
+        ..Default::default()
+    };
     let r = kopieren(&auftrag, &AtomicBool::new(false), |_| {});
     assert!(matches!(r, Err(Fehler::ZielExistiert(_))));
     assert_eq!(fs::read(t.path().join("ziel/alt.mov")).unwrap(), b"alt");
@@ -130,8 +140,12 @@ fn ausgefallenes_ziel_haelt_die_anderen_nicht_auf() {
     let gesperrt = t.path().join("gesperrt");
     fs::create_dir_all(&gesperrt).unwrap();
     fs::set_permissions(&gesperrt, fs::Permissions::from_mode(0o555)).unwrap();
-    let auftrag =
-        Auftrag { quelle: t.path().join("karte"), ziele: vec![t.path().join("gut"), gesperrt], mit_md5: false };
+    let auftrag = Auftrag {
+        quelle: t.path().join("karte"),
+        ziele: vec![t.path().join("gut"), gesperrt],
+        mit_md5: false,
+        ..Default::default()
+    };
     let mut ausgefallen = 0;
     let kopie = kopieren(&auftrag, &AtomicBool::new(false), |m| {
         if matches!(m, Meldung::ZielAusgefallen { .. }) {
@@ -158,7 +172,8 @@ fn alle_ziele_ausgefallen_ist_ein_fehler() {
     let gesperrt = t.path().join("gesperrt");
     fs::create_dir_all(&gesperrt).unwrap();
     fs::set_permissions(&gesperrt, fs::Permissions::from_mode(0o555)).unwrap();
-    let auftrag = Auftrag { quelle: t.path().join("karte"), ziele: vec![gesperrt], mit_md5: false };
+    let auftrag =
+        Auftrag { quelle: t.path().join("karte"), ziele: vec![gesperrt], mit_md5: false, ..Default::default() };
     let r = kopieren(&auftrag, &AtomicBool::new(false), |_| {});
     assert!(matches!(r, Err(Fehler::AlleZieleAusgefallen(_))), "{r:?}");
 }
@@ -177,6 +192,7 @@ fn abbruch_raeumt_die_eigenen_ziele_weg() {
         quelle: t.path().join("karte"),
         ziele: vec![t.path().join("a/A001R132"), t.path().join("b/A001R132")],
         mit_md5: false,
+        ..Default::default()
     };
     let abbruch = AtomicBool::new(false);
     let r = kopieren(&auftrag, &abbruch, |m| {
@@ -195,11 +211,84 @@ fn zweites_lesen_der_karte_findet_veraenderte_quelle() {
     use ingest_kern::pruefen::quelle_nachlesen;
     let t = tempfile::tempdir().unwrap();
     karte(&t.path().join("karte"));
-    let auftrag = Auftrag { quelle: t.path().join("karte"), ziele: vec![t.path().join("a/k")], mit_md5: false };
+    let auftrag = Auftrag {
+        quelle: t.path().join("karte"),
+        ziele: vec![t.path().join("a/k")],
+        mit_md5: false,
+        ..Default::default()
+    };
     let kopie = kopieren(&auftrag, &AtomicBool::new(false), |_| {}).unwrap();
     assert!(quelle_nachlesen(&kopie, false, &AtomicBool::new(false), |_| {}).unwrap().is_empty());
     // Wie ein Leser, der beim zweiten Mal andere Bytes liefert.
     fs::write(t.path().join("karte/A001R132/A001C002_261007_R132.mov"), b"zweiter cliP").unwrap();
     let a = quelle_nachlesen(&kopie, false, &AtomicBool::new(false), |_| {}).unwrap();
     assert!(matches!(&a[..], [Abweichung::Pruefsumme { .. }]), "{a:?}");
+}
+
+/// Kopie ergänzen (Marlon, 08.10.2026): Eine frühere, vollständige Kopie wird nicht neu geschrieben, sondern mit
+/// zurückgelesen und zählt mit. Bricht der zweite Lauf ab, bleibt die frühere Kopie unberührt.
+#[test]
+fn vorhandene_kopie_wird_nachgeprueft_und_nie_weggeraeumt() {
+    use ingest_kern::pruefen::zurueckpruefen;
+    use ingest_kern::zielstand::{bestimmen, Stand};
+    let t = tempfile::tempdir().unwrap();
+    karte(&t.path().join("karte"));
+    let a = t.path().join("ssd/A001R132");
+    let erst = Auftrag { quelle: t.path().join("karte"), ziele: vec![a.clone()], mit_md5: false, ..Default::default() };
+    let kopie = kopieren(&erst, &AtomicBool::new(false), |_| {}).unwrap();
+    ingest_kern::mhl::schreiben(
+        &a,
+        &kopie,
+        &ingest_kern::mhl::Angaben {
+            werkzeug: "t".into(),
+            version: "0".into(),
+            zeit: kopie.beginn,
+            nur_pruefen: false,
+        },
+    )
+    .unwrap();
+    assert!(matches!(bestimmen(&t.path().join("karte"), &a), Stand::Vorhanden { .. }));
+
+    // Zweiter Lauf: neues Ziel b, vorhandenes a.
+    let b = t.path().join("nas/A001R132");
+    let zweit =
+        Auftrag { quelle: t.path().join("karte"), ziele: vec![b.clone()], mit_md5: false, vorhandene: vec![a.clone()] };
+    let kopie2 = kopieren(&zweit, &AtomicBool::new(false), |_| {}).unwrap();
+    assert_eq!(kopie2.ziele.len(), 2);
+    assert!(!kopie2.ziele[0].vorhanden && kopie2.ziele[1].vorhanden);
+    let urteile = zurueckpruefen(&kopie2, false, &AtomicBool::new(false), |_, _| {}).unwrap();
+    assert!(urteile.iter().all(|u| u.gut()), "{urteile:?}");
+
+    // Nur nachprüfen, ohne neues Ziel, geht auch (Karte wird gelesen, nichts geschrieben).
+    let nur = Auftrag { quelle: t.path().join("karte"), vorhandene: vec![a.clone()], ..Default::default() };
+    let k3 = kopieren(&nur, &AtomicBool::new(false), |_| {}).unwrap();
+    assert_eq!(k3.ziele.len(), 1);
+
+    // Abbruch in einem weiteren Lauf: das neue Ziel wird weggeräumt, die vorhandene Kopie nicht.
+    let c = t.path().join("usb/A001R132");
+    let abbruch = AtomicBool::new(false);
+    let dritt =
+        Auftrag { quelle: t.path().join("karte"), ziele: vec![c.clone()], mit_md5: false, vorhandene: vec![a.clone()] };
+    let r = kopieren(&dritt, &abbruch, |m| {
+        if matches!(m, Meldung::Bytes { .. }) {
+            abbruch.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    });
+    assert!(r.is_err());
+    assert!(!c.exists(), "halbe neue Kopie weg");
+    assert!(matches!(bestimmen(&t.path().join("karte"), &a), Stand::Vorhanden { .. }), "frühere Kopie unberührt");
+
+    // Karte verändert (gleiche Grösse, anderer Inhalt): passt nicht mehr zur früheren Prüfsumme der Kopie.
+    assert!(ingest_kern::mhl::abweichungen_zur_historie(&a, &k3).unwrap().is_empty());
+    let datei = walkdir::WalkDir::new(t.path().join("karte"))
+        .into_iter()
+        .flatten()
+        .find(|e| e.file_type().is_file())
+        .unwrap()
+        .into_path();
+    let mut inhalt = fs::read(&datei).unwrap();
+    inhalt[0] ^= 0xff;
+    fs::write(&datei, inhalt).unwrap();
+    let k4 = kopieren(&nur, &AtomicBool::new(false), |_| {}).unwrap();
+    assert_eq!(ingest_kern::mhl::abweichungen_zur_historie(&a, &k4).unwrap().len(), 1, "Alarm: andere Daten");
 }
