@@ -241,3 +241,35 @@ def test_ergebnis_hochladen_nur_eigene_datei(tmp_path):
     cv2.imwrite(str(pfad), np.full((2048, 4096, 3), 128, np.uint8))
     klein = cv2.imdecode(np.frombuffer(klein_jpg(pfad), np.uint8), cv2.IMREAD_COLOR)
     assert klein.shape[:2] == (1024, 2048)
+
+
+def test_ki_lichter_nur_im_clip_und_nie_dunkler():
+    """Die KI-Schätzung ersetzt nur geclippte Pixel und nur nach oben; alles andere bleibt die Messung."""
+    from hdri_dienst import ki
+
+    h, w = 512, 1024
+    hdr = np.full((h, w, 3), 0.2, np.float32)
+    hdr[100:140, 300:360] = 1.5  # Fenster, gesättigt gemessen (Untergrenze)
+    clip = np.zeros((h, w), np.float32)
+    clip[100:140, 300:360] = 1
+    rgb8, k, h_klein, c_klein = ki.eingabe(hdr, clip)
+    assert rgb8.shape == (ki.HOEHE, ki.BREITE, 3) and rgb8[c_klein].min() >= 250  # Fenster weiss
+    # Schätzung: halbe Belichtung von h_klein, im Fenster 6× heller als gemessen
+    schaetzung = h_klein * 0.5
+    schaetzung[c_klein] *= 6
+    aus, erfunden, b = ki.zusammensetzen(hdr, clip, schaetzung, h_klein, c_klein)
+    assert abs(b["massstab"] - 2.0) < 1e-3
+    assert np.allclose(aus[clip == 0], hdr[clip == 0])
+    assert aus[120, 330, 0] > hdr[120, 330, 0] * 4
+    assert erfunden[clip == 0].max() == 0 and erfunden[120, 330] == 1
+    assert b["licht_im_clip_faktor"] > 4
+
+
+def test_ki_einstellungen(tmp_path):
+    from hdri_dienst import ki
+
+    assert ki.einstellungen(tmp_path / "fehlt.env") is None
+    (tmp_path / "ki.env").write_text("DIFFHDR_ORDNER=a\nDIFFHDR_PYTHON=b\nMODEL_BASE=c\n", encoding="utf-8")
+    assert ki.einstellungen(tmp_path / "ki.env") is None  # unvollständig
+    (tmp_path / "ki.env").write_text("# KI\nDIFFHDR_ORDNER=a\nDIFFHDR_PYTHON=b\nMODEL_BASE=c\nDIFFHDR_LORA=d\n", encoding="utf-8")
+    assert ki.einstellungen(tmp_path / "ki.env")["DIFFHDR_LORA"] == "d"

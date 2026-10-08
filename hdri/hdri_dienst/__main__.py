@@ -143,7 +143,28 @@ def ergebnis_angaben(hid: str, b: dict) -> dict:
     e = {"exr_gemessen": f"{hid}/{b['exr_gemessen']}", "vorschau": f"{hid}/{b['vorschau']}"}
     if b.get("vorschau_speicher"):
         e["vorschau_speicher"] = b["vorschau_speicher"]
+    if b.get("exr_ki"):
+        e["exr_ki"] = f"{hid}/{b['exr_ki']}"
+        e["ki"] = b.get("ki")
     return e
+
+
+def ki_anwenden(hid: str, ziel: Path, cfg: dict, arbeit: Path, log) -> dict:
+    """KI-Stufe „Lichter“ auf ein gerechnetes HDRI; schreibt das Ergebnis in bericht.json (ki_offen = False)."""
+    from . import ki
+    from .waechter import pruefen
+
+    b = json.loads((ziel / "bericht.json").read_text(encoding="utf-8"))
+    log(f"{hid}: KI-Stufe Lichter (DiffHDR) beginnt")
+    r = ki.lichter(ziel / b["exr_gemessen"], ziel / f"{hid}_ki.exr", cfg, arbeit / f"{hid}_ki", pruefen)
+    b["ki_offen"] = False
+    if r:
+        b["exr_ki"], b["ki"] = f"{hid}_ki.exr", r
+        log(f"{hid}: KI fertig: {r['clip_anteil']:.2%} ausgebrannt, Licht dort ×{r['licht_im_clip_faktor']:.1f}, {r['sekunden']} s")
+    else:
+        log(f"{hid}: nichts ausgebrannt, keine KI nötig")
+    (ziel / "bericht.json").write_text(json.dumps(b, indent=2), encoding="utf-8")
+    return b
 
 
 def laufen(datei: Path, wurzel: Path, takt_s: int, halb: bool) -> int:
@@ -178,6 +199,32 @@ def laufen(datei: Path, wurzel: Path, takt_s: int, halb: bool) -> int:
                 log(f"Job nicht gesetzt: {e}")
 
     versucht: dict[str, float] = {}
+    from . import ki
+
+    # KI-Stufen nur, wenn auf diesem Rechner eingerichtet (ki.env neben zugang.env, nie im Repo).
+    ki_cfg = ki.einstellungen(Path(datei).parent / "ki.env")
+    if ki_cfg:
+        log("KI-Stufe Lichter (DiffHDR) eingerichtet")
+
+    def ausstehende_ki() -> None:
+        """Offene KI-Stufen nachholen (nach einer Pause wegen nDisplay oder für ältere Aufnahmen)."""
+        if not ki_cfg:
+            return
+        for bericht in sorted((wurzel / "ergebnisse").glob("*/bericht.json")):
+            try:
+                b = json.loads(bericht.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if b.get("exr_gemessen") and b.get("ki_offen", "ki" not in b and "exr_ki" not in b):
+                hid = bericht.parent.name
+                try:
+                    neu = ki_anwenden(hid, bericht.parent, ki_cfg, wurzel / "arbeit", log)
+                except ki.KiAbbruch as e:
+                    log(f"{hid}: KI nicht gerechnet: {e}")
+                    b["ki_offen"], b["ki"] = False, {"fehler": str(e)[:500]}
+                    bericht.write_text(json.dumps(b, indent=2), encoding="utf-8")
+                    continue
+                job(hid, {"ergebnis": ergebnis_angaben(hid, neu)})
 
     def hochladen(hid: str, ziel: Path) -> dict | None:
         """Lädt das Panorama hoch (höchstens alle 30 min je Aufnahme versucht); schreibt den Pfad in bericht.json."""
@@ -263,6 +310,9 @@ def laufen(datei: Path, wurzel: Path, takt_s: int, halb: bool) -> int:
                     if isinstance(e, AufnahmeFehler):
                         (ziel / "bericht.json").write_text(json.dumps({"fehler": str(e)}), encoding="utf-8")
             ausstehende_hochladen()
+            ausstehende_ki()
+        except StageAktiv as e:
+            log(f"KI pausiert: {e}")
         except ServerFehler as e:
             log(f"Server: {e}")
         except Exception as e:  # nie still sterben: melden und im nächsten Takt weiter
@@ -296,7 +346,20 @@ def main(argv: list[str] | None = None) -> int:
     lf.add_argument("--wurzel", type=Path, default=Path(r"D:\hdri-dienst"))
     lf.add_argument("--takt", type=int, default=60)
     lf.add_argument("--halb", action="store_true")
+    kb = sub.add_parser("ki", help="KI-Stufe Lichter (DiffHDR) auf ein schon gerechnetes HDRI anwenden")
+    kb.add_argument("hdri_id")
+    kb.add_argument("--datei", type=Path, default=Path(r"D:\hdri-dienst\zugang.env"))
+    kb.add_argument("--wurzel", type=Path, default=Path(r"D:\hdri-dienst"))
     args = p.parse_args(argv)
+    if args.befehl == "ki":
+        from . import ki
+
+        cfg = ki.einstellungen(args.datei.parent / "ki.env")
+        if not cfg:
+            print("ki.env fehlt oder ist unvollständig (neben zugang.env)", file=sys.stderr)
+            return 2
+        ki_anwenden(args.hdri_id, args.wurzel / "ergebnisse" / args.hdri_id, cfg, args.wurzel / "arbeit", print)
+        return 0
     if args.befehl == "laufen":
         return laufen(args.datei, args.wurzel, args.takt, args.halb)
     if args.befehl == "rechnen":
