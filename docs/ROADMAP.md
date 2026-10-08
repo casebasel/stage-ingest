@@ -28,6 +28,13 @@ Gebaut ist der Kern (siehe KONZEPT Kapitel 14). Offen, in dieser Reihenfolge:
 - Kopieransicht: Dateiliste mit Stand pro Ziel (wie Silverstack)
 - ~~Mehrere Karten nacheinander (Warteschlange)~~ entschieden: vorerst nicht, eine Karte nach der anderen (Marlon, 08.10.2026)
 
+## Clips und Karten in der gemeinsamen Datenbank (Systemkarte c996e96/fc42079, freigegeben 08.10.2026)
+
+- Eigene Tabellen des Ingest `clip` (Zuordnung zu Take oder Drehort, auch „Zu klären“ von Hand, Neigung/Rollen aus
+  ART CMD) und `karte` (Projekt, Reel, freigegeben, Kopien, Speicherort, Bericht). Ersetzen `ingest_meldung`.
+  Nur der Ingest schreibt; Plate Assistant und Stage lesen. Wartet auf Schema und Migration des Plate Assistant;
+  bis dahin in `_ingest.json`.
+
 ## Filmlogik (Systemkarte 64edac1 … 64185e7, wartet auf die Migrationen des Plate Assistant)
 
 - Projektseite: Motive, Szenen, Drehorte, geplante Plates anlegen und bearbeiten (Schreibrecht wie die Stage, Regel im Code)
