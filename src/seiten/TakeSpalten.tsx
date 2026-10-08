@@ -82,6 +82,14 @@ const paSpalte = (id: string, titel: string, feld: string, rechts = false): Spal
 });
 
 const KATALOG: Spalte[] = [
+  // Vorschaubilder: erstes, mittleres, letztes Bild (ART CMD, sonst Quick Look), erst beim Einblenden gerechnet.
+  {
+    id: "vorschau",
+    titel: "Vorschau",
+    gruppe: "Bild",
+    quelle: "Clipdatei (ARRI ART CMD, sonst Quick Look); erstes, mittleres, letztes Bild",
+    wert: (t) => (t.datei ? <ClipVorschau datei={t.datei} /> : undefined),
+  },
   // Bild: aus der Kopie (Container).
   tech("codec", "Codec", "Bild", "Clipdatei (Container)", undefined, false),
   tech("aufloesung", "Auflösung", "Bild", "Clipdatei (Container)"),
@@ -388,5 +396,43 @@ export function SpaltenZellen({ spalten, t, technik }: { spalten: Spalte[]; t: T
         );
       })}
     </>
+  );
+}
+
+// Vorschaubilder nacheinander rechnen (ART CMD braucht pro Bild einige Sekunden; nie alle Clips gleichzeitig).
+const vorschauGemerkt = new Map<string, Promise<string[]>>();
+let vorschauKette: Promise<unknown> = Promise.resolve();
+function vorschauLaden(datei: string, artCmd: string): Promise<string[]> {
+  const schluessel = `${datei}|${artCmd}`;
+  let p = vorschauGemerkt.get(schluessel);
+  if (!p) {
+    p = vorschauKette.then(() => invoke<string[]>("clip_vorschaubilder", { datei, artCmd: artCmd || null }));
+    vorschauKette = p.catch(() => {});
+    vorschauGemerkt.set(schluessel, p);
+  }
+  return p;
+}
+
+function ClipVorschau({ datei }: { datei: string }) {
+  const artCmd = useEinstellungen().artCmd.trim();
+  const [bilder, setBilder] = useState<string[] | null>(null);
+  const [fehler, setFehler] = useState<string | null>(null);
+  useEffect(() => {
+    let aus = false;
+    vorschauLaden(datei, artCmd)
+      .then((b) => !aus && setBilder(b))
+      .catch((e) => !aus && setFehler(String(e)));
+    return () => {
+      aus = true;
+    };
+  }, [datei, artCmd]);
+  if (fehler) return <span className="leise" title={fehler}>–</span>;
+  if (!bilder) return <span className="leise">…</span>;
+  return (
+    <span className="clip-vorschau">
+      {bilder.map((b, i) => (
+        <img key={i} src={b} alt={["Erstes Bild", "Mittleres Bild", "Letztes Bild"][i] ?? "Bild"} loading="lazy" />
+      ))}
+    </span>
   );
 }

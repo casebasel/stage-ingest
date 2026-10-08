@@ -36,6 +36,8 @@ pub struct Angaben<'a> {
     pub mit_md5: bool,
     /// Projektangaben für den Kopf, nur gefüllte (z. B. „Projekt“, „Produktionsfirma“, „Regie“, „DoP“).
     pub projekt: Vec<(String, String)>,
+    /// Vorschaubilder pro Clip (Clipname, JPEGs: erstes, mittleres, letztes Bild); leer = kein Abschnitt „Clips“.
+    pub bilder: Vec<(String, Vec<Vec<u8>>)>,
 }
 
 #[derive(Serialize)]
@@ -123,6 +125,24 @@ pub fn pdf(
     let json = serde_json::to_string(&daten).map_err(|e| Fehler::Setzen(e.to_string()))?;
     let mut eingaben = Dict::new();
     eingaben.insert("daten".into(), json.into_value());
+    let bilder: Vec<typst::foundations::Value> = angaben
+        .bilder
+        .iter()
+        .map(|(name, jpegs)| {
+            let mut d = Dict::new();
+            d.insert("name".into(), name.clone().into_value());
+            d.insert(
+                "bilder".into(),
+                jpegs
+                    .iter()
+                    .map(|b| typst::foundations::Bytes::new(b.clone()).into_value())
+                    .collect::<Vec<_>>()
+                    .into_value(),
+            );
+            d.into_value()
+        })
+        .collect();
+    eingaben.insert("bilder".into(), bilder.into_value());
 
     let motor = TypstEngine::builder().main_file(VORLAGE).fonts(SCHRIFTEN).build();
     let dokument = motor.compile_with_input(eingaben).output.map_err(|e| Fehler::Setzen(format!("{e:?}")))?;

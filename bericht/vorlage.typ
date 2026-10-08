@@ -69,6 +69,23 @@
   #for f in z.fehler [ #text(fill: gold)[– #f] \ ]
 ]
 
+#let bilder = sys.inputs.at("bilder", default: ())
+#if bilder.len() > 0 [
+  == Clips
+  #v(4pt)
+  #set text(8pt)
+  #table(
+    columns: (auto, 1fr),
+    stroke: (x, y) => (bottom: 0.4pt + linie),
+    inset: (x: 3pt, y: 4pt),
+    align: (x, y) => horizon + left,
+    ..bilder.map(c => (
+      mono(c.name),
+      stack(dir: ltr, spacing: 3pt, ..c.bilder.map(b => image(b, width: 38mm))),
+    )).flatten(),
+  )
+]
+
 == Dateien
 #v(4pt)
 #set text(8pt)

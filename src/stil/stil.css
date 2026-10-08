@@ -1507,6 +1507,17 @@ input[type="checkbox"][role="switch"]:checked::before {
 .knopf-abspielen:hover {
   background: var(--hover);
 }
+.clip-vorschau {
+  display: inline-flex;
+  gap: 2px;
+}
+.clip-vorschau img {
+  display: block;
+  width: 72px;
+  height: auto;
+  border-radius: 2px;
+  background: var(--panel-2);
+}
 .ohne-drehort {
   margin-bottom: 16px;
 }

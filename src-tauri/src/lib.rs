@@ -7,6 +7,7 @@ mod plates;
 mod projekt;
 mod stage;
 mod technik;
+mod vorschaubilder;
 mod zuordnung;
 
 use std::path::{Path, PathBuf};
@@ -708,9 +709,29 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
         ));
     }
     // Bericht auf jedes Ziel, auch auf fehlerhafte (dort belegt er den Fehler), soweit schreibbar.
+    // Vorschaubilder für den Bericht (und gleich gemerkt für die Spalte „Vorschau“), aus der ersten guten Kopie.
+    // Nach der Freigabe: die Entscheidung wartet nie darauf. Ein Fehler kostet nur die Bilder.
+    let mut bilder = Vec::new();
+    if let (Some(erstes), Ok(cache)) = (urteile.iter().find(|u| u.gut()), app.path().app_cache_dir()) {
+        for c in clips.iter().filter(|c| c.angaben.is_some()) {
+            let _ = app.emit(FORTSCHRITT, Fortschritt::Nachlesen { pfad: format!("Vorschaubilder: {}", c.pfad) });
+            if let Ok(dateien) =
+                vorschaubilder::erzeugen(&erstes.ordner.join(&c.pfad), auftrag.art_cmd.as_deref(), &cache)
+            {
+                let jpegs: Vec<Vec<u8>> = dateien.iter().filter_map(|p| std::fs::read(p).ok()).collect();
+                if !jpegs.is_empty() {
+                    bilder.push((soll::ohne_endung(c.pfad.rsplit('/').next().unwrap_or(&c.pfad)).to_owned(), jpegs));
+                }
+            }
+        }
+    }
     let version = app.package_info().version.to_string();
-    let angaben =
-        ingest_bericht::Angaben { version: &version, mit_md5: auftrag.mit_md5, projekt: projekt_zeilen(auftrag) };
+    let angaben = ingest_bericht::Angaben {
+        version: &version,
+        mit_md5: auftrag.mit_md5,
+        projekt: projekt_zeilen(auftrag),
+        bilder,
+    };
     let berichte: Vec<Result<PathBuf, String>> = (0..urteile.len())
         .map(|i| {
             let pdf =
@@ -1048,6 +1069,7 @@ fn kaskade_ausfuehren(
         version: &version,
         mit_md5: true,
         projekt: zusammenfassung.as_ref().map(|z| z.projekt.clone().into_iter().collect()).unwrap_or_default(),
+        bilder: Vec::new(),
     };
     let bericht = ingest_bericht::pdf(&fuer_bericht, &urteile, &kennungen, &freigabe, 1, &b_angaben)
         .map_err(|e| e.to_string())
@@ -1445,6 +1467,24 @@ async fn art_viewer_installieren(app: AppHandle) -> Result<(), String> {
     im_hintergrund(move || artcmd_laden::viewer_installieren(&cache)).await
 }
 
+/// Vorschaubilder eines Clips (erstes, mittleres, letztes Bild) als JPEG-Daten-URLs, im Zwischenspeicher gemerkt.
+#[tauri::command]
+async fn clip_vorschaubilder(app: AppHandle, datei: PathBuf, art_cmd: Option<PathBuf>) -> Result<Vec<String>, String> {
+    use base64::Engine;
+    let cache = app.path().app_cache_dir().map_err(|e| e.to_string())?;
+    let art = art_cmd.filter(|p| !p.as_os_str().is_empty());
+    im_hintergrund(move || {
+        vorschaubilder::erzeugen(&datei, art.as_deref(), &cache)?
+            .iter()
+            .map(|p| {
+                let b = std::fs::read(p).map_err(|e| e.to_string())?;
+                Ok(format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(b)))
+            })
+            .collect()
+    })
+    .await
+}
+
 /// Technische Werte der Clips für die Spalten der Take-Tabellen (aus der Kopie, nur der Kopf; siehe `technik`).
 #[tauri::command]
 async fn take_technik(
@@ -1618,6 +1658,7 @@ pub fn run() {
             stage_projekt,
             projekt_uebersicht,
             take_technik,
+            clip_vorschaubilder,
             karte_wiedererkennen,
             karte_einsortieren,
             artcmd_laden,

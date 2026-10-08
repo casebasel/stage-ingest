@@ -52,11 +52,26 @@ fn bericht_wird_gesetzt() {
         &kennungen,
         &freigabe,
         1,
-        &Angaben { version: "0.1.0", mit_md5: true, projekt: vec![("Regie".into(), "Ada Lovelace".into())] },
+        &Angaben {
+            version: "0.1.0",
+            mit_md5: true,
+            projekt: vec![("Regie".into(), "Ada Lovelace".into())],
+            // Abschnitt „Clips“ mit echten JPEGs (drei Bilder wie im Ingest).
+            bilder: vec![("A001C001_261007_R132".into(), vec![jpeg(); 3])],
+        },
     )
     .unwrap();
     assert!(pdf.starts_with(b"%PDF"));
     if let Ok(ziel) = std::env::var("BERICHT_PROBE") {
         fs::write(ziel, &pdf).unwrap();
     }
+}
+
+/// Kleines JPEG (16 x 9, grau) für den Abschnitt „Clips“.
+fn jpeg() -> Vec<u8> {
+    let mut aus = Vec::new();
+    image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(16, 9, image::Rgb([120, 120, 120])))
+        .write_to(&mut std::io::Cursor::new(&mut aus), image::ImageFormat::Jpeg)
+        .unwrap();
+    aus
 }

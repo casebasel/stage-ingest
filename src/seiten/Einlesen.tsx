@@ -724,7 +724,7 @@ function Fortschritt() {
   ];
   const jetzt = schritte.findIndex((s) => s.id === phase);
   // Nach dem Zurücklesen meldet der Kern auch Bewegungsdaten und Plates als „nachlesen“.
-  const abschluss = phase === "nachlesen" && /^(ART CMD|Plates)/.test(stand.pruefPfad);
+  const abschluss = phase === "nachlesen" && /^(ART CMD|Plates|Vorschaubilder)/.test(stand.pruefPfad);
   const ausgefallen = (ordner: string) => stand.ausfaelle.find((a) => ordner.startsWith(ohneEnde(a.ordner)) || a.ordner.startsWith(ordner));
 
   return (

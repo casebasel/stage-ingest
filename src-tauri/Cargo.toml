@@ -29,7 +29,7 @@ tungstenite = "0.24"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 gethostname = "0.5"
 # Vorschaubilder (Fotos, HDRI) verkleinern und als data-URL an die Oberfläche geben.
-image = { version = "0.25", default-features = false, features = ["jpeg"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff"] }
 base64 = "0.22"
 walkdir = "2"
 zip = { version = "2", default-features = false, features = ["deflate"] }
