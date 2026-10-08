@@ -233,6 +233,10 @@ code {
   opacity: 0.45;
   box-shadow: none;
 }
+.knopf[aria-pressed="true"] {
+  background: var(--auswahl);
+  border-color: var(--akzent);
+}
 .knopf-haupt {
   background: var(--akzent);
   border-color: var(--akzent);

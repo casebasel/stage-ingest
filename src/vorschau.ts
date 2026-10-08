@@ -121,7 +121,7 @@ const laufwerke = () => [
 const projekt = { id: "projekt-happy_end", name: "Happy End", kurzname: "HAPPY_END", aktiv: true, fps: 25, codec: "ProRes 422 HQ", aufloesungPx: "3840x2160", art: "werbung", firma: "Beispiel Film AG", regie: "", dop: "" };
 
 const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
-  "plugin:app|version": () => "0.1.6 · Vorschau",
+  "plugin:app|version": () => "Vorschau mit Beispieldaten, nichts wird kopiert",
   "plugin:updater|check": () => null,
   "plugin:opener|open_path": () => null,
   "plugin:dialog|open": (a) => {
@@ -246,22 +246,4 @@ export function einrichten() {
   } catch {
     // ohne Speicher: dann eben ohne Vorbelegung
   }
-  const marke = document.createElement("div");
-  marke.textContent = "Vorschau mit Beispieldaten · nichts wird kopiert";
-  marke.setAttribute("role", "note");
-  Object.assign(marke.style, {
-    position: "fixed",
-    top: "10px",
-    left: "50%",
-    transform: "translateX(-50%)",
-    zIndex: "50",
-    padding: "4px 10px",
-    font: "500 12px/1.4 var(--schrift)",
-    color: "var(--amber-kontrast)",
-    background: "var(--amber)",
-    borderRadius: "999px",
-    pointerEvents: "none",
-  });
-  document.addEventListener("DOMContentLoaded", () => document.body.appendChild(marke));
-  if (document.body) document.body.appendChild(marke);
 }

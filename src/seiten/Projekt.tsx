@@ -2,8 +2,8 @@
 // Beantwortet vor dem Formatieren: Ist von diesem Projekt alles da? Welche Takes haben noch keinen Clip?
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { RefreshCw, Settings } from "lucide-react";
-import { ProjektEinstellungen } from "../ProjektEinstellungen";
+import { Plus, RefreshCw, Settings } from "lucide-react";
+import { NeuesProjekt, ProjektEinstellungen } from "../ProjektEinstellungen";
 import { useEinstellungen } from "../einstellungen";
 import { useKonto, type Projekt as ProjektT } from "../konto";
 import { useLauf } from "../lauf";
@@ -53,6 +53,7 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
   const [ansicht, setAnsicht] = useState<"takes" | "karten" | "klaerung">("takes");
   const [gewaehlt, setGewaehlt] = useState<string | null>(null);
   const [einstellen, setEinstellen] = useState(false);
+  const [anlegen, setAnlegen] = useState(false);
   // Aktueller Stand des Projekts (nach dem Speichern neu geladen) für das Formular.
   const aktuell = konto.projekte.find((p) => p.id === projekt?.id) ?? projekt;
 
@@ -128,8 +129,28 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
             </button>
           </>
         )}
+        {verbunden && (
+          <button
+            className="knopf"
+            aria-pressed={anlegen}
+            onClick={() => {
+              setAnlegen(!anlegen);
+              setEinstellen(false);
+            }}
+          >
+            <Plus size={14} strokeWidth={2} aria-hidden /> Neues Projekt
+          </button>
+        )}
         {verbunden && projekt?.id && (
-          <button className="knopf" aria-pressed={einstellen} onClick={() => setEinstellen(!einstellen)} title="Projekt-Einstellungen">
+          <button
+            className="knopf"
+            aria-pressed={einstellen}
+            onClick={() => {
+              setEinstellen(!einstellen);
+              setAnlegen(false);
+            }}
+            title="Projekt-Einstellungen"
+          >
             <Settings size={14} strokeWidth={2} aria-hidden /> Einstellungen
           </button>
         )}
@@ -159,7 +180,20 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
         </p>
       )}
 
-      {einstellen && aktuell ? (
+      {anlegen ? (
+        <div className="projekt-formular">
+          <NeuesProjekt
+            fertig={(p) => {
+              setAnlegen(false);
+              if (p) {
+                setProjekt(p);
+                setU(null);
+                laden(p);
+              }
+            }}
+          />
+        </div>
+      ) : einstellen && aktuell ? (
         <div className="projekt-formular">
           <ProjektEinstellungen
             projekt={aktuell}
@@ -171,7 +205,7 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
         </div>
       ) : !u ? (
         <div className="leer">
-          <h2>{laedt ? "Lädt die Übersicht …" : "Projekt wählen"}</h2>
+          <h2>{laedt ? "Lädt die Übersicht …" : verbunden ? "Projekt wählen oder neu anlegen" : "Projekt wählen"}</h2>
           <p>
             Die Übersicht zeigt pro Drehort die gedrehten Takes, welche schon sicher kopiert sind und für welche die Karte
             noch fehlt. Eingelesene Karten werden auf den Zielen gesucht

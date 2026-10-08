@@ -132,3 +132,71 @@ export function ProjektEinstellungen({ projekt, schliessen }: { projekt: Projekt
     </section>
   );
 }
+
+/** Neues Projekt anlegen: Name, Kurzname wird vorgeschlagen und ist danach fest. */
+export function NeuesProjekt({ fertig }: { fertig: (p?: Projekt) => void }) {
+  const konto = useKonto();
+  const [name, setName] = useState("");
+  const [kurzname, setKurzname] = useState("");
+  const [vonHand, setVonHand] = useState(false);
+  const [stand, setStand] = useState<{ ton: "fehler" | "laeuft"; text: string } | null>(null);
+  const vorhanden = konto.projekte.find((p) => p.kurzname === kurzname);
+
+  async function anlegen() {
+    if (!name.trim()) return setStand({ ton: "fehler", text: "Der Name darf nicht leer sein." });
+    if (!/^[A-Z0-9]+(_[A-Z0-9]+)*$/.test(kurzname) || kurzname.length < 2 || kurzname.length > 24)
+      return setStand({ ton: "fehler", text: "Kurzname: 2–24 Zeichen, nur A–Z, 0–9 und _ (nicht vorne oder hinten)." });
+    if (vorhanden) return setStand({ ton: "fehler", text: `Den Kurznamen hat schon „${vorhanden.name}“.` });
+    setStand({ ton: "laeuft", text: "Legt an …" });
+    try {
+      fertig(await konto.projektAnlegen(name.trim(), kurzname));
+    } catch (e) {
+      setStand({ ton: "fehler", text: String(e) });
+    }
+  }
+
+  return (
+    <section className="block projekt-einstellungen" aria-labelledby="t-np">
+      <div className="block-kopf">
+        <h2 id="t-np">Neues Projekt</h2>
+        <span className="leise">Erscheint danach in allen drei Apps</span>
+      </div>
+      <Feld name="Name" hilfe="Änderbar, auch später.">
+        <input
+          aria-label="Name"
+          autoFocus
+          placeholder="z. B. Happy End"
+          value={name}
+          onChange={async (e) => {
+            const n = e.target.value;
+            setName(n);
+            setStand(null);
+            if (!vonHand) setKurzname(await konto.kurznameVorschlag(n));
+          }}
+        />
+      </Feld>
+      <Feld name="Kurzname" hilfe="Ordnername auf allen Platten. Nach dem Anlegen fest.">
+        <input
+          aria-label="Kurzname"
+          className="zahl"
+          placeholder="HAPPY_END"
+          value={kurzname}
+          onChange={(e) => {
+            setVonHand(true);
+            setKurzname(e.target.value.toUpperCase());
+            setStand(null);
+          }}
+        />
+      </Feld>
+      <div className="knopfreihe einstellungen-knoepfe">
+        {stand && <Status ton={stand.ton}>{stand.text}</Status>}
+        <button className="knopf" onClick={() => fertig()}>
+          Abbrechen
+        </button>
+        <button className="knopf knopf-haupt" disabled={!name.trim() || !kurzname || stand?.ton === "laeuft"} onClick={anlegen}>
+          Anlegen
+        </button>
+      </div>
+    </section>
+  );
+}
