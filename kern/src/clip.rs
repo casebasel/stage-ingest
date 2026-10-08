@@ -219,6 +219,92 @@ pub fn lesen(pfad: &Path) -> io::Result<ClipAngaben> {
     })
 }
 
+/// Alle Metadaten-Einträge einer QuickTime-Datei als Text, Schlüssel wie in der Datei: `moov/meta` bzw.
+/// `moov/udta/meta` (`keys` + `ilst`, z. B. ARRI `com.arri.camera.ExposureIndexAsa`, iPhone
+/// `com.apple.quicktime.model`) und die klassischen `udta`-Einträge (`©mak`, `©mod`, …). MXF: leer, dort liefert
+/// ART CMD die Kamerawerte. Gelesen wird nur der Kopf.
+pub fn metadaten(pfad: &Path) -> io::Result<std::collections::BTreeMap<String, String>> {
+    let mut aus = std::collections::BTreeMap::new();
+    let mut datei = File::open(pfad)?;
+    let mut anfang = [0u8; 4];
+    if datei.read_exact(&mut anfang).is_ok() && anfang == crate::mxf::PRAEFIX {
+        return Ok(aus);
+    }
+    let moov = moov_lesen(&mut datei)?;
+    let wurzel = atome(&moov, 8, moov.len());
+    let mut metas: Vec<&Atom> = wurzel.iter().filter(|a| &a.art == b"meta").collect();
+    let udta: Vec<Atom> = finde(&moov, &wurzel, b"udta").map(|u| kinder(&moov, u)).unwrap_or_default();
+    metas.extend(udta.iter().filter(|a| &a.art == b"meta"));
+    for meta in metas {
+        // QuickTime: Kinder direkt; MP4 (ISO): zuerst 4 Byte Version/Flags.
+        let mut k = kinder(&moov, meta);
+        if finde(&moov, &k, b"keys").is_none() && finde(&moov, &k, b"ilst").is_none() {
+            k = atome(&moov, (meta.beginn + 4).min(meta.ende), meta.ende);
+        }
+        let schluessel: Vec<String> = finde(&moov, &k, b"keys")
+            .map(|ks| {
+                let mut v = Vec::new();
+                let anzahl = be32(&moov, ks.beginn + 4).unwrap_or(0);
+                let mut i = ks.beginn + 8;
+                for _ in 0..anzahl {
+                    let Some(g) = be32(&moov, i).map(|g| g as usize).filter(|g| *g >= 8 && i + g <= ks.ende) else {
+                        break;
+                    };
+                    v.push(String::from_utf8_lossy(&moov[i + 8..i + g]).trim_end_matches('\0').to_owned());
+                    i += g;
+                }
+                v
+            })
+            .unwrap_or_default();
+        let Some(ilst) = finde(&moov, &k, b"ilst") else { continue };
+        for eintrag in kinder(&moov, ilst) {
+            let name = match (u32::from_be_bytes(eintrag.art) as usize).checked_sub(1).and_then(|i| schluessel.get(i)) {
+                Some(n) => n.clone(),
+                None => String::from_utf8_lossy(&eintrag.art).into_owned(),
+            };
+            let teile = kinder(&moov, &eintrag);
+            if let Some(w) = finde(&moov, &teile, b"data").and_then(|d| datenwert(&moov[d.beginn..d.ende])) {
+                aus.insert(name, w);
+            }
+        }
+    }
+    // Klassisch: `©xyz` = Länge(2) Sprache(2) Text.
+    for a in udta.iter().filter(|a| a.art[0] == 0xa9) {
+        let name = format!("©{}", String::from_utf8_lossy(&a.art[1..]));
+        let Some(n) = moov.get(a.beginn..a.beginn + 2).map(|b| u16::from_be_bytes([b[0], b[1]]) as usize) else {
+            continue;
+        };
+        if let Some(t) = moov.get(a.beginn + 4..a.beginn + 4 + n) {
+            let t = String::from_utf8_lossy(t).trim().to_owned();
+            if !t.is_empty() {
+                aus.entry(name).or_insert(t);
+            }
+        }
+    }
+    Ok(aus)
+}
+
+/// Wert eines `data`-Atoms (Typ(4) Gebiet(4) Wert) als Text.
+fn datenwert(d: &[u8]) -> Option<String> {
+    let typ = u32::from_be_bytes(d.get(0..4)?.try_into().ok()?) & 0x00ff_ffff;
+    let w = d.get(8..)?;
+    let text = match (typ, w.len()) {
+        (1, _) => String::from_utf8_lossy(w).trim_end_matches('\0').trim().to_owned(),
+        (21, 1) => (w[0] as i8).to_string(),
+        (21, 2) => i16::from_be_bytes([w[0], w[1]]).to_string(),
+        (21, 4) => i32::from_be_bytes(w.try_into().ok()?).to_string(),
+        (21, 8) => i64::from_be_bytes(w.try_into().ok()?).to_string(),
+        (22, 1) => w[0].to_string(),
+        (22, 2) => u16::from_be_bytes([w[0], w[1]]).to_string(),
+        (22, 4) => u32::from_be_bytes(w.try_into().ok()?).to_string(),
+        (22, 8) => u64::from_be_bytes(w.try_into().ok()?).to_string(),
+        (23, 4) => format!("{}", f32::from_be_bytes(w.try_into().ok()?)),
+        (24, 8) => format!("{}", f64::from_be_bytes(w.try_into().ok()?)),
+        _ => return None, // Bilder, Binärdaten
+    };
+    (!text.is_empty()).then_some(text)
+}
+
 /// Codec-Kennung der QuickTime-Datei → Name wie bei ARRI (CAP-Liste Codec, Kameramenü).
 fn codec_name(format: &[u8]) -> String {
     match format {
@@ -310,6 +396,18 @@ mod tests {
                                                                          // 29,97 DF: Bild 1800 ist 00:01:00;02
         assert_eq!(timecode(1800, 30, true), "00:01:00;02");
         assert_eq!(timecode(17982, 30, true), "00:10:00;00");
+    }
+
+    #[test]
+    fn metadaten_aus_quicktime() {
+        // Erzeugt mit ffmpeg -movflags use_metadata_tags (Schlüssel wie ARRI sie schreibt, Werte erfunden). Eigener
+        // Ordner, weil `tests/daten` als ganze Karte kopiert wird.
+        let m = metadaten(&Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/metadaten/A006C001_mit_metadaten.mov"))
+            .unwrap();
+        assert_eq!(m.get("com.arri.camera.ExposureIndexAsa").map(String::as_str), Some("800"));
+        assert_eq!(m.get("com.arri.camera.CameraModel").map(String::as_str), Some("ALEXA Mini"));
+        assert_eq!(m.get("title").map(String::as_str), Some("Probe"));
+        assert!(metadaten(&daten("A005C001_120101_R56E.mov")).is_ok());
     }
 
     #[test]

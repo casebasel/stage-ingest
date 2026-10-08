@@ -5,6 +5,7 @@ mod plate;
 mod plates;
 mod projekt;
 mod stage;
+mod technik;
 mod zuordnung;
 
 use std::path::{Path, PathBuf};
@@ -1279,6 +1280,14 @@ async fn projekt_uebersicht(
     im_hintergrund(move || Ok(projekt::laden(&p, zugang.as_ref(), projekt, &basis))).await
 }
 
+/// Technische Werte der Clips für die Spalten der Take-Tabellen (aus der Kopie, nur der Kopf; siehe `technik`).
+#[tauri::command]
+async fn take_technik(
+    anfragen: Vec<technik::Anfrage>,
+) -> Result<Vec<std::collections::BTreeMap<String, String>>, String> {
+    im_hintergrund(move || Ok(anfragen.iter().map(technik::lesen).collect())).await
+}
+
 /// Aktives Filmprojekt der Stage (für den Vorschlag im Studio), `None` ohne.
 #[tauri::command]
 async fn stage_projekt(adresse: String) -> Result<Option<serde_json::Value>, String> {
@@ -1438,6 +1447,7 @@ pub fn run() {
             clip_zuordnen,
             stage_projekt,
             projekt_uebersicht,
+            take_technik,
             abbrechen,
             laeuft,
             verlauf,

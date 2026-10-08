@@ -103,6 +103,58 @@ pub fn auswerten(csv_text: &str) -> Result<Bewegung, String> {
     })
 }
 
+/// Alle Spalten der CSV von ART CMD als ein Wert pro Clip: gleich in allen Bildern → dieser Wert, Zahlen, die sich
+/// ändern → „min … max“, sonst der erste. Timecode und Bildzähler fehlen (ändern sich mit jedem Bild).
+pub fn felder(csv_text: &str) -> Result<std::collections::BTreeMap<String, String>, String> {
+    let mut r = csv::ReaderBuilder::new().delimiter(b';').flexible(true).from_reader(csv_text.as_bytes());
+    let kopf: Vec<String> = r.headers().map_err(|e| e.to_string())?.iter().map(|h| h.trim().to_owned()).collect();
+    // Pro Spalte: erster Wert, ob alle gleich, Zahlenbereich.
+    let mut stand: Vec<(Option<String>, bool, f64, f64, bool)> =
+        vec![(None, true, f64::INFINITY, f64::NEG_INFINITY, true); kopf.len()];
+    for z in r.records() {
+        let z = z.map_err(|e| e.to_string())?;
+        for (i, w) in z.iter().enumerate().take(kopf.len()) {
+            let w = w.trim();
+            if w.is_empty() {
+                continue;
+            }
+            let s = &mut stand[i];
+            match &s.0 {
+                None => s.0 = Some(w.to_owned()),
+                Some(erst) if erst != w => s.1 = false,
+                _ => {}
+            }
+            match w.replace(',', ".").parse::<f64>() {
+                Ok(x) => {
+                    s.2 = s.2.min(x);
+                    s.3 = s.3.max(x);
+                }
+                Err(_) => s.4 = false,
+            }
+        }
+    }
+    let mut aus = std::collections::BTreeMap::new();
+    for (name, (erst, gleich, min, max, zahl)) in kopf.into_iter().zip(stand) {
+        let klein = name.to_ascii_lowercase();
+        let Some(erst) = erst else { continue };
+        if name.is_empty() || klein.contains("timecode") || klein.ends_with("frame") || klein.contains("framecount") {
+            continue;
+        }
+        let wert = if gleich || !zahl { erst } else { format!("{} … {}", kurz(min), kurz(max)) };
+        aus.insert(name, wert);
+    }
+    Ok(aus)
+}
+
+fn kurz(x: f64) -> String {
+    let r = (x * 100.0).round() / 100.0;
+    if r.fract() == 0.0 {
+        format!("{}", r as i64)
+    } else {
+        format!("{r}")
+    }
+}
+
 /// Ruft ART CMD für einen Clip auf und schreibt die CSV nach `ausgabe`.
 pub fn exportieren(art_cmd: &Path, clip: &Path, ausgabe: &Path) -> Result<(), String> {
     let aus = Command::new(art_cmd)
@@ -132,6 +184,14 @@ mod tests {
         10:00:00:01;25/1;-2.0;0.4;35000\n\
         10:00:00:02;25/1;-2.2;0.5;35000\n\
         10:00:00:03;25/1;-2.1;0.3;0\n";
+
+    #[test]
+    fn felder_pro_clip() {
+        let f = felder(CSV).unwrap();
+        assert_eq!(f.get(TILT).map(String::as_str), Some("-2.2 … -2"));
+        assert_eq!(f.get("projectRate/timebase").map(String::as_str), Some("25/1"));
+        assert!(!f.contains_key("timecode"));
+    }
 
     #[test]
     fn mittel_und_bereich() {

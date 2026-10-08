@@ -2,7 +2,7 @@
 // Takes, Karten). Beantwortet auch vor dem Formatieren: Ist von diesem Projekt alles da? Was ist zu klären?
 // Das Projekt selbst wird oben links gewählt (gilt für alle Seiten). Bearbeiten von Plates und Takes kommt später
 // (Systemkarte, Entscheidung „Projektmanager“ vom 08.10.2026); heute nur lesen, Projekte und Drehorte anlegen.
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { ChevronDown, ChevronRight, Image as Bild, MapPinPlus, Plus, RefreshCw, Settings, X } from "lucide-react";
 import { NeuerDrehort, NeuesProjekt, ProjektEinstellungen } from "../ProjektEinstellungen";
@@ -11,8 +11,9 @@ import { useKonto, type Projekt as ProjektT, type Zugang } from "../konto";
 import { useLauf } from "../lauf";
 import { Status, type Ton } from "../teile";
 import { kurz } from "./Einlesen";
+import { SpaltenKopf, SpaltenMenue, SpaltenZellen, useTakeSpalten, type Spalte, type TakeMitWerten } from "./TakeSpalten";
 
-type TakeStand = { id: string; nummer: number; art: string; bewertung: string; clip: string; karte: string | null; freigegeben: boolean };
+type TakeStand = TakeMitWerten;
 type FotoStand = { id: string; art: string; pfad: string };
 type HdriStand = {
   id: string;
@@ -82,6 +83,36 @@ function stand(t: TakeStand): { ton: Ton; stand: string } {
   if (t.karte) return { ton: "rot", stand: "Nicht freigegeben" };
   return { ton: "fehler", stand: "Karte fehlt" };
 }
+
+// Grundspalten jeder Take-Tabelle (Gruppe „Take“); „Take“ selbst ist immer sichtbar.
+const GRUNDSPALTEN: Spalte[] = [
+  { id: "take", titel: "Take", gruppe: "Take", quelle: "Plate Assistant", rechts: true, wert: (t) => t.nummer },
+  {
+    id: "art",
+    titel: "Art · Bewertung",
+    gruppe: "Take",
+    quelle: "Plate Assistant",
+    wert: (t) => (
+      <span className="ohne-umbruch">
+        <span className="leise">{ART[t.art] ?? t.art}</span>
+        {BEWERTUNG[t.bewertung] && ` · ${BEWERTUNG[t.bewertung]}`}
+      </span>
+    ),
+  },
+  { id: "clip", titel: "Clip", gruppe: "Take", quelle: "Plate Assistant / Karte", mono: true, wert: (t) => t.clip || undefined },
+  { id: "karte", titel: "Karte", gruppe: "Take", quelle: "Eingelesene Karten", mono: true, wert: (t) => t.karte ?? undefined },
+  {
+    id: "stand",
+    titel: "Stand",
+    gruppe: "Take",
+    quelle: "Eingelesene Karten",
+    wert: (t) => {
+      const x = stand(t);
+      return <Status ton={x.ton}>{x.stand}</Status>;
+    },
+  },
+];
+const FEST = ["take"];
 
 const datumKurz = (d: string) => (d ? d.slice(5).split("-").reverse().join(".") : "ohne Datum");
 const plateTitel = (p: PlateStand) => p.slate || (p.nummer ? `P${String(p.nummer).padStart(3, "0")}` : "Plate");
@@ -396,6 +427,9 @@ function AlleTakes({
       (filter === "offen" && z.take.karte && !z.take.freigegeben) ||
       (filter === "sicher" && z.take.freigegeben),
   );
+  const takes = useMemo(() => zeilen.map((z) => z.take), [zeilen]);
+  const sp = useTakeSpalten(GRUNDSPALTEN, takes);
+  const spalten = sp.sichtbar.filter((x) => x.id !== "take");
   return (
     <>
       <div className="detail-kopf">
@@ -414,6 +448,7 @@ function AlleTakes({
             </button>
           ))}
         </div>
+        <SpaltenMenue alle={sp.alle} an={sp.an} setAn={sp.setAn} offen={sp.menueOffen} setOffen={sp.setMenueOffen} festeIds={FEST} />
       </div>
       {sichtbar.length ? (
         <table className="tabelle tabelle-waehlbar">
@@ -422,10 +457,7 @@ function AlleTakes({
               <th>Drehort</th>
               <th>Plate</th>
               <th className="rechts">Take</th>
-              <th>Art · Bewertung</th>
-              <th>Clip</th>
-              <th>Karte</th>
-              <th>Stand</th>
+              <SpaltenKopf spalten={spalten} />
             </tr>
           </thead>
           <tbody>
@@ -444,15 +476,7 @@ function AlleTakes({
                   <span className="zahl">{plateTitel(z.plate)}</span> {z.plate.name}
                 </td>
                 <td className="rechts zahl">{z.take.nummer}</td>
-                <td className="ohne-umbruch">
-                  <span className="leise">{ART[z.take.art] ?? z.take.art}</span>
-                  {BEWERTUNG[z.take.bewertung] && ` · ${BEWERTUNG[z.take.bewertung]}`}
-                </td>
-                <td className="zahl">{z.take.clip || <span className="leise">–</span>}</td>
-                <td className="zahl">{z.take.karte ?? <span className="leise">–</span>}</td>
-                <td>
-                  <Status ton={z.ton}>{z.stand}</Status>
-                </td>
+                <SpaltenZellen spalten={spalten} t={z.take} technik={sp.technik} />
               </tr>
             ))}
           </tbody>
@@ -590,6 +614,8 @@ const hdriTon = (h: HdriStand) => {
 
 function PlateDetail({ dreh, p, drehWaehlen }: { dreh: DrehStand; p: PlateStand; drehWaehlen: () => void }) {
   const [gross, setGross] = useState<number | null>(null);
+  const sp = useTakeSpalten(GRUNDSPALTEN, p.takes);
+  const spalten = [GRUNDSPALTEN[0], ...sp.sichtbar.filter((x) => x.id !== "take")];
   return (
     <>
       <div className="detail-kopf">
@@ -617,36 +643,25 @@ function PlateDetail({ dreh, p, drehWaehlen }: { dreh: DrehStand; p: PlateStand;
       )}
       <h3 className="detail-titel">HDRI</h3>
       {p.hdri.length ? <HdriListe hdri={p.hdri} /> : <p className="leer-zeile">Kein HDRI an dieser Plate.</p>}
-      <h3 className="detail-titel">Takes</h3>
+      <div className="detail-titel-zeile">
+        <h3 className="detail-titel">Takes</h3>
+        {p.takes.length > 0 && (
+          <SpaltenMenue alle={sp.alle} an={sp.an} setAn={sp.setAn} offen={sp.menueOffen} setOffen={sp.setMenueOffen} festeIds={FEST} />
+        )}
+      </div>
       {p.takes.length ? (
         <table className="tabelle">
           <thead>
             <tr>
-              <th className="rechts">Take</th>
-              <th>Art · Bewertung</th>
-              <th>Clip</th>
-              <th>Karte</th>
-              <th>Stand</th>
+              <SpaltenKopf spalten={spalten} />
             </tr>
           </thead>
           <tbody>
-            {p.takes.map((t) => {
-              const s = stand(t);
-              return (
-                <tr key={t.id}>
-                  <td className="rechts zahl">{t.nummer}</td>
-                  <td className="ohne-umbruch">
-                    <span className="leise">{ART[t.art] ?? t.art}</span>
-                    {BEWERTUNG[t.bewertung] && ` · ${BEWERTUNG[t.bewertung]}`}
-                  </td>
-                  <td className="zahl">{t.clip || <span className="leise">–</span>}</td>
-                  <td className="zahl">{t.karte ?? <span className="leise">–</span>}</td>
-                  <td>
-                    <Status ton={s.ton}>{s.stand}</Status>
-                  </td>
-                </tr>
-              );
-            })}
+            {p.takes.map((t) => (
+              <tr key={t.id}>
+                <SpaltenZellen spalten={spalten} t={t} technik={sp.technik} />
+              </tr>
+            ))}
           </tbody>
         </table>
       ) : (

@@ -40,6 +40,12 @@ Gebaut ist der Kern (siehe KONZEPT Kapitel 14). Offen, in dieser Reihenfolge:
 - **Schritt 1 (gebaut):** Projektwahl oben links für alle Seiten, gemerkt; Projektseite als Baum Drehort → Plate mit
   Details: Fotos als Vorschaubilder (Klick gross, ← →), HDRI mit Stand des Dienstes, Takes, Karten je Drehort; leere
   Drehorte und Plates sichtbar. Nur lesen.
+- **Spalten der Take-Tabellen** (Wunsch Marlon 08.10.2026, gebaut): Menü „Spalten“ über jeder Take-Tabelle, Auswahl
+  gemerkt. Gruppen Bild (Container: Codec, Auflösung, FPS, Bilder, Dauer, TC, Grösse), Kamerawerte (MOV-Metadaten
+  bzw. ART CMD, sonst Plate Assistant), Bewegung (ART CMD, sonst `aus_clip`), Plate Assistant (alle Felder von Take
+  und Plate) und alle übrigen Felder roh. Gelesen aus der Kopie, nur der Kopf, eigener Leser (kein ffprobe nötig).
+  Namen wie im Stage-CSV (`export.ts`); gemeinsamer Spaltenkatalog mit der Konsole der Stage in Abstimmung.
+  Offen: Spaltennamen der Kamerawerte von ARRI an einem echten Clip der Mini prüfen (MOV-Metadaten, ART-CMD-CSV).
 - **HDRI-Vorschau:** Der HDRI-Dienst lädt `hdri/<hdri_id>/vorschau.jpg` hoch und trägt den Pfad in
   `hdri_job.ergebnis.vorschau_speicher` ein (gebaut e54ea57; wartet auf Migration 0021). **Beim späteren Löschen der
   Rohdaten nach der Freigabe `ergebnis.jpg` ausnehmen** (0015/0020 erlauben das Löschen jeder Datei der Aufnahme).

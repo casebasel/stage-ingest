@@ -238,6 +238,15 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
     uhrFalsch: false,
     ordner: "RHEINUFER",
   }),
+  take_technik: (p) =>
+    ((p.anfragen as { datei: string }[]) ?? []).map((_, i) => ({
+      codec: "ProRes 4444 XQ", aufloesung: "3840x2160", bildrate: "25", bilder: String(1250 + i * 75), dauer: `0:${50 + i * 3}.0`,
+      startTc: `14:0${i + 1}:10:00`, endTc: `14:0${i + 1}:${60 + i * 3 - 60 < 10 ? "0" : ""}${(60 + i * 3) % 60}:00`, groesse: `${(14.2 + i).toFixed(1)} GB`,
+      kamera: "ALEXA Mini", seriennummer: "K1.0024581", ei: "800", weissK: "5600", tint: "0", shutter: "172.8", nd: "ND 0.6",
+      tilt: (-2.1 + i * 0.4).toFixed(1), tiltBereich: "0.3", roll: "0.4", rollBereich: "0.2", brennweite: "35",
+      "datei:com.arri.camera.ExposureIndexAsa": "800", "datei:com.arri.camera.LookName": "ARRI 709",
+      "artcmd:lensState/lensIris": "2.8", "artcmd:lensState/lensFocusDistance": "4200",
+    })),
   projekt_uebersicht: () => ({
     projekt,
     hinweis: null,
@@ -257,7 +266,11 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
         plates: [
           { id: "p1", nummer: 1, slate: "42A", name: "Ufer Süd", hdri: [],
             fotos: ["referenz", "set", "set", "position", "set", "set"].map((art, i) => ({ id: `f${i}`, art, pfad: `p1/f${i}.jpg` })),
-            takes: [1, 2, 3].map((n) => ({ id: `t${n}`, nummer: n, art: "take", bewertung: n === 2 ? "circle" : "", clip: `A001C00${n}_261028_R131`, karte: "A001R131", freigegeben: true })) },
+            takes: [1, 2, 3].map((n) => ({
+              id: `t${n}`, nummer: n, art: "take", bewertung: n === 2 ? "circle" : "", clip: `A001C00${n}_261028_R131`, karte: "A001R131", freigegeben: true,
+              datei: `/Volumes/NAS/A001R131/A001C00${n}_261028_R131.mov`, csv: `/Volumes/NAS/05_METADATEN/A001C00${n}_261028_R131.csv`,
+              werte: { "take.start_tc": `14:0${n}:10:00`, "take.start_zeit": `2026-10-28T12:0${n}:10Z`, "plate.kamera_hoehe_cm": 142, "plate.abstand_cm": 800, "plate.stativ": true, "plate.richtung.azimutGrad": 212.4, "plate.gps.lat": 47.5596, "plate.gps.lon": 7.5886, "plate.kamera.objektiv": "Signature Prime 35", "plate.notiz": "Gegenlicht" },
+            })) },
           { id: "p2", nummer: 2, slate: "42B", name: "Brücke",
             fotos: [0, 1, 2].map((i) => ({ id: `g${i}`, art: "set", pfad: `p2/g${i}.jpg` })),
             hdri: [{ id: "h1", zustand: "uploaded", erstelltAm: "2026-10-28T10:40:00Z", job: "processed", vorschau: "h1/ergebnis.jpg", vorschauQuelle: "dienst" }],

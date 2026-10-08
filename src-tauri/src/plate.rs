@@ -300,10 +300,10 @@ impl Plate {
 
     /// Wie `projekt_drehs`, nur über die Projekt-ID (alte Drehorte mit Projektname als Text nur, wenn `name` gesetzt).
     pub fn drehs_mit_plan(&self, z: &Zugang, projekt_id: &str, name: Option<&str>) -> Result<Value, String> {
-        // Mit Kurzname, Fotos und HDRI-Zeit (ab 0017); bei einem älteren Server die schmale Auswahl.
+        // Mit Kurzname, Fotos und HDRI-Zeit (ab 0017), Plates und Takes mit allen Feldern (Spalten der Take-Tabellen);
+        // bei einem älteren Server die schmale Auswahl.
         let voll = "select=id,name,kurzname,datum,geloescht,hdri(id,plate_id,zustand,erstellt_am,geloescht),\
-                    plate(id,nummer,name,szene,buchstabe,geloescht,foto(id,art,pfad,zeit,geloescht),\
-                    take(id,nummer,art,clip,clip_name,bewertung,geloescht))";
+                    plate(*,foto(id,art,pfad,zeit,geloescht),take(*))";
         let schmal = "select=id,name,datum,geloescht,hdri(id,plate_id,zustand,geloescht),\
                       plate(id,nummer,name,szene,buchstabe,geloescht,foto(id,geloescht),\
                       take(id,nummer,art,clip,clip_name,bewertung,geloescht))";

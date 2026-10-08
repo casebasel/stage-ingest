@@ -102,6 +102,40 @@ pub struct TakeStand {
     /// Eingelesen: Karte und ob freigegeben.
     pub karte: Option<String>,
     pub freigegeben: bool,
+    /// Clipdatei auf einer gefundenen Kopie und die CSV von ART CMD dazu (für `take_technik`).
+    pub datei: Option<PathBuf>,
+    pub csv: Option<PathBuf>,
+    /// Alle Felder aus dem Plate Assistant für die Spalten: `take.<feld>`, `plate.<feld>`, verschachtelt mit Punkt
+    /// (`plate.kamera.iso`). Ohne IDs, Löschmarke und Listen.
+    pub werte: std::collections::BTreeMap<String, Value>,
+}
+
+/// Flacht die Felder eines Datensatzes für die Spalten ab (Zahlen, Text, Wahrheitswerte; Objekte mit Punkt).
+fn flach(praefix: &str, v: &Value, aus: &mut std::collections::BTreeMap<String, Value>) {
+    let Some(o) = v.as_object() else { return };
+    for (k, w) in o {
+        if k == "id" || k.ends_with("_id") || k == "geloescht" {
+            continue;
+        }
+        let name = format!("{praefix}.{k}");
+        match w {
+            Value::Object(_) => flach(&name, w, aus),
+            Value::Array(_) | Value::Null => {}
+            Value::String(t) if t.trim().is_empty() => {}
+            _ => {
+                aus.insert(name, w.clone());
+            }
+        }
+    }
+}
+
+/// Wo ein eingelesener Clip liegt.
+#[derive(Clone)]
+struct Eingelesen {
+    karte: String,
+    freigegeben: bool,
+    datei: Option<PathBuf>,
+    csv: Option<PathBuf>,
 }
 
 fn text(v: &Value) -> String {
@@ -143,15 +177,34 @@ pub fn zusammenfuehren(
         }
     };
     // Eingelesene Clips: nach Take-ID und nach Clipname.
-    let mut nach_take: HashMap<String, (String, bool)> = HashMap::new();
-    let mut nach_clip: HashMap<String, (String, bool)> = HashMap::new();
+    // Mehrere Kopien derselben Karte: eine, deren Clipdatei erreichbar ist, gewinnt.
+    let mut nach_take: HashMap<String, Eingelesen> = HashMap::new();
+    let mut nach_clip: HashMap<String, Eingelesen> = HashMap::new();
     for k in &karten {
+        // `<Dreh>/04_BERICHTE/<Karte>_ingest.json` → Clips in `<Dreh>/01_KAMERA/<Karte>/`, ART CMD in `05_METADATEN`.
+        let dreh = k.datei.parent().and_then(|b| b.parent());
         for c in &k.inhalt.clips {
-            let stand = (k.inhalt.karte.clone(), k.inhalt.freigegeben);
+            let datei = dreh
+                .map(|d| d.join(ingest_kern::struktur::KAMERA).join(ingest_kern::struktur::ordnername(&k.inhalt.karte)))
+                .map(|o| o.join(&c.pfad))
+                .filter(|p| !c.pfad.is_empty() && p.is_file());
+            let csv = dreh
+                .map(|d| {
+                    d.join(ingest_kern::struktur::METADATEN)
+                        .join(format!("{}.csv", ingest_kern::soll::ohne_endung(&c.pfad)))
+                })
+                .filter(|p| datei.is_some() && p.is_file());
+            let stand = Eingelesen { karte: k.inhalt.karte.clone(), freigegeben: k.inhalt.freigegeben, datei, csv };
+            let besser = |alt: Option<&Eingelesen>| alt.is_none_or(|a| a.datei.is_none() && stand.datei.is_some());
             if let Some(t) = &c.take_id {
-                nach_take.insert(t.clone(), stand.clone());
+                if besser(nach_take.get(t)) {
+                    nach_take.insert(t.clone(), stand.clone());
+                }
             }
-            nach_clip.insert(c.name.to_uppercase(), stand);
+            let name = c.name.to_uppercase();
+            if besser(nach_clip.get(&name)) {
+                nach_clip.insert(name, stand);
+            }
         }
     }
     let mut zugeordnete_clips: HashSet<String> = HashSet::new();
@@ -174,13 +227,19 @@ pub fn zusammenfuehren(
                 if !clip.is_empty() && stand.is_some() {
                     zugeordnete_clips.insert(clip.clone());
                 }
+                let mut werte = std::collections::BTreeMap::new();
+                flach("take", t, &mut werte);
+                flach("plate", p, &mut werte);
                 takes.push(TakeStand {
                     nummer: t["nummer"].as_i64().unwrap_or(0),
                     art: t["art"].as_str().unwrap_or("take").to_owned(),
                     bewertung: text(&t["bewertung"]),
                     clip,
-                    karte: stand.map(|s| s.0.clone()),
-                    freigegeben: stand.is_some_and(|s| s.1),
+                    karte: stand.map(|s| s.karte.clone()),
+                    freigegeben: stand.is_some_and(|s| s.freigegeben),
+                    datei: stand.and_then(|s| s.datei.clone()),
+                    csv: stand.and_then(|s| s.csv.clone()),
+                    werte,
                     id,
                 });
             }
