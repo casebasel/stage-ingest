@@ -177,7 +177,9 @@ function Konto() {
   const ton = k.verbindung === "verbunden" ? "ok" : k.verbindung === "fehler" ? "fehler" : k.verbindung === "verbindet" ? "laeuft" : "leise";
   const text =
     k.verbindung === "verbunden"
-      ? `Verbunden · ${k.projekte.length} Projekte · ${k.drehs.length} Drehorte`
+      ? `Verbunden · ${k.projekte.length} ${k.projekte.length === 1 ? "Projekt" : "Projekte"} · ${k.drehs.length} ${
+          k.drehs.length === 1 ? "Drehort" : "Drehorte"
+        }`
       : k.verbindung === "fehler"
         ? "Nicht verbunden"
         : k.verbindung === "verbindet"
@@ -190,9 +192,19 @@ function Konto() {
         <h2 id="t-konto">Plate Assistant</h2>
         <Status ton={ton}>{text}</Status>
         {k.verbindung === "verbunden" && (
-          <button className="knopf knopf-klein" onClick={k.laden}>
-            Neu laden
-          </button>
+          <span className="knopfreihe kopf-knoepfe">
+            <button className="knopf knopf-klein" onClick={k.laden}>
+              Neu laden
+            </button>
+            <button
+              className="knopf knopf-klein"
+              disabled={gesperrt}
+              title={gesperrt ? "Während des Kopierens nicht möglich" : "Abmelden und das Passwort auf diesem Rechner löschen"}
+              onClick={k.abmelden}
+            >
+              Abmelden
+            </button>
+          </span>
         )}
       </div>
       <p className="leise block-text">
@@ -200,10 +212,15 @@ function Konto() {
         Passwort bleibt im Schlüsselbund dieses Rechners.
       </p>
       {k.konto && (
-        <Feld name="Angemeldet als">
+        <Feld name="Angemeldet als" hilfe="Abmelden löscht das Passwort auf diesem Rechner; danach meldet die App nicht mehr von selbst an.">
           <span className="zahl">{k.konto.email}</span>
           {!k.konto.ingestRecht && <span className="leise">Nur lesen und Projekte anlegen</span>}
         </Feld>
+      )}
+      {k.meldung && k.verbindung === "verbunden" && (
+        <p className="feld-meldung">
+          <Status ton="fehler">{k.meldung}</Status>
+        </p>
       )}
       {k.verbindung !== "verbunden" && (
         <form

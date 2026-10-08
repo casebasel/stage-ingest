@@ -630,6 +630,7 @@ input[type="checkbox"][role="switch"]:checked::before {
   font-size: 13px;
   font-weight: 650;
 }
+.block-kopf > .kopf-knoepfe:last-child,
 .block-kopf > .knopf:last-child,
 .block-kopf > .suche:last-child {
   margin-left: auto;

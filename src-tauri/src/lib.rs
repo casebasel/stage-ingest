@@ -641,6 +641,20 @@ async fn im_hintergrund<T: Send + 'static>(
     tauri::async_runtime::spawn_blocking(f).await.map_err(|e| e.to_string())?
 }
 
+/// Abmelden: Sitzung beenden und das Passwort aus dem Schlüsselbund löschen. Nicht während eines Kopiervorgangs.
+#[tauri::command]
+async fn plate_abmelden(
+    plate: State<'_, Arc<plate::Plate>>,
+    laufend: State<'_, Laufend>,
+    zugang: plate::Zugang,
+) -> Result<(), String> {
+    if laufend.aktiv.load(Ordering::SeqCst) {
+        return Err("Während des Kopierens nicht abmelden: die Plates werden noch geholt.".into());
+    }
+    let p = Arc::clone(&plate);
+    im_hintergrund(move || p.abmelden(&zugang)).await
+}
+
 /// Mit dem persönlichen Konto anmelden, Passwort im Schlüsselbund ablegen. Ohne Passwort: das gemerkte nehmen.
 #[tauri::command]
 async fn plate_anmelden(
@@ -860,6 +874,7 @@ pub fn run() {
             plate_projekt_aendern,
             kurzname_vorschlag,
             plate_drehort_anlegen,
+            plate_abmelden,
             stage_projekt,
             projekt_uebersicht,
             abbrechen,

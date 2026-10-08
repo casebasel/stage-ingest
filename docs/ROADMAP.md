@@ -24,7 +24,7 @@ Gebaut ist der Kern (siehe KONZEPT Kapitel 14). Offen, in dieser Reihenfolge:
 
 - ~~Clips gegen die Kameraeinstellungen des Projekts (fps, Codec, Auflösung `BxH`), nur Warnung~~ gebaut (Systemkarte 0d270db); aktiv, sobald der Plate Assistant Migration 0016 liefert. Sensor-fps/-modus nach dem Test an echtem Clip.
 - Kopieransicht: Dateiliste mit Stand pro Ziel (wie Silverstack)
-- Mehrere Karten nacheinander (Warteschlange): noch nicht entschieden
+- ~~Mehrere Karten nacheinander (Warteschlange)~~ entschieden: vorerst nicht, eine Karte nach der anderen (Marlon, 08.10.2026)
 
 ## Filmlogik (Systemkarte 64edac1 … 64185e7, wartet auf die Migrationen des Plate Assistant)
 
@@ -68,6 +68,5 @@ Neigung/Rollen aus dem SDI-Signal.
 ## Entscheidungen, die Marlon noch treffen muss
 
 - ~~Farbwelt~~ entschieden: Kategorie-Standard (PRODUCT.md, DESIGN.md)
-- Warteschlange für mehrere Karten: ja oder nein
 - Rolle `ingest_writer` in der Plate-Assistant-Supabase anlegen (Phase 2)
 - Zugang von VM 170 zu Ada für Windows-Tests (oder Tests von Hand)

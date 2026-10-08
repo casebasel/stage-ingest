@@ -161,6 +161,20 @@ function useKontoHalten() {
   const kurznameVorschlag = async (name: string, laenge?: number) =>
     (await invoke<string | null>("kurzname_vorschlag", { name, laenge: laenge ?? null })) ?? "";
 
+  async function abmelden() {
+    try {
+      await invoke("plate_abmelden", { zugang });
+    } catch (e) {
+      setMeldung(String(e));
+      return;
+    }
+    setKonto(null);
+    setProjekte([]);
+    setDrehs([]);
+    setVerbindung("aus");
+    setMeldung(null);
+  }
+
   /** Drehort anlegen (ab Migration 0017): gibt die neue ID zurück. */
   async function drehortAnlegen(projekt: Projekt, name: string, kurzname: string, datum: string): Promise<string> {
     const id = await invoke<string>("plate_drehort_anlegen", { zugang, projekt, name, kurzname, datum });
@@ -181,6 +195,7 @@ function useKontoHalten() {
     drehs,
     laden: () => laden(),
     anmelden,
+    abmelden,
     projektAnlegen,
     projektAendern,
     drehortAnlegen,

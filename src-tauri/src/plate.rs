@@ -182,6 +182,24 @@ impl Plate {
         Err("Anmeldung beim Plate Assistant abgelehnt".into())
     }
 
+    /// Abmelden: Sitzung am Server beenden (wenn erreichbar), Token vergessen, Passwort aus dem Schlüsselbund löschen.
+    /// Danach meldet die App beim Start nicht mehr von selbst an.
+    pub fn abmelden(&self, z: &Zugang) -> Result<(), String> {
+        let alt = self.sitzung.lock().expect("Sitzung").take();
+        if let Some(s) = alt {
+            // Abmelden am Server ist nur Aufräumen; ohne Netz läuft das Token ohnehin ab.
+            let _ = agent()
+                .post(&format!("{}/auth/v1/logout", z.adresse.trim_end_matches('/')))
+                .set("apikey", &key_bereinigen(&z.anon_key))
+                .set("Authorization", &format!("Bearer {}", s.access))
+                .call();
+        }
+        match keyring::Entry::new(SCHLUESSELBUND_DIENST, &z.email).and_then(|e| e.delete_credential()) {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(format!("Schlüsselbund: {e}")),
+        }
+    }
+
     /// Meldet an und sagt, ob das Konto im Ingest löschen und Meldungen schreiben darf.
     pub fn anmelden_pruefen(&self, z: &Zugang) -> Result<Anmeldung, String> {
         self.token(z, true)?;
