@@ -131,6 +131,24 @@ fn flach(praefix: &str, v: &Value, aus: &mut std::collections::BTreeMap<String, 
     }
 }
 
+/// Clipdateien (MOV, MXF, MP4) einer Kartenkopie nach Name ohne Endung (gross), ohne die eigenen Ordner.
+fn clips_im_ordner(ordner: &std::path::Path) -> HashMap<String, PathBuf> {
+    walkdir::WalkDir::new(ordner)
+        .max_depth(4)
+        .into_iter()
+        .flatten()
+        .filter(|e| e.file_type().is_file() && !e.file_name().to_string_lossy().starts_with("._"))
+        .filter(|e| {
+            let n = e.file_name().to_string_lossy().to_ascii_lowercase();
+            n.ends_with(".mov") || n.ends_with(".mxf") || n.ends_with(".mp4")
+        })
+        .map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            (ingest_kern::soll::ohne_endung(&name).to_uppercase(), e.into_path())
+        })
+        .collect()
+}
+
 /// Wo ein eingelesener Clip liegt.
 #[derive(Clone)]
 struct Eingelesen {
@@ -185,11 +203,19 @@ pub fn zusammenfuehren(
     for k in &karten {
         // `<Dreh>/04_BERICHTE/<Karte>_ingest.json` → Clips in `<Dreh>/01_KAMERA/<Karte>/`, ART CMD in `05_METADATEN`.
         let dreh = k.datei.parent().and_then(|b| b.parent());
+        let ordner = dreh
+            .map(|d| d.join(ingest_kern::struktur::KAMERA).join(ingest_kern::struktur::ordnername(&k.inhalt.karte)))
+            .filter(|o| o.is_dir());
+        // Ältere Zusammenfassungen ohne `pfad`: Clips einmal pro Karte über den Namen suchen.
+        let mut nach_name: Option<HashMap<String, PathBuf>> = None;
         for c in &k.inhalt.clips {
-            let datei = dreh
-                .map(|d| d.join(ingest_kern::struktur::KAMERA).join(ingest_kern::struktur::ordnername(&k.inhalt.karte)))
-                .map(|o| o.join(&c.pfad))
-                .filter(|p| !c.pfad.is_empty() && p.is_file());
+            let datei = ordner.as_ref().and_then(|o| {
+                let direkt = o.join(&c.pfad);
+                if !c.pfad.is_empty() && direkt.is_file() {
+                    return Some(direkt);
+                }
+                nach_name.get_or_insert_with(|| clips_im_ordner(o)).get(&c.name.to_uppercase()).cloned()
+            });
             let csv = dreh
                 .map(|d| {
                     d.join(ingest_kern::struktur::METADATEN)

@@ -82,15 +82,16 @@ jobs:
       - name: Oberfläche bauen
         run: npm run build
       - name: App übersetzen
-        if: github.event_name != 'push'
+        if: github.event_name != 'push' || matrix.os == 'windows-2025'
         run: cargo check -p stage-ingest
       # Auf main: fertige Installer zum Testen (ohne Update-Signatur; signierte Releases macht release.yml).
+      # Windows: nur übersetzen (kein Release für Windows, siehe release.yml); Mac: Installer zum Testen.
       - name: Installer bauen
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && matrix.os != 'windows-2025'
         shell: bash
         run: npx tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}' --bundles ${{ matrix.os == 'windows-2025' && 'nsis' || 'dmg' }} --target ${{ matrix.os == 'windows-2025' && 'x86_64-pc-windows-msvc' || 'aarch64-apple-darwin' }}
       - name: Installer hochladen
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && matrix.os != 'windows-2025'
         uses: actions/upload-artifact@v4
         with:
           name: stage-ingest-${{ matrix.os == 'windows-2025' && 'windows' || 'mac' }}

@@ -8,7 +8,8 @@ license.workspace = true
 
 [lib]
 name = "stage_ingest_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# Nur Desktop: staticlib/cdylib (für iOS/Android) würden bei jedem Release den ganzen Abhängigkeitsbaum zusätzlich linken.
+crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -30,6 +31,7 @@ gethostname = "0.5"
 # Vorschaubilder (Fotos, HDRI) verkleinern und als data-URL an die Oberfläche geben.
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
 base64 = "0.22"
+walkdir = "2"
 
 [dev-dependencies]
 tempfile = "3"

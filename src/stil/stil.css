@@ -1495,6 +1495,18 @@ input[type="checkbox"][role="switch"]:checked::before {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.knopf-abspielen {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 22px;
+  margin: -2px 0;
+  border-radius: var(--rund-klein);
+  color: var(--akzent-text);
+}
+.knopf-abspielen:hover {
+  background: var(--hover);
+}
 .spalten-hinweis {
   margin: 0 4px 6px;
   padding: 6px 8px;

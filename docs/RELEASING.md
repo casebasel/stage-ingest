@@ -9,6 +9,13 @@ Der öffentliche Schlüssel steht in `src-tauri/tauri.conf.json` (`plugins.updat
 1. Den privaten Schlüssel als Repository-Secret `TAURI_SIGNING_PRIVATE_KEY` anlegen (Repo → Settings → Secrets and variables → Actions). Er hat kein Passwort; das leere Passwort setzt `release.yml` selbst (ein Secret mit einem Leerzeichen bricht das Signieren).
 2. Den privaten Schlüssel sicher aufbewahren (Passwortmanager, verschlüsselt auf dem NAS). Geht er verloren, können bestehende Installationen keine Updates mehr bekommen und müssen einmal von Hand neu installiert werden.
 
+## Plattformen
+
+Vorerst nur **Mac** (Apple Silicon) im Release (09.10.2026, kein Windows im Einsatz). Unter Windows prüft `ci.yml` bei jedem
+Push weiterhin den Kern (Tests) und die App (übersetzen), damit nichts unbemerkt bricht. Windows wieder ins Release:
+in `release.yml` die drei auskommentierten Zeilen der Matrix einschalten; bestehende Windows-Installationen bekommen
+ab dann wieder Updates.
+
 ## Release auslösen
 
 Version in allen drei Dateien gleich setzen: `package.json`, `Cargo.toml` (`[workspace.package]`), `src-tauri/tauri.conf.json`.

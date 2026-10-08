@@ -4927,6 +4927,7 @@ dependencies = [
  "tempfile",
  "tungstenite",
  "ureq",
+ "walkdir",
 ]
 
 [[package]]

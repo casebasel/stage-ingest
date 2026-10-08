@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openPath } from "@tauri-apps/plugin-opener";
+import { message } from "@tauri-apps/plugin-dialog";
 import { ChevronDown, ChevronRight, Image as Bild, MapPinPlus, Play, Plus, RefreshCw, Settings, X } from "lucide-react";
 import { NeuerDrehort, NeuesProjekt, ProjektEinstellungen } from "../ProjektEinstellungen";
 import { useEinstellungen } from "../einstellungen";
@@ -113,7 +114,48 @@ const GRUNDSPALTEN: Spalte[] = [
     },
   },
 ];
-const FEST = ["take"];
+const FEST = ["take", "abspielen"];
+
+/** Öffnet die Kopie des Clips im Standard-Player des Systems; scheitert das, sagt es das (nie still). */
+async function abspielen(datei: string) {
+  try {
+    await openPath(datei);
+  } catch (e) {
+    const mxf = datei.toLowerCase().endsWith(".mxf");
+    await message(
+      `Der Clip liess sich nicht öffnen.\n\n${datei}\n\n${
+        mxf ? "MXF (z. B. ARRIRAW) spielt QuickTime nicht ab; dafür braucht es einen Player wie DaVinci Resolve oder ARRI Reference Tool.\n\n" : ""
+      }${String(e)}`,
+      { title: "Clip abspielen", kind: "error" },
+    ).catch(() => {});
+  }
+}
+
+// Abspielen: immer sichtbar, direkt nach „Take“.
+const ABSPIELEN: Spalte = {
+  id: "abspielen",
+  titel: "",
+  gruppe: "Take",
+  quelle: "Kopie des Clips auf einer angeschlossenen Platte",
+  wert: (t) =>
+    t.datei ? (
+      <button
+        className="knopf-symbol knopf-abspielen"
+        title={`Abspielen: ${t.datei}`}
+        aria-label={`Take ${t.nummer} abspielen`}
+        onClick={(ev) => {
+          ev.stopPropagation();
+          abspielen(t.datei!);
+        }}
+      >
+        <Play size={14} aria-hidden />
+      </button>
+    ) : t.karte ? (
+      <span className="leise" title="Die Kopie dieses Clips liegt auf keiner angeschlossenen Platte">
+        –
+      </span>
+    ) : undefined,
+};
 
 const datumKurz = (d: string) => (d ? d.slice(5).split("-").reverse().join(".") : "ohne Datum");
 const plateTitel = (p: PlateStand) => p.slate || (p.nummer ? `P${String(p.nummer).padStart(3, "0")}` : "Plate");
@@ -458,7 +500,7 @@ function AlleTakes({
               <th>Drehort</th>
               <th>Plate</th>
               <th className="rechts">Take</th>
-              <SpaltenKopf spalten={spalten} />
+              <SpaltenKopf spalten={[ABSPIELEN, ...spalten]} />
             </tr>
           </thead>
           <tbody>
@@ -477,7 +519,7 @@ function AlleTakes({
                   <span className="zahl">{plateTitel(z.plate)}</span> {z.plate.name}
                 </td>
                 <td className="rechts zahl">{z.take.nummer}</td>
-                <SpaltenZellen spalten={spalten} t={z.take} technik={sp.technik} />
+                <SpaltenZellen spalten={[ABSPIELEN, ...spalten]} t={z.take} technik={sp.technik} />
               </tr>
             ))}
           </tbody>
@@ -616,7 +658,7 @@ const hdriTon = (h: HdriStand) => {
 function PlateDetail({ dreh, p, drehWaehlen }: { dreh: DrehStand; p: PlateStand; drehWaehlen: () => void }) {
   const [gross, setGross] = useState<number | null>(null);
   const sp = useTakeSpalten(GRUNDSPALTEN, p.takes);
-  const spalten = [GRUNDSPALTEN[0], ...sp.sichtbar.filter((x) => x.id !== "take")];
+  const spalten = [GRUNDSPALTEN[0], ABSPIELEN, ...sp.sichtbar.filter((x) => x.id !== "take")];
   return (
     <>
       <div className="detail-kopf">
@@ -753,7 +795,7 @@ function FotoText({ f, takes }: { f: FotoStand; takes: TakeStand[] }) {
           title={`Kopie im Standard-Player öffnen: ${t.datei}`}
           onClick={(ev) => {
             ev.stopPropagation();
-            openPath(t.datei!).catch(() => {});
+            abspielen(t.datei!);
           }}
         >
           <Play size={12} aria-hidden /> Clip abspielen
