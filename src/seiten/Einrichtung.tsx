@@ -1,5 +1,6 @@
 // Einrichtung: alles, was man einmal pro Rechner einstellt. Am Set zeigt der Kopf nur, ob es steht.
 import { useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Moon, Sun, SunMoon } from "lucide-react";
 import { useEinstellungen } from "../einstellungen";
@@ -141,6 +142,7 @@ export function Einrichtung({ wahl, setWahl }: { wahl: Wahl; setWahl: (w: Wahl) 
               Wählen …
             </button>
           </Feld>
+          <ArtCmdLaden gesperrt={!!gesperrt} gesetzt={(p) => e.setArtCmd(p)} />
         </section>
 
         <section className="block" aria-labelledby="t-darst">
@@ -349,5 +351,38 @@ function Schluesselangaben({ adresse, schluessel, eigene }: { adresse: string; s
         Schlüssel eingebaut (GitHub-Variable SUPABASE_ANON_KEY) oder die falsche Adresse (SUPABASE_ADRESSE).
       </dd>
     </dl>
+  );
+}
+
+/** ART CMD direkt bei ARRI laden (mitliefern verbietet die Lizenz von ARRI) und eintragen. */
+function ArtCmdLaden({ gesperrt, gesetzt }: { gesperrt: boolean; gesetzt: (pfad: string) => void }) {
+  const [stand, setStand] = useState<"bereit" | "laedt" | "fertig" | string>("bereit");
+  return (
+    <div className="art-laden">
+      <p className="leise">
+        Noch nicht installiert? Die App lädt das kostenlose ARRI Reference Tool CMD direkt bei ARRI (etwa 60 MB) und trägt es
+        hier ein. Es gilt die Lizenz von ARRI (EULA im Paket). Danach erscheinen Tilt und Roll auch für schon eingelesene Karten.
+      </p>
+      <div className="knopfreihe">
+        <button
+          className="knopf"
+          disabled={gesperrt || stand === "laedt"}
+          onClick={async () => {
+            setStand("laedt");
+            try {
+              const pfad = await invoke<string>("artcmd_laden");
+              gesetzt(pfad);
+              setStand("fertig");
+            } catch (err) {
+              setStand(String(err));
+            }
+          }}
+        >
+          {stand === "laedt" ? "Lädt bei ARRI …" : "Von ARRI laden und einrichten"}
+        </button>
+        {stand === "fertig" && <Status ton="ok">Eingerichtet</Status>}
+        {stand !== "bereit" && stand !== "laedt" && stand !== "fertig" && <Status ton="fehler">{stand}</Status>}
+      </div>
+    </div>
   );
 }

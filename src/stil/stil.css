@@ -1507,6 +1507,16 @@ input[type="checkbox"][role="switch"]:checked::before {
 .knopf-abspielen:hover {
   background: var(--hover);
 }
+.art-laden {
+  display: grid;
+  gap: 8px;
+  max-width: 720px;
+  padding: 4px 0 8px;
+}
+.art-laden p {
+  font-size: 12px;
+  line-height: 1.45;
+}
 .spalten-hinweis {
   margin: 0 4px 6px;
   padding: 6px 8px;

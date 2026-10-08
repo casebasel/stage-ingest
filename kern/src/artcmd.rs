@@ -1,7 +1,8 @@
 //! Bewegungs- und Objektivdaten pro Bild mit ARRI ART CMD (`docs/KONZEPT.md`, Kapitel 7).
 //!
 //! Aufruf wie in der Stage (vp-companion-app `werkzeuge/leinwand-messen/bilder_holen.py`):
-//! `art-cmd --mode export --input <clip> --output <datei>.csv` ergibt eine CSV mit `;` und einer Zeile pro Bild.
+//! `art-cmd export --input <clip> --output <datei>.csv` ergibt eine CSV mit `;` und einer Zeile pro Bild (Modus als
+//! erstes Argument wie im Handbuch von ART CMD 1.0.0; die Stage schreibt `--mode export`, das versteht 1.0.0 auch).
 //! Felder: `positional/orientation/tilt` und `/roll` in Grad (0,1°), `lensState/lensFocalLength` in 1/1000 mm,
 //! `projectRate/timebase` als Bruch. Vorzeichen werden unverändert übernommen: ob sie der gemeinsamen
 //! Festlegung entsprechen (Neigung + = nach oben, Rollen + = im Uhrzeigersinn aus Sicht der Kamera), ist an
@@ -158,7 +159,7 @@ fn kurz(x: f64) -> String {
 /// Ruft ART CMD für einen Clip auf und schreibt die CSV nach `ausgabe`.
 pub fn exportieren(art_cmd: &Path, clip: &Path, ausgabe: &Path) -> Result<(), String> {
     let aus = Command::new(art_cmd)
-        .args(["--mode", "export", "--input"])
+        .args(["export", "--input"])
         .arg(clip)
         .arg("--output")
         .arg(ausgabe)

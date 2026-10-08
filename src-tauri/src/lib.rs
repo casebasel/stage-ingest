@@ -1,5 +1,6 @@
 //! Tauri-Hülle um den Kern: Befehle für die Oberfläche, Fortschritt als Ereignisse.
 
+mod artcmd_laden;
 mod karte_db;
 mod plate;
 mod plates;
@@ -1285,6 +1286,13 @@ async fn projekt_uebersicht(
     im_hintergrund(move || Ok(projekt::laden(&p, zugang.as_ref(), projekt, &basis))).await
 }
 
+/// ART CMD bei ARRI laden und in den Datenordner der App entpacken; gibt den Pfad zum Programm zurück.
+#[tauri::command]
+async fn artcmd_laden(app: AppHandle) -> Result<PathBuf, String> {
+    let ordner = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    im_hintergrund(move || artcmd_laden::laden(&ordner)).await
+}
+
 /// Technische Werte der Clips für die Spalten der Take-Tabellen (aus der Kopie, nur der Kopf; siehe `technik`).
 #[tauri::command]
 async fn take_technik(
@@ -1458,6 +1466,7 @@ pub fn run() {
             stage_projekt,
             projekt_uebersicht,
             take_technik,
+            artcmd_laden,
             abbrechen,
             laeuft,
             verlauf,

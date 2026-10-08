@@ -340,8 +340,8 @@ export function SpaltenMenue({
                   <legend>{g === "Weitere" ? "Weitere Felder (roh)" : g}</legend>
                   {g === "Bewegung" && ohneArtCmd && (
                     <p className="spalten-hinweis">
-                      Tilt und Roll stehen pro Bild im Clip; lesen kann sie nur ARRI ART CMD. In der Einrichtung eintragen, dann
-                      erscheinen sie auch für schon eingelesene Karten. Bis dahin: Werte aus dem Plate Assistant, falls vorhanden.
+                      Tilt und Roll stehen pro Bild im Clip; lesen kann sie nur ARRI ART CMD. In der Einrichtung unter
+                      „Bewegungsdaten“ mit einem Klick bei ARRI laden, dann erscheinen sie auch für schon eingelesene Karten.
                     </p>
                   )}
                   {teil.map((s) => (
