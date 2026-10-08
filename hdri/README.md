@@ -11,8 +11,14 @@ Ablauf je Aufnahme:
 4. EXR schreiben: `R`, `G`, `B` (linear, Rec.709-Primärfarben), `clip.Y`, `abdeckung.Y` (0 = Loch); dazu eine
    JPEG-Vorschau.
 
-Noch offen: Verfeinerung der Lage über Merkmale (IMU ±1–2°), Verzeichnung des Ultraweitwinkels, Abholen aus Supabase
-und die Job-Tabelle `hdri_job`, Wächter für nDisplay.
+Dazu: Objektivkorrektur aus dem DNG (`OpcodeList3`: WarpRectilinear2, FixVignetteRadial), Verfeinerung der Lage über
+SIFT-Merkmale (RANSAC je Paar, Bündelausgleich der Drehungen und des Sichtfelds), Übergänge zum mittigsten Bild hin
+(Parallaxe aus der Hand gibt schmale Nähte statt Geister), nDisplay-Wächter.
+
+Betrieb auf Ada (`D:\hdri-dienst\`, festgelegt von Marlon 08.10.2026): Code in `code\`, Umgebung in `venv\`,
+Zugang in `zugang.env` (Dienst-Konto `app = "hdri"`, nie im Repo), Ergebnisse in `ergebnisse\<hdri_id>\`.
+`python -m hdri_dienst laufen` holt jede Aufnahme mit Zustand `uploaded` und rechnet sie; Stand in `hdri_job`
+(ab Migration 0019). Offen: Ablage im NAS-Projektordner, KI-Stufen (Phase 4).
 
 ```
 python -m venv .venv && .venv/bin/pip install -r requirements.txt pytest

@@ -84,6 +84,13 @@ def abbildung(kamera: Kamera, lage: np.ndarray, welt: np.ndarray) -> tuple[np.nd
     return map_x.astype(np.float32), map_y.astype(np.float32), gewicht.astype(np.float32)
 
 
+def mittigkeit(kamera: Kamera, mx: np.ndarray, my: np.ndarray) -> np.ndarray:
+    """1 in der Bildmitte, fallend zum Rand (elliptisch): wo ein Bild am wenigsten verzerrt und am genauesten ist."""
+    dx = (mx - kamera.breite / 2) / (kamera.breite / 2)
+    dy = (my - kamera.hoehe / 2) / (kamera.hoehe / 2)
+    return np.clip(1.0 - np.sqrt(dx * dx + dy * dy) / np.sqrt(2), 0.0, 1.0).astype(np.float32)
+
+
 @dataclass
 class Position:
     """Ein zusammengeführtes Bild (linear) mit Lage und Kamera; optional seine Clip-Maske."""
@@ -94,26 +101,40 @@ class Position:
     clip: np.ndarray | None = None
 
 
+#: Schärfe der Übergänge: Gewicht hoch diese Zahl. 1 = weiches Mitteln (Geisterbilder bei Parallaxe),
+#: höher = jede Stelle kommt fast nur aus dem Bild, das sie am mittigsten sieht (schmale Nähte statt Geister).
+SCHAERFE = 8
+
+
 def panorama(positionen: list[Position], hoehe: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Gibt (Panorama H×2H×3 float32, Clip-Maske H×2H float32 0..1, Abdeckung H×2H float32) zurück.
 
-    Abdeckung = Summe der Gewichte; 0 heisst „keine Aufnahme sieht diese Richtung“ (Loch, typisch am Nadir).
+    Abdeckung = Zahl der Aufnahmen, die eine Richtung sehen (weich); 0 heisst Loch (typisch am Nadir).
+    Gemischt wird mit Gewicht = Randabfall × Mittigkeit^SCHAERFE: wo sich Bilder überlappen, dominiert das, das die
+    Stelle am mittigsten sieht. Bei Parallaxe (aus der Hand) gibt das schmale Nähte statt durchscheinender Geister.
     """
     welt = richtungen(hoehe)
     summe = np.zeros((hoehe, 2 * hoehe, 3), dtype=np.float64)
     clip = np.zeros((hoehe, 2 * hoehe), dtype=np.float64)
     gewichte = np.zeros((hoehe, 2 * hoehe), dtype=np.float64)
+    abdeckung = np.zeros((hoehe, 2 * hoehe), dtype=np.float64)
     for p in positionen:
         mx, my, w = abbildung(p.kamera, p.lage, welt)
         if not w.any():
             continue
+        # Nach der Entzerrung schwarze Ränder: dort sieht das Bild nichts.
+        gueltig = cv2.remap((p.bild.max(axis=2) > 0).astype(np.float32), mx, my, interpolation=cv2.INTER_LINEAR,
+                            borderMode=cv2.BORDER_CONSTANT) > 0.99
+        w = np.where(gueltig, w, 0.0)
+        abdeckung += w
+        scharf = (w * mittigkeit(p.kamera, mx, my) ** SCHAERFE + 1e-12 * (w > 0)).astype(np.float64)
         werte = cv2.remap(p.bild, mx, my, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
-        summe += werte * w[..., None]
-        gewichte += w
+        summe += werte * scharf[..., None]
+        gewichte += scharf
         if p.clip is not None:
             c = cv2.remap(p.clip.astype(np.float32), mx, my, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
-            clip += c * w
-    bedeckt = gewichte > 1e-6
-    bild = np.where(bedeckt[..., None], summe / np.maximum(gewichte, 1e-6)[..., None], 0.0)
-    maske = np.where(bedeckt, clip / np.maximum(gewichte, 1e-6), 0.0)
-    return bild.astype(np.float32), maske.astype(np.float32), gewichte.astype(np.float32)
+            clip += c * scharf
+    bedeckt = gewichte > 0
+    bild = np.where(bedeckt[..., None], summe / np.where(bedeckt, gewichte, 1.0)[..., None], 0.0)
+    maske = np.where(bedeckt, clip / np.where(bedeckt, gewichte, 1.0), 0.0)
+    return bild.astype(np.float32), maske.astype(np.float32), abdeckung.astype(np.float32)
