@@ -115,8 +115,17 @@ def treffer(
     return paare
 
 
-def ausgleichen(positionen: list[Position], paare, bindung: float = 0.02) -> tuple[list[Position], dict]:
-    """Bündelausgleich: δ (Drehvektor, Welt) je Position und ein Massstab der Brennweite."""
+#: Bindung an die IMU je Achse der Welt (x, y = Neigung/Rollen aus der Schwerkraft, genau; z = Yaw, driftet).
+#: Ohne Bindung an die Schwerkraft verbiegt sich der Horizont, wo Merkmale fehlen (weisse Wände); zu starke Bindung
+#: gibt Doppelkanten. 0,3 an zwei echten Aufnahmen (Küche, Wohnzimmer, 08.10.2026) gewählt: Horizont gerade,
+#: Restfehler 0,15° bzw. 0,35°.
+BINDUNG = np.array([0.3, 0.3, 0.02])
+#: Bereich für den Massstab der Brennweite gegenüber Apples Sichtfeld (gemessen am iPhone 13 Pro: ~1,10).
+MASSSTAB = (0.95, 1.15)
+
+
+def ausgleichen(positionen: list[Position], paare, bindung: np.ndarray = BINDUNG) -> tuple[list[Position], dict]:
+    """Bündelausgleich: δ (Drehvektor, Welt) je Position und ein Massstab der Brennweite (begrenzt)."""
     n = len(positionen)
 
     def zerlegen(x):
@@ -130,12 +139,19 @@ def ausgleichen(positionen: list[Position], paare, bindung: float = 0.02) -> tup
             wi = _strahlen(pi, positionen[i].kamera, s) @ lagen[i].T
             wj = _strahlen(pj, positionen[j].kamera, s) @ lagen[j].T
             teile.append(np.cross(wi, wj).ravel())  # ≈ Winkel in rad
-        teile.append(bindung * deltas.ravel())  # Horizont und Yaw 0 bleiben bei der IMU
+        # Gewichtet mit der Wurzel der Trefferzahl, damit die Bindung nicht von vielen Treffern überstimmt wird.
+        teile.append((bindung[None, :] * deltas).ravel() * np.sqrt(max(1, anzahl) / max(1, n)))
         return np.concatenate(teile)
 
+    anzahl = sum(len(x[2]) for x in paare)
     x0 = np.zeros(3 * n + 1)
-    vorher = np.abs(reste(x0)[: -3 * n]).mean() if paare else 0.0
-    erg = least_squares(reste, x0, loss="soft_l1", f_scale=np.radians(0.3), max_nfev=200)
+    x0[-1] = np.log(1.05)
+    unten = np.full(3 * n + 1, -np.inf)
+    oben = np.full(3 * n + 1, np.inf)
+    unten[-1], oben[-1] = np.log(MASSSTAB[0]), np.log(MASSSTAB[1])
+    x_imu = np.zeros(3 * n + 1)
+    vorher = np.abs(reste(x_imu)[: -3 * n]).mean() if paare else 0.0
+    erg = least_squares(reste, x0, loss="soft_l1", f_scale=np.radians(0.3), max_nfev=300, bounds=(unten, oben))
     deltas, s = zerlegen(erg.x)
     nachher = np.abs(reste(erg.x)[: -3 * n]).mean() if paare else 0.0
     neu = []
