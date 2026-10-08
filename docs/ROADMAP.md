@@ -47,7 +47,9 @@ Gebaut ist der Kern (siehe KONZEPT Kapitel 14). Offen, in dieser Reihenfolge:
 - **Umbenennen samt Kurzname** (Drehort und Projekt): Ordner auf allen erreichbaren Zielen umbenennen, Pfade in
   Datenbank und `_ingest.json` nachführen, fehlende Platten beim nächsten Einstecken; nie während eines Kopiervorgangs.
 - **ULID für alle IDs** (auch Drehort, Karte, Clip), Bestand einmal umstellen (Migration Plate Assistant). Danach
-  sucht der Ingest eine Karte über Projekt + Reel statt über eine ausgerechnete ID.
+  sucht der Ingest eine Karte über Projekt + Reel statt über eine ausgerechnete ID. Auch **neue Projekte** bekommen dann
+  eine ULID (heute legt `plate.rs` `projekt-<kurzname>` an und verlässt sich auf das Zusammenführen gleicher IDs; nach
+  der Umstellung braucht es dafür die Eindeutigkeit des Kurznamens am Server). Studio-Slate ist `STUDIO-NN` (Stage).
 
 ## Filmlogik (Systemkarte 64edac1 … 64185e7, wartet auf die Migrationen des Plate Assistant)
 
