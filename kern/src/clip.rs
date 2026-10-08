@@ -1,4 +1,5 @@
-//! Angaben eines Clips direkt aus der QuickTime-Datei (`.mov`, ProRes von ALEXA Mini/Amira):
+//! Angaben eines Clips direkt aus der Datei: QuickTime (`.mov`, ProRes) hier, MXF (ARRIRAW, ProRes in MXF) in
+//! [`crate::mxf`]. QuickTime-Angaben:
 //! Start-Timecode, fps, Zahl der Bilder. Gelesen werden nur die Kopfdaten (`moov`), nie die Bilder.
 //!
 //! Quellen im Format: Timecode-Spur (`tmcd`) mit Beschreibung (fps, Drop-Frame) und einem Bildzähler
@@ -112,6 +113,11 @@ fn moov_lesen(datei: &mut File) -> io::Result<Vec<u8>> {
 /// Liest die Angaben eines Clips. Fehlt etwas (z. B. keine Timecode-Spur), ist das Feld `None`.
 pub fn lesen(pfad: &Path) -> io::Result<ClipAngaben> {
     let mut datei = File::open(pfad)?;
+    // MXF (ARRIRAW, ProRes in MXF) erkennt man am SMPTE-Schlüssel am Dateianfang.
+    let mut anfang = [0u8; 4];
+    if datei.read_exact(&mut anfang).is_ok() && anfang == crate::mxf::PRAEFIX {
+        return crate::mxf::lesen(pfad);
+    }
     let moov = moov_lesen(&mut datei)?;
     let wurzel = atome(&moov, 8, moov.len());
 

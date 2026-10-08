@@ -19,6 +19,7 @@ pub mod geraet;
 pub mod kopie;
 pub mod laufwerke;
 pub mod mhl;
+pub mod mxf;
 mod ohne_cache;
 
 /// Für den Bericht: Datei schreiben und samt Ordnereintrag auf die Platte bringen.
