@@ -608,6 +608,8 @@ function KartenListe({ karten, einsortieren, neuLaden }: { karten: Karte[]; eins
 /** Karten unter „<Datum>_OHNE_DREHORT“: einsortieren, sobald alle Clips einem Drehort gehören (Systemkarte). */
 function OhneDrehort({ liste, neuLaden }: { liste: Einsortierbar[]; neuLaden: () => void }) {
   const lauf = useLauf();
+  const konto = useKonto();
+  const e = useEinstellungen();
   const [laeuft, setLaeuft] = useState<string | null>(null);
   const [ergebnis, setErgebnis] = useState<Record<string, { ton: Ton; text: string }>>({});
   async function los(k: Einsortierbar) {
@@ -621,7 +623,14 @@ function OhneDrehort({ liste, neuLaden }: { liste: Einsortierbar[]; neuLaden: ()
     if (!ja) return;
     setLaeuft(k.karte);
     try {
-      const r = await invoke<EinsortiertStand[]>("karte_einsortieren", { kopien: k.kopien, ziel: k.ziel });
+      const r = await invoke<EinsortiertStand[]>("karte_einsortieren", {
+        // Mit Verbindung wird auch der Speicherort der Karte in der gemeinsamen Datenbank nachgeführt.
+        zugang: konto.verbindung === "verbunden" ? konto.zugang : null,
+        // Die Stage ersetzt den Pfad-Anfang in ihrer Kartenmeldung (ingest.karteVerschoben).
+        stageAdresse: e.stageAdresse.trim() || null,
+        kopien: k.kopien,
+        ziel: k.ziel,
+      });
       const fehler = r.filter((x) => "Err" in x.ergebnis).map((x) => ("Err" in x.ergebnis ? x.ergebnis.Err : ""));
       const abweichend = r.filter((x) => "Ok" in x.ergebnis && x.ergebnis.Ok.nachpruefung.abweichungen.length > 0).length;
       const gut = r.length - fehler.length - abweichend;

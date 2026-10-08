@@ -13,6 +13,23 @@ const ANTWORT_ZEITGRENZE: Duration = Duration::from_secs(20);
 
 /// Schickt `daten` als `ingest.karte` und wartet auf die Antwort mit passendem `bezug`.
 pub fn karte_melden(adresse: &str, daten: Value) -> Result<Value, String> {
+    befehl(adresse, "ingest.karte", daten)
+}
+
+/// Karte wurde einsortiert: `ingest.karteVerschoben {karte, projekt?, von, nach}` (Stage, docs/PROTOKOLL.md,
+/// 09.10.2026). `von`/`nach` sind Pfad-Anfänge; die Stage ersetzt sie in ihrer Kartenmeldung und an den Takes,
+/// Prüfsumme, Freigabe und Kopien bleiben. Unbekannte Karte: `{ok: true, karte: false}`, kein Fehler.
+pub fn karte_verschoben(
+    adresse: &str,
+    karte: &str,
+    projekt: Option<&str>,
+    von: &str,
+    nach: &str,
+) -> Result<Value, String> {
+    befehl(adresse, "ingest.karteVerschoben", json!({ "karte": karte, "projekt": projekt, "von": von, "nach": nach }))
+}
+
+fn befehl(adresse: &str, typ: &str, daten: Value) -> Result<Value, String> {
     let rechner = gethostname::gethostname().to_string_lossy().into_owned();
     let basis = adresse.trim().trim_end_matches('/').replacen("https://", "wss://", 1).replacen("http://", "ws://", 1);
     let url = format!("{basis}/client?quelle=stage-ingest&geraet={}", url_teil(&rechner));
@@ -22,7 +39,7 @@ pub fn karte_melden(adresse: &str, daten: Value) -> Result<Value, String> {
     let id = format!("ingest-{}", chrono::Utc::now().timestamp_millis());
     let umschlag = json!({
         "v": 1, "art": "befehl", "id": id, "bezug": null,
-        "zeit": chrono::Utc::now().to_rfc3339(), "typ": "ingest.karte", "daten": daten,
+        "zeit": chrono::Utc::now().to_rfc3339(), "typ": typ, "daten": daten,
     });
     ws.send(Message::text(umschlag.to_string())).map_err(|e| e.to_string())?;
 

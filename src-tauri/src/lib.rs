@@ -1071,9 +1071,13 @@ struct EinsortiertStand {
 async fn karte_einsortieren(
     app: AppHandle,
     laufend: State<'_, Laufend>,
+    plate: State<'_, Arc<plate::Plate>>,
+    zugang: Option<plate::Zugang>,
+    stage_adresse: Option<String>,
     kopien: Vec<PathBuf>,
     ziel: String,
 ) -> Result<Vec<EinsortiertStand>, String> {
+    let p = Arc::clone(&plate);
     if laufend.aktiv.swap(true, Ordering::SeqCst) {
         return Err("Es läuft schon ein Vorgang.".into());
     }
@@ -1081,7 +1085,7 @@ async fn karte_einsortieren(
     let aktiv = Arc::clone(&laufend.aktiv);
     let abbruch = Arc::clone(&laufend.abbruch);
     let ergebnis = tauri::async_runtime::spawn_blocking(move || {
-        kopien
+        let staende: Vec<EinsortiertStand> = kopien
             .into_iter()
             .map(|zusammenfassung| {
                 let ergebnis = ingest_kern::einsortieren::verschieben(&zusammenfassung, &ziel, &abbruch, |pfad| {
@@ -1089,7 +1093,58 @@ async fn karte_einsortieren(
                 });
                 EinsortiertStand { zusammenfassung, ergebnis }
             })
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>();
+        // Speicherort in der gemeinsamen Datenbank: wie beim Einlesen das NAS, sonst die erste Kopie.
+        let gut: Vec<&ingest_kern::einsortieren::Verschoben> =
+            staende.iter().filter_map(|s| s.ergebnis.as_ref().ok()).collect();
+        let haupt = gut
+            .iter()
+            .find(|v| geraet::kennung_schnell(&v.karte).is_ok_and(|k| k.art == geraet::Art::Netz))
+            .or(gut.first());
+        if let (Some(v), Some(z)) = (haupt, zugang.as_ref()) {
+            let karte_id = std::fs::read(&v.zusammenfassung)
+                .ok()
+                .and_then(|b| serde_json::from_slice::<ingest_kern::uebersicht::KartenZusammenfassung>(&b).ok())
+                .and_then(|k| k.karte_id);
+            if let Some(id) = karte_id {
+                let a = karte_db::speicherort_aenderung(
+                    &id,
+                    &v.karte.display().to_string(),
+                    chrono::Utc::now(),
+                    plate::ulid_aehnlich(),
+                );
+                let _ = p.karte_schreiben(z, vec![a]);
+            }
+        }
+        // Stage: Pfad-Anfang jeder verschobenen Kopie ersetzen (ein Fehler sperrt nichts).
+        if let Some(adresse) = stage_adresse.as_deref().filter(|a| !a.trim().is_empty()) {
+            for s in &staende {
+                let Ok(v) = &s.ergebnis else { continue };
+                let von = s.zusammenfassung.parent().and_then(Path::parent);
+                let nach = v.karte.parent().and_then(Path::parent);
+                let inhalt = std::fs::read(&v.zusammenfassung)
+                    .ok()
+                    .and_then(|b| serde_json::from_slice::<ingest_kern::uebersicht::KartenZusammenfassung>(&b).ok());
+                if let (Some(von), Some(nach), Some(k)) = (von, nach, inhalt) {
+                    let mit_strich = |p: &Path| format!("{}/", p.display().to_string().trim_end_matches('/'));
+                    // Kurzname wie in ingest.karte (Ordner des Projekts, höchstens 24 Zeichen).
+                    let projekt: Option<String> = k
+                        .projekt
+                        .get("Kurzname")
+                        .cloned()
+                        .or_else(|| von.parent().and_then(Path::file_name).map(|n| n.to_string_lossy().into_owned()))
+                        .map(|p| p.chars().take(24).collect());
+                    let _ = stage::karte_verschoben(
+                        adresse,
+                        &k.karte.chars().take(40).collect::<String>(),
+                        projekt.as_deref(),
+                        &mit_strich(von),
+                        &mit_strich(nach),
+                    );
+                }
+            }
+        }
+        staende
     })
     .await
     .map_err(|e| e.to_string());

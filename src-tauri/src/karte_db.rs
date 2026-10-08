@@ -108,6 +108,11 @@ fn aenderung(id: String, tabelle: &str, datensatz: &str, feld: &str, wert: Value
     json!({ "id": id, "tabelle": tabelle, "datensatz": datensatz, "feld": feld, "wert": wert, "zeit": jetzt.timestamp_micros() })
 }
 
+/// Neuer Speicherort einer Karte nach dem Einsortieren (`karte.speicherort` ist änderbar, Plate Assistant 0018).
+pub fn speicherort_aenderung(karte_id: &str, pfad: &str, jetzt: DateTime<Utc>, id: String) -> Value {
+    aenderung(id, "karte", karte_id, "speicherort", json!(pfad.chars().take(1000).collect::<String>()), jetzt)
+}
+
 /// Alle Änderungen einer eingelesenen Karte: zuerst die Karte, dann ihre Clips. Liefert die Karten-ID und die
 /// Clipnamen, die nicht geschrieben werden können (Name ungültig).
 pub fn aenderungen(
