@@ -26,6 +26,13 @@ Gebaut ist der Kern (siehe KONZEPT Kapitel 14). Offen, in dieser Reihenfolge:
 - Kopieransicht: Dateiliste mit Stand pro Ziel (wie Silverstack)
 - Mehrere Karten nacheinander (Warteschlange): noch nicht entschieden
 
+## Filmlogik (Systemkarte 64edac1 … 64185e7, wartet auf die Migrationen des Plate Assistant)
+
+- Projektseite: Motive, Szenen, Drehorte, geplante Plates anlegen und bearbeiten (Schreibrecht wie die Stage, Regel im Code)
+- Stufe A (0017): Drehort anlegen mit Kurzname (Vorschlag aus dem Namen, änderbar, 2–12 Zeichen, eindeutig im Projekt, Warnung bei Doppel, ID `dreh-<projekt>-<drehort>` klein; STUDIO fürs Studio); Ordner nach `dreh.kurzname` (vorbereitet); `plate.verwendung`, `plate.plan`
+- Stufe B (0018): Motiv, Szene, Motiv ↔ Drehort, Plate ↔ Szene, Buchstabenzähler
+- Stufe C (0019): Drehort ohne Datum: Ordnerdatum = Aufnahmedatum der Clips, Soll-Liste über `take.start_zeit`
+
 ## Phase 0: Prüfungen (laufen nebenher)
 
 | Prüfung | Wer | Wann |
