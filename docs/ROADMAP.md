@@ -22,6 +22,33 @@ Gebaut ist der Kern (siehe KONZEPT Kapitel 14). Offen, in dieser Reihenfolge:
      Byte 416/420/432 = 25000); eindeutig erst mit einem Clip, bei dem Sensor- und Projekt-fps verschieden sind
 4. Erst danach: Stage Ingest am Dreh einsetzen, die ersten Tage parallel zum bisherigen Werkzeug.
 
+## Prüfung und Konkurrenzvergleich (09.10.2026)
+
+Unabhängige Code-Prüfung: nichts, was eine fehlerhafte Karte als sicher durchlässt. Behoben: Zielordner nur mit
+`.DS_Store` (Ausweg nur im Finder), Finder-Spuren liessen frühere Kopien durchfallen, Zurücklesen nacheinander
+(jetzt je Platte gleichzeitig), Seriennummer bei jeder Vorab-Prüfung (`system_profiler`), Kartenerkennung alle 3 s
+über alle Platten, neue HTTP-Verbindung pro Anfrage. Gebaut aus dem Vergleich (Silverstack, ShotPut, OffShoot,
+Ingesto, FoolCat): Platz-Check exakt (Blockgrösse des Ziels), Kartengedächtnis (schon eingelesen / nicht
+formatiert), Abspielen je nach Format (QuickTime, ARRI Reference Tool Viewer), ART CMD mit einem Klick bei ARRI laden.
+Release nur noch Mac (Windows weiter in der CI geprüft), Zwischenspeicher vorgewärmt: Release 3 statt 13 Minuten.
+
+Offen aus der Prüfung (nach Wirkung):
+- Jede Datei einzeln auf die Platte sichern (`sync_all`, am Mac F_FULLFSYNC) bremst Karten mit Tausenden kleiner
+  Dateien; bündeln, ohne die Regel „erst umbenennen, wenn sicher auf der Platte“ zu brechen
+- MD5 (nur wenn eingeschaltet) läuft im selben Faden wie das Lesen; schnelle Kartenleser werden auf MD5-Tempo gebremst
+- 8-MB-Puffer pro Block neu angelegt; Pool wiederverwenden
+- Fortschrittsliste der Oberfläche wächst quadratisch mit der Dateizahl (erst ab Zehntausenden Dateien spürbar)
+- Karte und Ziele werden vor dem Kopieren mehrfach durchlaufen (Vorab-Prüfung, Zielstand); einmal bestimmen
+- `einlesen` (lib.rs) ist eine Funktion mit 390 Zeilen ohne eigenen Test; `Einlesen.tsx` und `Projekt.tsx` teilen
+- Karte mit eigenem `ascmhl/` gilt nie als vorhandene Kopie (wird zur Seite gelegt und neu kopiert; sicher, aber
+  unnötig): braucht eine saubere Regel für die Kette auf der Karte
+- „Karte zweimal lesen“ ist aus: ein Kartenleser, der beim einzigen Lesen falsch liefert, ergibt gleich falsche
+  Kopien. Entscheidung bewusst treffen
+
+Offen aus dem Vergleich (nicht gewählt, 09.10.2026): Push aufs Handy bei fertig/fehlgeschlagen, Fortsetzen nach
+Unterbruch, Vorschaubilder (erstes/mittleres/letztes Bild) in Tabelle und PDF, Tilt/Roll als Kurve mit Export,
+Live-Protokoll auf jedem Ziel, Kiosk-Ansicht, Codex-HDE (`.arx`) erkennen.
+
 ## Laufend, ohne fremde Abhängigkeit
 
 - ~~Clips gegen die Kameraeinstellungen des Projekts (fps, Codec, Auflösung `BxH`), nur Warnung~~ gebaut (Systemkarte 0d270db); aktiv, sobald der Plate Assistant Migration 0016 liefert. Sensor-fps/-modus nach dem Test an echtem Clip.
