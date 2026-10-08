@@ -83,6 +83,31 @@ fn zuruecklesen_je_platte_gleichzeitig_mit_gleichem_ergebnis() {
 }
 
 #[test]
+fn viele_kleine_dateien_alle_festgeschrieben_ohne_teil_reste() {
+    // Mehr Dateien als ein Bündel (macOS: 64 pro F_FULLFSYNC), wie eine Fotokarte.
+    let t = tempfile::tempdir().unwrap();
+    let karte = t.path().join("karte/DCIM/100CANON");
+    fs::create_dir_all(&karte).unwrap();
+    for i in 0..150 {
+        fs::write(karte.join(format!("IMG_{i:04}.CR3")), format!("bild {i}").repeat(i + 1)).unwrap();
+    }
+    let ziele = vec![t.path().join("a/FOTOS"), t.path().join("b/FOTOS")];
+    let auftrag = Auftrag { quelle: t.path().join("karte"), ziele: ziele.clone(), ..Default::default() };
+    let kopie = kopieren(&auftrag, &AtomicBool::new(false), |_| {}).unwrap();
+    assert_eq!(kopie.dateien.len(), 150);
+    let urteile = zurueckpruefen(&kopie, false, &AtomicBool::new(false), |_, _| {}).unwrap();
+    assert!(urteile.iter().all(|u| u.gut() && u.geprueft == 150), "{urteile:?}");
+    for z in &ziele {
+        let reste = walkdir::WalkDir::new(z)
+            .into_iter()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().ends_with(ingest_kern::TEIL_ENDUNG))
+            .count();
+        assert_eq!(reste, 0, "keine .ingest-teil in {}", z.display());
+    }
+}
+
+#[test]
 fn karte_an_zwei_ziele_kopieren_und_freigeben() {
     let t = tempfile::tempdir().unwrap();
     karte(&t.path().join("karte"));

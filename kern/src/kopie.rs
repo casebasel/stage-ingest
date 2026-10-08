@@ -406,10 +406,62 @@ fn zeit(t: FileTime) -> DateTime<Utc> {
     DateTime::from_timestamp(t.unix_seconds(), t.nanoseconds()).unwrap_or_default()
 }
 
-/// Schreib-Faden eines Ziels. Jede Datei entsteht unter `<name>.ingest-teil` und wird erst nach
-/// `sync_all` umbenannt. Nach einem Fehler nimmt der Faden weiter Nachrichten an und verwirft sie.
+/// Fertig geschriebene Dateien, die noch umbenannt werden (macOS: gesammelt bis zum nächsten F_FULLFSYNC).
+struct Ausstehend {
+    datei: std::fs::File,
+    teil: PathBuf,
+    endgueltig: PathBuf,
+    geaendert: FileTime,
+}
+
+/// macOS: höchstens so viele Dateien bzw. Bytes zwischen zwei F_FULLFSYNC.
+#[cfg(target_os = "macos")]
+const BUENDEL_DATEIEN: usize = 64;
+#[cfg(target_os = "macos")]
+const BUENDEL_BYTES: u64 = 512 * 1024 * 1024;
+
+/// Bringt die ausstehenden Dateien sicher auf die Platte und benennt sie erst dann um.
+/// macOS: jede Datei hat schon `fsync` (Daten an die Platte übergeben); ein F_FULLFSYNC leert danach den
+/// Schreibpuffer der ganzen Platte, also für alle Dateien des Bündels (Apple, fcntl(2)). Andere Systeme: `sync_all`
+/// pro Datei schon beim Fertigstellen.
+fn festschreiben(ausstehend: &mut Vec<Ausstehend>, beruehrt: &mut BTreeSet<PathBuf>) -> std::io::Result<()> {
+    #[cfg(target_os = "macos")]
+    if let Some(letzte) = ausstehend.last() {
+        use std::os::unix::io::AsRawFd;
+        // SAFETY: gültiger, offener Dateideskriptor.
+        if unsafe { libc::fcntl(letzte.datei.as_raw_fd(), libc::F_FULLFSYNC) } == -1 {
+            // Manche Dateisysteme (SMB, exFAT über bestimmte Treiber) kennen F_FULLFSYNC nicht: dann jede Datei
+            // einzeln mit dem stärksten Mittel, das es gibt.
+            for a in ausstehend.iter() {
+                a.datei.sync_all()?;
+            }
+        }
+    }
+    let mut rest = std::mem::take(ausstehend).into_iter();
+    while let Some(Ausstehend { datei, teil, endgueltig, geaendert }) = rest.next() {
+        drop(datei);
+        if let Err(e) = std::fs::rename(&teil, &endgueltig) {
+            // Nichts halb Umbenanntes stehen lassen: die übrigen Teil-Dateien dieses Bündels gleich mit wegräumen.
+            let _ = std::fs::remove_file(&teil);
+            for r in rest {
+                let _ = std::fs::remove_file(r.teil);
+            }
+            return Err(e);
+        }
+        // Manche SMB-Freigaben verbieten das Setzen der Zeit. Die Zeit der Karte steht im MHL.
+        let _ = filetime::set_file_mtime(&endgueltig, geaendert);
+        beruehrt.extend(endgueltig.parent().map(Path::to_path_buf));
+    }
+    Ok(())
+}
+
+/// Schreib-Faden eines Ziels. Jede Datei entsteht unter `<name>.ingest-teil` und wird erst umbenannt, wenn sie sicher
+/// auf der Platte ist (siehe [`festschreiben`]). Nach einem Fehler nimmt der Faden weiter Nachrichten an und verwirft sie.
 fn schreiben(wurzel: &Path, rx: Receiver<AnZiel>, zustand: &Mutex<Option<String>>) {
     let mut offen: Option<(std::fs::File, PathBuf, PathBuf)> = None;
+    let mut ausstehend: Vec<Ausstehend> = Vec::new();
+    #[cfg_attr(not(target_os = "macos"), allow(unused_mut, unused_variables))]
+    let mut buendel_bytes = 0u64;
     let mut kaputt = false;
     // Ordner mit neuen oder umbenannten Einträgen; am Ende auf die Platte gebracht.
     let mut beruehrt: BTreeSet<PathBuf> = BTreeSet::from([wurzel.to_path_buf()]);
@@ -444,19 +496,34 @@ fn schreiben(wurzel: &Path, rx: Receiver<AnZiel>, zustand: &Mutex<Option<String>
                 AnZiel::Block(daten) => {
                     if let Some((datei, _, _)) = &mut offen {
                         datei.write_all(&daten)?;
+                        buendel_bytes += daten.len() as u64;
                     }
                 }
                 AnZiel::Fertig(geaendert) => {
                     if let Some((datei, teil, endgueltig)) = offen.take() {
+                        #[cfg(target_os = "macos")]
+                        {
+                            use std::os::unix::io::AsRawFd;
+                            // SAFETY: gültiger, offener Dateideskriptor.
+                            if unsafe { libc::fsync(datei.as_raw_fd()) } != 0 {
+                                return Err(std::io::Error::last_os_error());
+                            }
+                        }
+                        #[cfg(not(target_os = "macos"))]
                         datei.sync_all()?;
-                        drop(datei);
-                        std::fs::rename(&teil, &endgueltig)?;
-                        // Manche SMB-Freigaben verbieten das Setzen der Zeit. Die Zeit der Karte steht im MHL.
-                        let _ = filetime::set_file_mtime(&endgueltig, geaendert);
-                        beruehrt.extend(endgueltig.parent().map(Path::to_path_buf));
+                        ausstehend.push(Ausstehend { datei, teil, endgueltig, geaendert });
+                        #[cfg(target_os = "macos")]
+                        let voll = ausstehend.len() >= BUENDEL_DATEIEN || buendel_bytes >= BUENDEL_BYTES;
+                        #[cfg(not(target_os = "macos"))]
+                        let voll = true;
+                        if voll {
+                            festschreiben(&mut ausstehend, &mut beruehrt)?;
+                            buendel_bytes = 0;
+                        }
                     }
                 }
                 AnZiel::Ende => {
+                    festschreiben(&mut ausstehend, &mut beruehrt)?;
                     for o in beruehrt.iter().rev() {
                         ohne_cache::ordner_sichern(o)?;
                     }
@@ -470,11 +537,18 @@ fn schreiben(wurzel: &Path, rx: Receiver<AnZiel>, zustand: &Mutex<Option<String>
             if let Some((_, teil, _)) = offen.take() {
                 let _ = std::fs::remove_file(teil);
             }
+            for a in ausstehend.drain(..) {
+                let _ = std::fs::remove_file(a.teil);
+            }
         }
     }
-    // Kanal zu: Abbruch oder Fehler der Quelle mitten in einer Datei. Halbe Datei wegräumen.
+    // Kanal zu: Abbruch oder Fehler der Quelle mitten in einer Datei. Halbe und nicht festgeschriebene Dateien
+    // wegräumen (sie tragen noch die Endung `.ingest-teil`).
     if let Some((_, teil, _)) = offen.take() {
         let _ = std::fs::remove_file(teil);
+    }
+    for a in ausstehend.drain(..) {
+        let _ = std::fs::remove_file(a.teil);
     }
 }
 
