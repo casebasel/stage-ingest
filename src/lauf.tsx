@@ -10,6 +10,8 @@ import {
   sollVonStage,
   vorabPruefen,
   zielNachpruefen,
+  einlesenVorschau,
+  type EinlesenVorschau,
   type Befund,
   type Dreh,
   type Fortschritt,
@@ -18,7 +20,7 @@ import {
   type SollClip,
 } from "./kern";
 import { gemerkt, merken, useEinstellungen } from "./einstellungen";
-import { plateSoll, useKonto, type DrehKurz, type Projekt } from "./konto";
+import { drehsVon, plateSoll, useKonto, type DrehKurz, type Projekt } from "./konto";
 
 export type Phase = "bereit" | "kopieren" | "pruefen" | "nachlesen" | "nachpruefen" | "fertig" | "fehler";
 
@@ -112,8 +114,41 @@ function useLaufHalten() {
     merken("drehTag", heute);
   }, [drehName, heute]);
 
-  const dreh: Dreh | null =
-    projektText.trim() && drehName.trim()
+  // Mit Projekt aus dem Plate Assistant: kein Drehort von Hand. Vor dem Kopieren ordnet die App die Clips der Karte
+  // den Drehorten zu; die Karte kommt zum Drehort mit den meisten Clips, ohne Treffer nach <Datum>_OHNE_DREHORT.
+  const [vorschau, setVorschau] = useState<EinlesenVorschau | null>(null);
+  const [vorschauLaedt, setVorschauLaedt] = useState(false);
+  const automatisch = konto.verbindung === "verbunden" && !!paProjekt;
+  async function vorschauLaden() {
+    if (!quelle || !paProjekt || konto.verbindung !== "verbunden") {
+      setVorschau(null);
+      return;
+    }
+    setVorschauLaedt(true);
+    try {
+      await konto.laden(); // neue Drehorte und Takes vom iPhone
+      setVorschau(await einlesenVorschau(konto.zugang, paProjekt, quelle.pfad));
+    } catch {
+      setVorschau(null);
+    }
+    setVorschauLaedt(false);
+  }
+  useEffect(() => {
+    vorschauLaden();
+  }, [quelle?.pfad, paProjekt?.id, konto.verbindung]);
+  const haupt = vorschau?.drehorte[0] ?? null;
+
+  const dreh: Dreh | null = automatisch
+    ? vorschau
+      ? {
+          projekt: paProjekt!.name,
+          kurzname: paProjekt!.kurzname,
+          datum: haupt?.datum || vorschau.aufnahmetag || heute,
+          name: haupt?.name ?? "Ohne Drehort",
+          ortKurzname: vorschau.ordner,
+        }
+      : null
+    : projektText.trim() && drehName.trim()
       ? {
           projekt: projektText.trim(),
           kurzname: paProjekt?.kurzname ?? null,
@@ -246,9 +281,15 @@ function useLaufHalten() {
       const sollStage = await sollLaden();
       // Draussen: Takes des gewählten Drehorts aus dem Plate Assistant (fehlt der Zugang, nur ein Hinweis).
       let sollPlate: SollClip[] = [];
-      if (paDreh) {
+      // Takes aller Drehorte des Projekts (eine Karte kann mehrere Drehorte haben); doppelte Takes nur einmal.
+      const drehIds = automatisch
+        ? [...new Set([...(vorschau?.drehorte.map((d) => d.id) ?? []), ...drehsVon(konto.drehs, paProjekt).map((d) => d.id)])]
+        : paDreh
+          ? [paDreh.id]
+          : [];
+      for (const id of drehIds) {
         try {
-          sollPlate = await plateSoll(konto.zugang, paDreh.id);
+          for (const s of await plateSoll(konto.zugang, id)) if (!sollPlate.some((x) => x.takeId === s.takeId)) sollPlate.push(s);
         } catch (err) {
           setSoll({ liste: sollStage, fehler: `Plate Assistant: ${err}`, zeit: Date.now() });
         }
@@ -264,7 +305,7 @@ function useLaufHalten() {
         artCmd: e.artCmd.trim() || null,
         stageAdresse: e.stageAdresse.trim() || null,
         plateZugang: paDreh || paProjekt ? konto.zugang : null,
-        plateDreh: paDreh?.id ?? null,
+        plateDreh: automatisch ? (haupt?.id ?? null) : (paDreh?.id ?? null),
         // Fest gewähltes Projekt: Karte und Clips gehen in die gemeinsame Datenbank (Tabellen karte/clip).
         plateProjekt: paProjekt ? { id: paProjekt.id, kurzname: paProjekt.kurzname } : null,
         kamera:
@@ -337,6 +378,10 @@ function useLaufHalten() {
     projektWaehlen,
     paDreh,
     setPaDreh,
+    automatisch,
+    vorschau,
+    vorschauLaedt,
+    vorschauLaden,
     drehName,
     setDrehName,
     drehDatum,

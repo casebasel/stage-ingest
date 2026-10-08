@@ -11,7 +11,8 @@ use crate::kopie::Kopie;
 use crate::soll::{arri_reel, ohne_endung};
 
 /// Endungen, die als Clip gelten (Kamera-Originale).
-const CLIP_ENDUNGEN: &[&str] = &["mov", "mxf"];
+/// Videoclips (ARRI MOV/MXF, iPhone MOV, Sony und andere MP4).
+const CLIP_ENDUNGEN: &[&str] = &["mov", "mxf", "mp4"];
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

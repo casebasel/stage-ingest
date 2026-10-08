@@ -267,7 +267,13 @@ function Auftrag({ pflicht, zurEinrichtung, laufwerke }: { pflicht: boolean; zur
     if (typeof pfad === "string" && !e.ziele.includes(pfad)) e.setZiele([...e.ziele, pfad]);
   }
 
-  const bereit = !!q && lauf.ziele.length > 0 && !pflicht && !lauf.sperrt;
+  // Ohne einen einzigen Treffer erst nachfragen (iPhone noch nicht synchronisiert?), dann nach <Datum>_OHNE_DREHORT.
+  const [trotzdem, setTrotzdem] = useState(false);
+  useEffect(() => setTrotzdem(false), [q?.pfad]);
+  const v = lauf.automatisch ? lauf.vorschau : null;
+  const ohneTreffer = !!v && v.gesamt > 0 && v.drehorte.length === 0;
+  const zuordnungOffen = lauf.automatisch && (lauf.vorschauLaedt || !v || (ohneTreffer && !trotzdem));
+  const bereit = !!q && lauf.ziele.length > 0 && !pflicht && !lauf.sperrt && !zuordnungOffen;
   const pp = lauf.paProjekt;
   const kamera = pp
     ? [pp.fps ? `${zahl(pp.fps, 3).replace(/,?0+$/, "")} fps` : "", pp.codec ?? "", pp.aufloesungPx ?? ""].filter(Boolean).join(" · ")
@@ -278,7 +284,11 @@ function Auftrag({ pflicht, zurEinrichtung, laufwerke }: { pflicht: boolean; zur
       ? "Mindestens ein Ziel hinzufügen."
       : pflicht
         ? "Erst das Pflicht-Update installieren (Hinweis oben)."
-        : null;
+        : lauf.automatisch && lauf.vorschauLaedt
+          ? "Ordnet die Clips den Drehorten zu …"
+          : ohneTreffer && !trotzdem
+            ? "Kein Clip passt zu einem Take: oben neu laden oder trotzdem einlesen."
+            : null;
 
   return (
     <div className="auftrag">
@@ -398,7 +408,7 @@ function Auftrag({ pflicht, zurEinrichtung, laufwerke }: { pflicht: boolean; zur
       <section className="block" aria-labelledby="t-dreh">
         <div className="block-kopf">
           <h2 id="t-dreh">Dreh</h2>
-          {lauf.paDreh && <Status ton="ok">Soll-Liste aus dem Plate Assistant</Status>}
+          {(lauf.paDreh || lauf.automatisch) && <Status ton="ok">Takes aus dem Plate Assistant</Status>}
           {lauf.soll && !lauf.soll.fehler && <Status ton="ok">{lauf.soll.liste.length} Takes von der Stage</Status>}
           {lauf.soll?.fehler && <Status ton="warn">Soll-Liste nicht geladen</Status>}
           {kamera && (
@@ -407,7 +417,7 @@ function Auftrag({ pflicht, zurEinrichtung, laufwerke }: { pflicht: boolean; zur
             </span>
           )}
         </div>
-        <DrehZeile />
+        {lauf.automatisch ? <Zuordnung trotzdem={trotzdem} setTrotzdem={setTrotzdem} /> : <DrehZeile />}
         <p className="ablage">
           {lauf.dreh ? (
             <>
@@ -467,6 +477,64 @@ export const kurz = (p: string) =>
     .replace(/^_+/, "")
     .slice(0, 24)
     .replace(/_+$/, "") || "OHNE_PROJEKT";
+
+/** Mit Projekt aus dem Plate Assistant: kein Drehort von Hand. Zeigt, wohin die Clips der Karte gehören (über die
+ *  Takes aller Drehorte des Projekts); die Karte kommt zum Drehort mit den meisten Clips. */
+function Zuordnung({ trotzdem, setTrotzdem }: { trotzdem: boolean; setTrotzdem: (b: boolean) => void }) {
+  const lauf = useLauf();
+  const v = lauf.vorschau;
+  if (!lauf.quelle) return <p className="zuordnung leise">Karte wählen: Die App ordnet ihre Clips selbst den Drehorten des Projekts zu.</p>;
+  if (lauf.vorschauLaedt || !v) return <p className="zuordnung"><Status ton="laeuft">Ordnet die Clips den Drehorten zu …</Status></p>;
+  const ohne = v.gesamt > 0 && v.drehorte.length === 0;
+  return (
+    <div className="zuordnung">
+      <ul className="zuordnung-liste">
+        {v.drehorte.map((d, i) => (
+          <li key={d.id}>
+            <Status ton="ok">
+              {d.name} · {d.clips.length} {d.clips.length === 1 ? "Clip" : "Clips"}
+            </Status>
+            {i === 0 && v.drehorte.length > 1 && <span className="leise">Ordner der Karte (meiste Clips)</span>}
+          </li>
+        ))}
+        {v.ohne.length > 0 && (
+          <li>
+            <Status ton="warn">
+              Zu klären · {v.ohne.length} {v.ohne.length === 1 ? "Clip" : "Clips"} ohne Take
+            </Status>
+            <span className="leise">nach dem Kopieren sucht die App noch über Timecode und Uhrzeit, der Rest auf der Projekt-Seite</span>
+          </li>
+        )}
+        {v.gesamt === 0 && (
+          <li>
+            <Status ton="leise">Keine Clips erkannt</Status>
+          </li>
+        )}
+        {v.uhrFalsch && (
+          <li>
+            <Status ton="warn">Kamerauhr prüfen: Die Clips tragen ein unglaubwürdiges Datum</Status>
+          </li>
+        )}
+      </ul>
+      {ohne && !trotzdem && (
+        <div className="zuordnung-frage" role="alert">
+          <p>
+            <b>Kein Clip passt zu einem Take.</b> Hat das iPhone schon synchronisiert? Sonst kommt die Karte in den Ordner
+            <span className="zahl"> {v.aufnahmetag ?? "heute"}_OHNE_DREHORT</span> und alle Clips stehen unter „Zu klären“.
+          </p>
+          <div className="zuordnung-knoepfe">
+            <button className="knopf" onClick={lauf.vorschauLaden}>
+              <RotateCcw size={14} strokeWidth={2} aria-hidden /> Neu laden
+            </button>
+            <button className="knopf" onClick={() => setTrotzdem(true)}>
+              Trotzdem einlesen
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** Datum und Drehort des Projekts (das Projekt selbst wird oben links gewählt und gilt für alle Seiten).
  *  Drehorte aus dem Plate Assistant, oder von Hand, wenn keine Verbindung besteht. */

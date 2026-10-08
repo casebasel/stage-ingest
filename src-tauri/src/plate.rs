@@ -295,6 +295,11 @@ impl Plate {
     /// Alle Drehorte eines Projekts mit Plates, Takes, Fotos und HDRI. Drehorte von vor Migration 0009 haben nur
     /// den Projektnamen als Text: sie zählen nur bei exakter Gleichheit (und nur ohne `projekt_id`).
     pub fn projekt_drehs(&self, z: &Zugang, projekt: &Projekt) -> Result<Value, String> {
+        self.drehs_mit_plan(z, &projekt.id, Some(&projekt.name))
+    }
+
+    /// Wie `projekt_drehs`, nur über die Projekt-ID (alte Drehorte mit Projektname als Text nur, wenn `name` gesetzt).
+    pub fn drehs_mit_plan(&self, z: &Zugang, projekt_id: &str, name: Option<&str>) -> Result<Value, String> {
         // Mit Kurzname, Fotos und HDRI-Zeit (ab 0017); bei einem älteren Server die schmale Auswahl.
         let voll = "select=id,name,kurzname,datum,geloescht,hdri(id,plate_id,zustand,erstellt_am,geloescht),\
                     plate(id,nummer,name,szene,buchstabe,geloescht,foto(id,art,pfad,zeit,geloescht),\
@@ -303,16 +308,19 @@ impl Plate {
                       plate(id,nummer,name,szene,buchstabe,geloescht,foto(id,geloescht),\
                       take(id,nummer,art,clip,clip_name,bewertung,geloescht))";
         let mut auswahl = voll;
-        let neu = match self.lesen(z, &format!("dreh?projekt_id=eq.{}&{voll}", url_teil(&projekt.id))) {
+        let neu = match self.lesen(z, &format!("dreh?projekt_id=eq.{}&{voll}", url_teil(projekt_id))) {
             Ok(v) => v,
             Err(_) => {
                 auswahl = schmal;
-                self.lesen(z, &format!("dreh?projekt_id=eq.{}&{schmal}", url_teil(&projekt.id)))?
+                self.lesen(z, &format!("dreh?projekt_id=eq.{}&{schmal}", url_teil(projekt_id)))?
             }
         };
-        let alt = self
-            .lesen(z, &format!("dreh?projekt_id=is.null&produktion=eq.{}&{auswahl}", url_teil(&projekt.name)))
-            .unwrap_or(Value::Array(vec![]));
+        let alt = match name {
+            Some(n) => self
+                .lesen(z, &format!("dreh?projekt_id=is.null&produktion=eq.{}&{auswahl}", url_teil(n)))
+                .unwrap_or(Value::Array(vec![])),
+            None => Value::Array(vec![]),
+        };
         let mut alle = neu.as_array().cloned().unwrap_or_default();
         alle.extend(alt.as_array().cloned().unwrap_or_default());
         Ok(Value::Array(alle))

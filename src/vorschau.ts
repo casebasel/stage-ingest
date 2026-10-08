@@ -203,6 +203,14 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="hsl(${hdri ? 205 : farbe} 45% 62%)"/><stop offset="1" stop-color="hsl(${hdri ? 30 : farbe} 30% 28%)"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#g)"/><text x="50%" y="52%" font-family="sans-serif" font-size="28" fill="white" text-anchor="middle">${pfad}</text></svg>`;
     return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
   },
+  einlesen_vorschau: () => ({
+    drehorte: [{ id: "d1", name: "Rheinufer", datum: "2026-10-28", kurzname: "RHEINUFER", clips: ["A001C001_261028_R132", "A001C002_261028_R132"] }],
+    ohne: ["A001C014_261028_R132"],
+    gesamt: 3,
+    aufnahmetag: "2026-10-28",
+    uhrFalsch: false,
+    ordner: "RHEINUFER",
+  }),
   projekt_uebersicht: () => ({
     projekt,
     hinweis: null,

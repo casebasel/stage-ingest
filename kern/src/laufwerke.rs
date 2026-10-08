@@ -107,6 +107,48 @@ fn arri_clip(name: &str) -> bool {
 }
 
 /// Wirft die Karte aus (macOS `diskutil`, Windows über die Shell, Linux `gio`/`umount`).
+/// Clips einer Karte vor dem Kopieren: Namen und Zeit der frühesten Clipdatei (Kamerauhr).
+#[derive(Debug, Clone, Default)]
+pub struct KartenClips {
+    pub namen: Vec<String>,
+    pub erste: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// Clipnamen auf einer Karte (ohne Endung, gross), für den Abgleich mit den Takes vor dem Kopieren. Bildfolgen
+/// (`.ari`, `.arx`, `.dng`) zählen als ein Clip mit dem Namen ihres Ordners.
+pub fn clipnamen(wurzel: &Path) -> Vec<String> {
+    clips_auf_karte(wurzel).namen
+}
+
+pub fn clips_auf_karte(wurzel: &Path) -> KartenClips {
+    let mut namen: Vec<String> = Vec::new();
+    let mut erste: Option<chrono::DateTime<chrono::Utc>> = None;
+    let eintraege = walkdir::WalkDir::new(wurzel).max_depth(5).into_iter().filter_entry(|e| {
+        let n = e.file_name().to_string_lossy();
+        e.depth() == 0 || !(n.starts_with('.') || n.eq_ignore_ascii_case("$RECYCLE.BIN"))
+    });
+    for e in eintraege.take(HOECHSTENS * 4).flatten().filter(|e| e.file_type().is_file()) {
+        let pfad = e.path();
+        let endung = pfad.extension().map(|x| x.to_string_lossy().to_lowercase()).unwrap_or_default();
+        let name = match endung.as_str() {
+            "mov" | "mxf" | "mp4" | "braw" => pfad.file_stem(),
+            "ari" | "arx" | "dng" => pfad.parent().and_then(Path::file_name),
+            _ => None,
+        };
+        if let Some(n) = name.map(|n| n.to_string_lossy().to_uppercase()) {
+            if let Some(t) =
+                e.metadata().ok().and_then(|m| m.modified().ok()).map(chrono::DateTime::<chrono::Utc>::from)
+            {
+                erste = Some(erste.map_or(t, |e| e.min(t)));
+            }
+            if !namen.contains(&n) {
+                namen.push(n);
+            }
+        }
+    }
+    KartenClips { namen, erste }
+}
+
 pub fn auswerfen(pfad: &Path) -> Result<(), String> {
     use std::process::Command;
     #[cfg(target_os = "macos")]
@@ -243,6 +285,20 @@ pub fn platz(pfad: &Path) -> Option<(u64, u64)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clipnamen_einer_karte() {
+        let t = tempfile::tempdir().unwrap();
+        std::fs::write(t.path().join("A004C001_261008_R132.mxf"), b"x").unwrap();
+        std::fs::write(t.path().join("A004C002_261008_R132.MXF"), b"x").unwrap();
+        std::fs::create_dir_all(t.path().join("A004C003_261008_R132")).unwrap();
+        std::fs::write(t.path().join("A004C003_261008_R132").join("A004C003_261008_R132.0000001.ari"), b"x").unwrap();
+        std::fs::write(t.path().join("A004C003_261008_R132").join("A004C003_261008_R132.0000002.ari"), b"x").unwrap();
+        std::fs::write(t.path().join("info.xml"), b"x").unwrap();
+        let mut n = clipnamen(t.path());
+        n.sort();
+        assert_eq!(n, ["A004C001_261008_R132", "A004C002_261008_R132", "A004C003_261008_R132"]);
+    }
     use std::fs;
 
     #[test]

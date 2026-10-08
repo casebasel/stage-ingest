@@ -5,6 +5,7 @@ mod plate;
 mod plates;
 mod projekt;
 mod stage;
+mod zuordnung;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -183,6 +184,12 @@ fn karte_in_datenbank(
         speicherort: haupt.map(|&i| urteile[i].ordner.display().to_string()),
         bericht_ok: !berichte.is_empty() && berichte.iter().all(Result::is_ok),
     };
+    // Drehort je Clip: der Drehort seines Takes (eine Karte kann mehrere Drehorte haben); ohne Take keiner (zu klären).
+    let take_dreh = app
+        .state::<Arc<plate::Plate>>()
+        .drehs_mit_plan(z, &projekt.id, None)
+        .map(|v| zuordnung::take_zu_dreh(&v))
+        .unwrap_or_default();
     let namen: Vec<String> = clips.iter().map(|c| soll::ohne_endung(&c.pfad).to_owned()).collect();
     let eintraege: Vec<karte_db::Clip> = clips
         .iter()
@@ -195,7 +202,9 @@ fn karte_in_datenbank(
                 start_tc: a.and_then(|a| a.start_tc.as_deref()),
                 end_tc: a.and_then(|a| a.end_tc.as_deref()),
                 fps: a.and_then(|a| a.fps),
-                dreh_id: auftrag.plate_dreh.as_deref(),
+                dreh_id: take
+                    .filter(|t| !t.is_empty())
+                    .and_then(|t| take_dreh.get(t).map(String::as_str).or(auftrag.plate_dreh.as_deref())),
                 take_id: take.filter(|t| !t.is_empty()),
                 zuordnung: art,
                 aus_clip: bewegung
@@ -941,6 +950,23 @@ fn vorschau_jpg(roh: &[u8], breite: u32) -> Result<Vec<u8>, String> {
     Ok(aus.into_inner())
 }
 
+/// Vor dem Kopieren: Clips der Karte den Drehorten des Projekts zuordnen (Ordner = Drehort mit den meisten Clips).
+#[tauri::command]
+async fn einlesen_vorschau(
+    plate: State<'_, Arc<plate::Plate>>,
+    zugang: plate::Zugang,
+    projekt: plate::Projekt,
+    quelle: PathBuf,
+) -> Result<zuordnung::Vorschau, String> {
+    let p = Arc::clone(&plate);
+    im_hintergrund(move || {
+        let karte = ingest_kern::laufwerke::clips_auf_karte(&quelle);
+        let drehs = p.projekt_drehs(&zugang, &projekt)?;
+        Ok(zuordnung::vorschau(&drehs, &karte.namen, karte.erste, chrono::Utc::now()))
+    })
+    .await
+}
+
 /// Projektübersicht: Plan aus dem Plate Assistant und eingelesene Karten auf den Zielordnern.
 #[tauri::command]
 async fn projekt_uebersicht(
@@ -1091,6 +1117,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             bild_vorschau,
+            einlesen_vorschau,
             vorab_pruefen,
             karte_einlesen,
             ziel_nachpruefen,

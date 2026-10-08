@@ -182,6 +182,8 @@ pub fn abgleichen(kopie: &Kopie, soll: &[SollClip], clips: &[crate::ale::ClipZei
                     .as_ref()
                     .and_then(|a| Some((a.start_tc.as_deref()?, a.fps?)))
                     .and_then(|(tc, fps)| tc_als_zeit(&s.drehtag, tc, fps))
+                    // Ohne Timecode (iPhone, Fotoapparat): Dateizeit = Ende der Aufnahme, minus Dauer = Beginn.
+                    .or_else(|| start_aus_dateizeit(kopie, c))
                     .is_some_and(|t| t >= von && t < bis)
             })
             .map(|c| &c.pfad)
@@ -198,6 +200,13 @@ pub fn abgleichen(kopie: &Kopie, soll: &[SollClip], clips: &[crate::ale::ClipZei
 
     a.unerwartet = auf_karte.into_iter().filter(|(n, _)| !bekannt.contains(n)).map(|(_, p)| p).collect();
     a
+}
+
+/// Beginn eines Clips ohne Timecode aus der Dateizeit (die Kamera schreibt die Datei zum Ende der Aufnahme fertig).
+fn start_aus_dateizeit(kopie: &Kopie, c: &crate::ale::ClipZeile) -> Option<chrono::DateTime<chrono::Utc>> {
+    let ende = kopie.dateien.iter().find(|d| d.pfad == c.pfad)?.geaendert;
+    let dauer = c.angaben.as_ref().and_then(|a| Some(a.bilder? as f64 / a.fps.filter(|f| *f > 0.0)?)).unwrap_or(0.0);
+    Some(ende - chrono::Duration::milliseconds((dauer * 1000.0) as i64))
 }
 
 /// Fenster eines Takes in UTC: Klappe minus Spielraum bis nächste Klappe (oder 30 min).
@@ -431,6 +440,37 @@ mod timecode_tests {
             a.ueber_zeitfenster.iter().map(|(s, p)| (s.take_id.as_str(), p.as_str())).collect();
         assert_eq!(paare, [("T1", "A001C003_261028_R1AB.mov"), ("T2", "A001C004_261028_R1AB.mov")]);
         assert!(a.unerwartet.is_empty() && a.mehrdeutig.is_empty());
+    }
+
+    #[test]
+    fn iphone_clip_ohne_timecode_ueber_die_dateizeit() {
+        // iPhone-Video ohne Timecode, 10 s lang (300 Bilder bei 30 fps), Datei fertig um 09:45:20 UTC → Beginn 09:45:10.
+        let mut k = kopie(&["DCIM/100APPLE/IMG_0001.MOV"]);
+        k.dateien[0].geaendert = "2026-10-28T09:45:20Z".parse().unwrap();
+        let clip = ClipZeile {
+            pfad: "DCIM/100APPLE/IMG_0001.MOV".into(),
+            angaben: Some(ClipAngaben {
+                start_tc: None,
+                end_tc: None,
+                fps: Some(30.0),
+                bilder: Some(300),
+                bildrate: None,
+                codec: None,
+                aufloesung_px: None,
+            }),
+            fehler: None,
+        };
+        let take = SollClip {
+            take_id: "T1".into(),
+            start_zeit: "2026-10-28T09:45:05+00:00".into(),
+            fenster_bis: "2026-10-28T09:50:00+00:00".into(),
+            drehtag: "2026-10-28".into(),
+            start_tc: String::new(),
+            end_tc: String::new(),
+            ..soll("", "")
+        };
+        let a = abgleichen(&k, &[take], &[clip]);
+        assert_eq!(a.ueber_zeitfenster.len(), 1);
     }
 
     #[test]

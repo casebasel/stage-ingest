@@ -157,3 +157,15 @@ export type ZielGeraet = {
   fehler: string | null;
 };
 export const zielGeraete = (basis: string[]) => invoke<ZielGeraet[]>("ziel_geraete", { basis });
+
+/** Vor dem Kopieren: Clips der Karte den Drehorten des Projekts zuordnen (Ordner = Drehort mit den meisten Clips). */
+export type EinlesenVorschau = {
+  drehorte: { id: string; name: string; datum: string; kurzname: string | null; clips: string[] }[];
+  ohne: string[];
+  gesamt: number;
+  aufnahmetag: string | null;
+  uhrFalsch: boolean;
+  ordner: string | null;
+};
+export const einlesenVorschau = (zugang: unknown, projekt: unknown, quelle: string) =>
+  invoke<EinlesenVorschau>("einlesen_vorschau", { zugang, projekt, quelle });
