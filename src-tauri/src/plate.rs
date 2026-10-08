@@ -303,7 +303,7 @@ impl Plate {
         // Mit Kurzname, Fotos und HDRI-Zeit (ab 0017), Plates und Takes mit allen Feldern (Spalten der Take-Tabellen);
         // bei einem älteren Server die schmale Auswahl.
         let voll = "select=id,name,kurzname,datum,geloescht,hdri(id,plate_id,zustand,erstellt_am,geloescht),\
-                    plate(*,foto(id,art,pfad,zeit,geloescht),take(*))";
+                    plate(*,foto(*),take(*))";
         let schmal = "select=id,name,datum,geloescht,hdri(id,plate_id,zustand,geloescht),\
                       plate(id,nummer,name,szene,buchstabe,geloescht,foto(id,geloescht),\
                       take(id,nummer,art,clip,clip_name,bewertung,geloescht))";

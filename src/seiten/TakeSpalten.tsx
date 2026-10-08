@@ -67,7 +67,9 @@ const tech = (id: string, titel: string, gruppe: Gruppe, quelle: string, rueckfa
   quelle,
   rechts,
   technik: true,
-  wert: (t, x) => x?.[id] ?? (rueckfall ? pa(t, rueckfall) : undefined),
+  // Kamerawerte (Plate Assistant, Build 20): erst die Werte der REC-Klappe am Take (CAP), dann die der Plate (Hand).
+  wert: (t, x) =>
+    x?.[id] ?? (rueckfall?.startsWith("plate.kamera.") ? (pa(t, rueckfall.replace("plate.", "take.")) ?? pa(t, rueckfall)) : rueckfall ? pa(t, rueckfall) : undefined),
 });
 
 const paSpalte = (id: string, titel: string, feld: string, rechts = false): Spalte => ({
@@ -90,26 +92,35 @@ const KATALOG: Spalte[] = [
   tech("endTc", "End TC", "Bild", "Clipdatei (Timecode-Spur), sonst Plate Assistant", "take.end_tc"),
   tech("groesse", "Grösse", "Bild", "Clipdatei"),
   // Kamerawerte: Metadaten im Clip oder ART CMD, sonst Plate Assistant.
-  tech("kamera", "Kamera", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Plate Assistant", "plate.kamera.modell", false),
+  // „Kamera“ ist der Kamerabuchstabe wie clip.kamera (Systemkarte, Spaltenkatalog), das Modell eine eigene Spalte.
+  {
+    id: "kamera",
+    titel: "Kamera",
+    gruppe: "Kamerawerte",
+    quelle: "Clipname (erster Buchstabe, ARRI-Schema)",
+    wert: (t) => (/^[A-Z]\d{3}C\d{3}/.test(t.clip) ? t.clip[0] : undefined),
+  },
+  tech("kameramodell", "Kameramodell", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Take (CAP), sonst Plate", "plate.kamera.modell", false),
   tech(
     "seriennummer",
     "Kamera-Seriennummer",
     "Kamerawerte",
-    "Clip-Metadaten / ART CMD, sonst Plate Assistant",
+    "Clip-Metadaten / ART CMD, sonst Take (CAP), sonst Plate",
     "plate.kamera.seriennummer",
     false,
   ),
-  tech("sensorFps", "Sensor FPS", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Plate Assistant", "plate.kamera.sensorFps"),
-  tech("shutter", "Shutter", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Plate Assistant", "plate.kamera.shutter"),
-  tech("ei", "EI", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Plate Assistant", "plate.kamera.iso"),
-  tech("weissK", "Weissabgleich K", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Plate Assistant", "plate.kamera.weissK"),
-  tech("tint", "Tint", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Plate Assistant", "plate.kamera.tint"),
-  tech("nd", "ND", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Plate Assistant", "plate.kamera.nd", false),
-  tech("look", "Look", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Plate Assistant", "plate.kamera.look", false),
-  tech("objektiv", "Objektiv", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Plate Assistant", "plate.kamera.objektiv", false),
-  tech("brennweite", "Brennweite mm", "Kamerawerte", "ART CMD, sonst Plate Assistant", "plate.kamera.brennweiteMm"),
-  tech("fokus", "Fokus", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Plate Assistant", "plate.kamera.fokus"),
-  tech("blende", "Blende", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Plate Assistant", "plate.kamera.blende"),
+  tech("sensorFps", "Sensor FPS", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Take (CAP), sonst Plate", "plate.kamera.sensorFps"),
+  tech("shutter", "Shutter", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Take (CAP), sonst Plate", "plate.kamera.shutter"),
+  // Spalte „EI“ heisst ei, im Datensatz (kamera{}, clip.kamerawerte) heisst der Schlüssel iso: bewusst so abgebildet.
+  tech("ei", "EI", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Take (CAP), sonst Plate", "plate.kamera.iso"),
+  tech("weissK", "Weissabgleich K", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Take (CAP), sonst Plate", "plate.kamera.weissK"),
+  tech("tint", "Tint", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Take (CAP), sonst Plate", "plate.kamera.tint"),
+  tech("nd", "ND", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Take (CAP), sonst Plate", "plate.kamera.nd", false),
+  tech("look", "Look", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Take (CAP), sonst Plate", "plate.kamera.look", false),
+  tech("objektiv", "Objektiv", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Take (CAP), sonst Plate", "plate.kamera.objektiv", false),
+  tech("brennweite", "Brennweite mm", "Kamerawerte", "ART CMD, sonst Take (CAP), sonst Plate", "plate.kamera.brennweiteMm"),
+  tech("fokus", "Fokus", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Take (CAP), sonst Plate", "plate.kamera.fokus"),
+  tech("blende", "Blende", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Take (CAP), sonst Plate", "plate.kamera.blende"),
   // Bewegung: ART CMD (Mittel und Bereich über alle Bilder), sonst der Wert, den der Plate Assistant übernommen hat.
   tech("tilt", "Tilt °", "Bewegung", "ART CMD (Mittel), sonst Plate Assistant", "take.aus_clip.tiltGrad"),
   tech("tiltBereich", "Tilt Bereich °", "Bewegung", "ART CMD", "take.aus_clip.tiltBereich"),

@@ -265,7 +265,10 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
         hdri: [{ id: "h0", zustand: "uploaded", erstelltAm: "2026-10-28T08:12:00Z", job: "wartet", vorschau: "h0/vorschau.jpg", vorschauQuelle: "iphone" }],
         plates: [
           { id: "p1", nummer: 1, slate: "42A", name: "Ufer Süd", hdri: [],
-            fotos: ["referenz", "set", "set", "position", "set", "set"].map((art, i) => ({ id: `f${i}`, art, pfad: `p1/f${i}.jpg` })),
+            fotos: [
+              ...["referenz", "set", "position"].map((art, i) => ({ id: `f${i}`, art, pfad: `p1/f${i}.jpg` })),
+              ...[1, 2].map((n) => ({ id: `v${n}`, art: "vorschau", pfad: `p1/v${n}.jpg`, takeId: `t${n}` })),
+            ],
             takes: [1, 2, 3].map((n) => ({
               id: `t${n}`, nummer: n, art: "take", bewertung: n === 2 ? "circle" : "", clip: `A001C00${n}_261028_R131`, karte: "A001R131", freigegeben: true,
               datei: `/Volumes/NAS/A001R131/A001C00${n}_261028_R131.mov`, csv: `/Volumes/NAS/05_METADATEN/A001C00${n}_261028_R131.csv`,

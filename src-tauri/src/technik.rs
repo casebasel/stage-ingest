@@ -44,7 +44,7 @@ fn kamerawert(feld: &str) -> Option<&'static str> {
     } else if hat("serial") {
         "seriennummer"
     } else if hat("cameramodel") || hat("cameratype") || k == "comapplequicktimemodel" || k == "mod" {
-        "kamera"
+        "kameramodell"
     } else if hat("lookname") || k.ends_with("look") {
         "look"
     } else {
@@ -129,7 +129,7 @@ mod tests {
         assert_eq!(kamerawert("com.arri.camera.WhiteBalanceKelvin"), Some("weissK"));
         assert_eq!(kamerawert("com.arri.camera.WhiteBalanceTintCc"), Some("tint"));
         assert_eq!(kamerawert("com.arri.camera.CameraSerialNumber"), Some("seriennummer"));
-        assert_eq!(kamerawert("com.apple.quicktime.model"), Some("kamera"));
+        assert_eq!(kamerawert("com.apple.quicktime.model"), Some("kameramodell"));
         assert_eq!(kamerawert("positional/orientation/tilt"), None);
     }
 
@@ -139,7 +139,7 @@ mod tests {
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../kern/tests/metadaten/A006C001_mit_metadaten.mov");
         let w = lesen(&Anfrage { datei, csv: None });
         assert_eq!(w.get("ei").map(String::as_str), Some("800"));
-        assert_eq!(w.get("kamera").map(String::as_str), Some("ALEXA Mini"));
+        assert_eq!(w.get("kameramodell").map(String::as_str), Some("ALEXA Mini"));
         assert_eq!(w.get("aufloesung").map(String::as_str), Some("64x36"));
         assert!(w.contains_key("datei:title"));
     }

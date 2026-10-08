@@ -4,7 +4,8 @@
 // (Systemkarte, Entscheidung „Projektmanager“ vom 08.10.2026); heute nur lesen, Projekte und Drehorte anlegen.
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { ChevronDown, ChevronRight, Image as Bild, MapPinPlus, Plus, RefreshCw, Settings, X } from "lucide-react";
+import { openPath } from "@tauri-apps/plugin-opener";
+import { ChevronDown, ChevronRight, Image as Bild, MapPinPlus, Play, Plus, RefreshCw, Settings, X } from "lucide-react";
 import { NeuerDrehort, NeuesProjekt, ProjektEinstellungen } from "../ProjektEinstellungen";
 import { useEinstellungen } from "../einstellungen";
 import { useKonto, type Projekt as ProjektT, type Zugang } from "../konto";
@@ -14,7 +15,7 @@ import { kurz } from "./Einlesen";
 import { SpaltenKopf, SpaltenMenue, SpaltenZellen, useTakeSpalten, type Spalte, type TakeMitWerten } from "./TakeSpalten";
 
 type TakeStand = TakeMitWerten;
-type FotoStand = { id: string; art: string; pfad: string };
+type FotoStand = { id: string; art: string; pfad: string; takeId?: string | null };
 type HdriStand = {
   id: string;
   zustand: string;
@@ -50,7 +51,7 @@ type Uebersicht = {
 
 const ART: Record<string, string> = { graukugel: "Graukugel", chromkugel: "Chromkugel", cleanplate: "Cleanplate", take: "Take" };
 const BEWERTUNG: Record<string, string> = { circle: "Favorit", gut: "Gut", schlecht: "Schlecht" };
-const FOTO: Record<string, string> = { referenz: "Referenz", set: "Set", position: "Position" };
+const FOTO: Record<string, string> = { referenz: "Referenz", set: "Set", position: "Position", vorschau: "Vorschau" };
 
 /** HDRI: Stand des HDRI-Dienstes, wenn es einen Job gibt, sonst der Stand im Plate Assistant. */
 function hdriStand(h: HdriStand): { ton: Ton; text: string } {
@@ -634,7 +635,7 @@ function PlateDetail({ dreh, p, drehWaehlen }: { dreh: DrehStand; p: PlateStand;
               <button className="foto-knopf" onClick={() => setGross(i)} aria-label={`Foto ${i + 1} gross anzeigen`}>
                 <Vorschau bucket="fotos" pfad={f.pfad} breite={320} alt={FOTO[f.art] ?? f.art} />
               </button>
-              {f.art && <span className="foto-art">{FOTO[f.art] ?? f.art}</span>}
+              <FotoText f={f} takes={p.takes} />
             </li>
           ))}
         </ul>
@@ -667,7 +668,7 @@ function PlateDetail({ dreh, p, drehWaehlen }: { dreh: DrehStand; p: PlateStand;
       ) : (
         <p className="leer-zeile">Noch keine Takes.</p>
       )}
-      {gross !== null && <Grossbild fotos={p.fotos} index={gross} setIndex={setGross} />}
+      {gross !== null && <Grossbild fotos={p.fotos} index={gross} setIndex={setGross} takes={p.takes} />}
     </>
   );
 }
@@ -731,16 +732,49 @@ function Vorschau({ bucket, pfad, breite, alt }: { bucket: string; pfad: string;
   return <img src={url} alt={alt} loading="lazy" />;
 }
 
+/** Unter einem Foto: bei einem Vorschaubild des Takes Take-Nummer und Clip (Klick spielt die Kopie ab), sonst die Art. */
+function FotoText({ f, takes }: { f: FotoStand; takes: TakeStand[] }) {
+  const t = f.takeId ? takes.find((x) => x.id === f.takeId) : undefined;
+  if (!t) return f.art ? <span className="foto-art">{FOTO[f.art] ?? f.art}</span> : null;
+  return (
+    <span className="foto-art foto-take">
+      <span>
+        Take {t.nummer}
+        {BEWERTUNG[t.bewertung] && <span className="leise"> · {BEWERTUNG[t.bewertung]}</span>}
+      </span>
+      {t.clip && (
+        <span className="zahl leise" title={t.clip}>
+          {t.clip}
+        </span>
+      )}
+      {t.datei && (
+        <button
+          className="verweis foto-abspielen"
+          title={`Kopie im Standard-Player öffnen: ${t.datei}`}
+          onClick={(ev) => {
+            ev.stopPropagation();
+            openPath(t.datei!).catch(() => {});
+          }}
+        >
+          <Play size={12} aria-hidden /> Clip abspielen
+        </button>
+      )}
+    </span>
+  );
+}
+
 function Grossbild({
   fotos,
   index,
   setIndex,
   bucket = "fotos",
+  takes = [],
 }: {
   fotos: FotoStand[];
   index: number;
   setIndex: (i: number | null) => void;
   bucket?: string;
+  takes?: TakeStand[];
 }) {
   useEffect(() => {
     const taste = (ev: KeyboardEvent) => {
@@ -759,6 +793,9 @@ function Grossbild({
       </button>
       <div className="grossbild-bild" onClick={(ev) => ev.stopPropagation()}>
         <Vorschau bucket={bucket} pfad={f.pfad} breite={2048} alt={FOTO[f.art] ?? (f.art || "Bild")} />
+      </div>
+      <div className="grossbild-text" onClick={(ev) => ev.stopPropagation()}>
+        <FotoText f={f} takes={takes} />
       </div>
       {fotos.length > 1 && (
         <span className="grossbild-zahl zahl">

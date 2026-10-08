@@ -74,6 +74,8 @@ pub struct FotoStand {
     pub art: String,
     /// Pfad im Bucket `fotos`.
     pub pfad: String,
+    /// Vorschaubild eines Takes (`art` = `vorschau`, Plate Assistant): der Take dazu.
+    pub take_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -249,7 +251,10 @@ pub fn zusammenfuehren(
                 .into_iter()
                 .flatten()
                 .filter(|x| gilt(x))
-                .map(|f| (f, FotoStand { id: text(&f["id"]), art: text(&f["art"]), pfad: text(&f["pfad"]) }))
+                .map(|f| {
+                    let take_id = Some(text(&f["take_id"])).filter(|t| !t.is_empty());
+                    (f, FotoStand { id: text(&f["id"]), art: text(&f["art"]), pfad: text(&f["pfad"]), take_id })
+                })
                 .filter(|(_, f)| !f.pfad.is_empty())
                 .collect();
             fotos.sort_by_key(|(f, _)| text(&f["zeit"]));
