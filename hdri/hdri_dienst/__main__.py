@@ -123,6 +123,29 @@ def rechnen(hdri_id: str, datei: Path, arbeit: Path, hoehe: int | None, halb: bo
     return 0
 
 
+def klein_jpg(pfad: Path, breite: int = 2048) -> bytes:
+    """Vorschau-JPEG des Panoramas auf `breite` verkleinert (2:1), zum Hochladen."""
+    import cv2
+
+    bild = cv2.imread(str(pfad), cv2.IMREAD_COLOR)
+    if bild is None:
+        raise FileNotFoundError(pfad)
+    if bild.shape[1] > breite:
+        bild = cv2.resize(bild, (breite, breite * bild.shape[0] // bild.shape[1]), interpolation=cv2.INTER_AREA)
+    ok, daten = cv2.imencode(".jpg", bild, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    if not ok:
+        raise ValueError("JPEG nicht erzeugt")
+    return daten.tobytes()
+
+
+def ergebnis_angaben(hid: str, b: dict) -> dict:
+    """`hdri_job.ergebnis`: Pfade auf Ada (relativ zu ergebnisse/) und, falls hochgeladen, das Bild im Speicher."""
+    e = {"exr_gemessen": f"{hid}/{b['exr_gemessen']}", "vorschau": f"{hid}/{b['vorschau']}"}
+    if b.get("vorschau_speicher"):
+        e["vorschau_speicher"] = b["vorschau_speicher"]
+    return e
+
+
 def laufen(datei: Path, wurzel: Path, takt_s: int, halb: bool) -> int:
     """Dauerbetrieb: neue, vollständig hochgeladene Aufnahmen holen und rechnen; pausiert, solange nDisplay läuft.
 
@@ -154,6 +177,37 @@ def laufen(datei: Path, wurzel: Path, takt_s: int, halb: bool) -> int:
             else:
                 log(f"Job nicht gesetzt: {e}")
 
+    versucht: dict[str, float] = {}
+
+    def hochladen(hid: str, ziel: Path) -> dict | None:
+        """Lädt das Panorama hoch (höchstens alle 30 min je Aufnahme versucht); schreibt den Pfad in bericht.json."""
+        if time.time() - versucht.get(hid, 0) < 1800:
+            return None
+        erster = hid not in versucht
+        versucht[hid] = time.time()
+        b = json.loads((ziel / "bericht.json").read_text(encoding="utf-8"))
+        try:
+            b["vorschau_speicher"] = server.ergebnis_hochladen(hid, klein_jpg(ziel / b["vorschau"]))
+        except (ServerFehler, OSError, ValueError) as e:
+            if erster:
+                log(f"{hid}: Vorschau nicht hochgeladen ({e}); neuer Versuch alle 30 min")
+            return None
+        (ziel / "bericht.json").write_text(json.dumps(b, indent=2), encoding="utf-8")
+        log(f"{hid}: Vorschau hochgeladen ({b['vorschau_speicher']})")
+        return b
+
+    def ausstehende_hochladen() -> None:
+        for bericht in sorted((wurzel / "ergebnisse").glob("*/bericht.json")):
+            try:
+                b = json.loads(bericht.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if b.get("exr_gemessen") and not b.get("vorschau_speicher"):
+                hid = bericht.parent.name
+                neu = hochladen(hid, bericht.parent)
+                if neu:
+                    job(hid, {"ergebnis": ergebnis_angaben(hid, neu)})
+
     log(f"HDRI-Dienst läuft (Takt {takt_s} s, Ergebnisse in {wurzel / 'ergebnisse'})")
     while True:
         try:
@@ -170,8 +224,7 @@ def laufen(datei: Path, wurzel: Path, takt_s: int, halb: bool) -> int:
                     b = json.loads((ziel / "bericht.json").read_text(encoding="utf-8"))
                     if b.get("exr_gemessen") and jobs_da:
                         job(hid, {"zustand": "processed", "stufe": "fertig", "fortschritt": 1.0, "rechner": "Ada",
-                                  "fertig_am": b.get("fertig"),
-                                  "ergebnis": {"exr_gemessen": f"{hid}/{b['exr_gemessen']}", "vorschau": f"{hid}/{b['vorschau']}"}},
+                                  "fertig_am": b.get("fertig"), "ergebnis": ergebnis_angaben(hid, b)},
                             anlegen=True)
                         if jobs_da:
                             log(f"{hid}: Job nachgetragen (processed)")
@@ -194,8 +247,9 @@ def laufen(datei: Path, wurzel: Path, takt_s: int, halb: bool) -> int:
                     bericht = {"exr_gemessen": exr.name, "vorschau": exr.with_suffix(".jpg").name, "fertig": datetime.now().astimezone().isoformat()}
                     (ziel / "bericht.json").write_text(json.dumps(bericht, indent=2), encoding="utf-8")
                     shutil.rmtree(ordner, ignore_errors=True)  # Rohdaten liegen weiter im Bucket
+                    bericht = hochladen(hid, ziel) or bericht
                     job(hid, {"zustand": "processed", "stufe": "fertig", "fortschritt": 1.0, "fertig_am": bericht["fertig"],
-                              "ergebnis": {"exr_gemessen": f"{hid}/{exr.name}", "vorschau": f"{hid}/{exr.with_suffix('.jpg').name}"}})
+                              "ergebnis": ergebnis_angaben(hid, bericht)})
                     log(f"{hid}: fertig")
                 except StageAktiv as e:
                     log(f"{hid}: {e}")
@@ -208,6 +262,7 @@ def laufen(datei: Path, wurzel: Path, takt_s: int, halb: bool) -> int:
                     (ziel / "fehler.txt").write_text(str(e), encoding="utf-8")
                     if isinstance(e, AufnahmeFehler):
                         (ziel / "bericht.json").write_text(json.dumps({"fehler": str(e)}), encoding="utf-8")
+            ausstehende_hochladen()
         except ServerFehler as e:
             log(f"Server: {e}")
         except Exception as e:  # nie still sterben: melden und im nächsten Takt weiter

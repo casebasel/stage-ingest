@@ -225,3 +225,19 @@ def test_multiband_wie_panorama():
     fehler = np.abs(bild - gt)[bewertbar] / np.maximum(gt[bewertbar], 0.05)
     assert np.median(fehler) < 0.03, np.median(fehler)
     assert maske[gt.max(axis=2) > 100].mean() > 0.5
+
+
+def test_ergebnis_hochladen_nur_eigene_datei(tmp_path):
+    """Der Dienst lädt nur `<hdri_id>/ergebnis.jpg` hoch, verkleinert auf 2048 Pixel Breite."""
+    import cv2
+
+    from hdri_dienst.__main__ import klein_jpg
+    from hdri_dienst.server import SPEICHER_DARF
+
+    assert SPEICHER_DARF.match("01M4DDQMJE3PJBD8R4PJRAS32W/ergebnis.jpg")
+    assert not SPEICHER_DARF.match("01M4DDQMJE3PJBD8R4PJRAS32W/vorschau.jpg")  # gehört dem iPhone
+    assert not SPEICHER_DARF.match("../ergebnis.jpg")
+    pfad = tmp_path / "p.jpg"
+    cv2.imwrite(str(pfad), np.full((2048, 4096, 3), 128, np.uint8))
+    klein = cv2.imdecode(np.frombuffer(klein_jpg(pfad), np.uint8), cv2.IMREAD_COLOR)
+    assert klein.shape[:2] == (1024, 2048)

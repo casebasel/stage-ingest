@@ -318,12 +318,14 @@ impl Plate {
         Ok(Value::Array(alle))
     }
 
-    /// HDRI-Jobs des Projekts (Tabelle `hdri_job`, ab 0019): Zustand und Ergebnis (mit Pfad der Vorschau).
-    pub fn hdri_jobs(&self, z: &Zugang, projekt: &Projekt) -> Result<Value, String> {
-        self.lesen(
-            z,
-            &format!("hdri_job?projekt_id=eq.{}&select=hdri_id,zustand,ergebnis,geloescht", url_teil(&projekt.id)),
-        )
+    /// HDRI-Jobs zu diesen Aufnahmen (Tabelle `hdri_job`, ab 0019): Zustand und Ergebnis (mit Pfad der Vorschau).
+    /// Gesucht über die HDRI-ID, nicht über das Projekt: der Dienst kennt das Projekt nicht immer.
+    pub fn hdri_jobs(&self, z: &Zugang, hdri_ids: &[String]) -> Result<Value, String> {
+        if hdri_ids.is_empty() {
+            return Ok(Value::Array(vec![]));
+        }
+        let liste = hdri_ids.iter().map(|i| url_teil(i)).collect::<Vec<_>>().join(",");
+        self.lesen(z, &format!("hdri_job?hdri_id=in.({liste})&select=hdri_id,zustand,ergebnis,geloescht"))
     }
 
     /// Lädt ein Bild aus einem Bucket des Plate Assistant (nur lesen): `fotos` oder `hdri`.

@@ -14,7 +14,15 @@ import { kurz } from "./Einlesen";
 
 type TakeStand = { id: string; nummer: number; art: string; bewertung: string; clip: string; karte: string | null; freigegeben: boolean };
 type FotoStand = { id: string; art: string; pfad: string };
-type HdriStand = { id: string; zustand: string; erstelltAm: string; job: string | null; vorschau: string | null };
+type HdriStand = {
+  id: string;
+  zustand: string;
+  erstelltAm: string;
+  job: string | null;
+  vorschau: string | null;
+  /** "dienst" = gerechnetes Panorama, "iphone" = Vorschau der Aufnahme vom iPhone. */
+  vorschauQuelle: "dienst" | "iphone" | null;
+};
 type PlateStand = { id: string; nummer: number; slate: string; name: string; fotos: FotoStand[]; hdri: HdriStand[]; takes: TakeStand[] };
 type DrehStand = { id: string; name: string; kurzname: string; datum: string; plates: PlateStand[]; hdri: HdriStand[]; karten: string[] };
 type Karte = {
@@ -662,11 +670,12 @@ function HdriListe({ hdri }: { hdri: HdriStand[] }) {
             ) : (
               <div className="hdri-bild hdri-leer">
                 <Bild size={20} strokeWidth={1.5} aria-hidden />
-                <span>Vorschau, sobald der Dienst gerechnet hat</span>
+                <span>Noch keine Vorschau</span>
               </div>
             )}
             <div className="hdri-text">
               <Status ton={s.ton}>{s.text}</Status>
+              {h.vorschauQuelle === "iphone" && <span className="leise">Bild: Vorschau vom iPhone, nicht das gerechnete HDRI</span>}
               {h.erstelltAm && <span className="leise zahl">{new Date(h.erstelltAm).toLocaleString("de-CH")}</span>}
             </div>
           </li>

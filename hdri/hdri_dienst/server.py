@@ -9,6 +9,7 @@ HDRI_PASSWORT. Nur die Standardbibliothek, damit auf Ada nichts weiter zu instal
 from __future__ import annotations
 
 import json
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -25,6 +26,12 @@ JOB_FELDER = {
     "_anlegen", "zustand", "stufe", "fortschritt", "rechner", "begonnen_am", "fertig_am", "fehler", "ergebnis",
     "ausrichtung_grad", "nord_grad",
 }
+
+
+#: Einzige Datei, die der Dienst in den Speicher lädt: das gerechnete Panorama, verkleinert, zum Ansehen in Ingest
+#: und iPhone (`<hdri_id>/ergebnis.jpg`; `vorschau.jpg` gehört dem iPhone). Braucht ein Schreibrecht für
+#: `app = "hdri"` im Bucket `hdri` (Migration Plate Assistant); bis dahin lehnt der Server ab und der Dienst meldet es.
+SPEICHER_DARF = re.compile(r"^[A-Za-z0-9_-]{10,40}/ergebnis\.jpg$")
 
 
 class ServerFehler(Exception):
@@ -65,12 +72,15 @@ class Server:
 
     # --- Netz -------------------------------------------------------------------------------------------------
 
-    def _anfrage(self, methode: str, pfad: str, daten=None, token: bool = True, roh: bool = False, zeit: int = 60):
+    def _anfrage(
+        self, methode: str, pfad: str, daten=None, token: bool = True, roh: bool = False, zeit: int = 60,
+        bytes_: bytes | None = None, kopf_dazu: dict | None = None,
+    ):
         # Eigene Kennung: Cloudflare weist die Standardkennung „Python-urllib“ ab (Fehler 1010).
-        kopf = {"apikey": self.anon_key, "User-Agent": "StageIngest-HDRI-Dienst/1"}
+        kopf = {"apikey": self.anon_key, "User-Agent": "StageIngest-HDRI-Dienst/1", **(kopf_dazu or {})}
         if token:
             kopf["Authorization"] = f"Bearer {self.token()}"
-        body = None
+        body = bytes_
         if daten is not None:
             body = json.dumps(daten).encode()
             kopf["Content-Type"] = "application/json"
@@ -153,6 +163,17 @@ class Server:
         return ziel
 
     # --- Schreiben (nur hdri_job) -----------------------------------------------------------------------------
+
+    def ergebnis_hochladen(self, hdri_id: str, jpg: bytes) -> str:
+        """Lädt das verkleinerte Panorama nach `hdri/<hdri_id>/ergebnis.jpg` (ersetzt ein altes). Gibt den Pfad zurück."""
+        pfad = f"{hdri_id}/ergebnis.jpg"
+        if not SPEICHER_DARF.match(pfad):
+            raise ServerFehler(f"Der HDRI-Dienst lädt {pfad} nicht hoch")
+        self._anfrage(
+            "POST", f"/storage/v1/object/hdri/{pfad}", bytes_=jpg, zeit=120,
+            kopf_dazu={"Content-Type": "image/jpeg", "x-upsert": "true"},
+        )
+        return pfad
 
     def job_setzen(self, hdri_id: str, felder: dict, anlegen: bool = False, projekt_id: str | None = None) -> None:
         """Ändert den Job einer Aufnahme; `anlegen` schickt zuerst `_anlegen` (der Server führt Doppeltes zusammen)."""

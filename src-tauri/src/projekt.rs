@@ -85,8 +85,10 @@ pub struct HdriStand {
     pub erstellt_am: String,
     /// Job des HDRI-Dienstes (`wartet`, `laeuft`, `processed`, …), falls bekannt.
     pub job: Option<String>,
-    /// Vorschaubild im Bucket `hdri` (vom HDRI-Dienst hochgeladen), falls vorhanden.
+    /// Vorschaubild im Bucket `hdri`: das gerechnete Panorama des Dienstes, sonst die Vorschau des iPhones.
     pub vorschau: Option<String>,
+    /// `dienst` (gerechnet) oder `iphone` (Vorschau der Aufnahme), `None` ohne Bild.
+    pub vorschau_quelle: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -121,11 +123,22 @@ pub fn zusammenfuehren(
     let hdri_stand = |h: &Value| {
         let id = text(&h["id"]);
         let job = jobs.get(&id);
+        let zustand = text(&h["zustand"]);
+        // `ergebnis.vorschau` ist ein Pfad auf Ada; im Speicher liegt das Bild unter `vorschau_speicher`.
+        let vom_dienst = job.map(|j| text(&j["ergebnis"]["vorschau_speicher"])).filter(|v| !v.is_empty());
+        // Das iPhone lädt mit den Rohdaten `<hdri_id>/vorschau.jpg` hoch (Plate Assistant, 0013).
+        let vom_iphone =
+            matches!(zustand.as_str(), "uploaded" | "processed" | "linked").then(|| format!("{id}/vorschau.jpg"));
         HdriStand {
-            zustand: text(&h["zustand"]),
             erstellt_am: text(&h["erstellt_am"]),
             job: job.map(|j| text(&j["zustand"])).filter(|z| !z.is_empty()),
-            vorschau: job.map(|j| text(&j["ergebnis"]["vorschau"])).filter(|v| !v.is_empty()),
+            vorschau_quelle: if vom_dienst.is_some() {
+                Some("dienst".into())
+            } else {
+                vom_iphone.as_ref().map(|_| "iphone".into())
+            },
+            vorschau: vom_dienst.or(vom_iphone),
+            zustand,
             id,
         }
     };
@@ -260,7 +273,17 @@ pub fn laden(plate: &Plate, zugang: Option<&Zugang>, projekt: Projekt, basis: &[
     karten.dedup_by(|a, b| a.inhalt.karte == b.inhalt.karte);
     let (drehs, jobs, hinweis) = match zugang {
         Some(z) => match plate.projekt_drehs(z, &projekt) {
-            Ok(v) => (v, plate.hdri_jobs(z, &projekt).unwrap_or(Value::Null), None),
+            Ok(v) => {
+                let ids: Vec<String> = v
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .flat_map(|d| d["hdri"].as_array().into_iter().flatten())
+                    .filter_map(|h| h["id"].as_str().map(str::to_owned))
+                    .collect();
+                let jobs = plate.hdri_jobs(z, &ids).unwrap_or(Value::Null);
+                (v, jobs, None)
+            }
             Err(e) => (Value::Null, Value::Null, Some(e)),
         },
         None => (Value::Null, Value::Null, Some("Kein Zugang zum Plate Assistant: nur eingelesene Karten".into())),
@@ -353,7 +376,7 @@ mod tests {
             regie: None,
             dop: None,
         };
-        let jobs = json!([{"hdri_id": "H1", "zustand": "processed", "ergebnis": {"vorschau": "H1/vorschau.jpg"}}]);
+        let jobs = json!([{"hdri_id": "H1", "zustand": "processed", "ergebnis": {"vorschau": "H1/H1_gemessen.jpg", "vorschau_speicher": "H1/ergebnis.jpg"}}]);
         let u = zusammenfuehren(p, &drehs, &jobs, vec![karte], vec![]);
         let plate = &u.drehs[0].plates[0];
         assert_eq!((plate.slate.as_str(), plate.fotos.len()), ("42A", 1));
@@ -361,10 +384,12 @@ mod tests {
         assert_eq!(plate.hdri.len(), 1);
         assert_eq!(
             (plate.hdri[0].job.as_deref(), plate.hdri[0].vorschau.as_deref()),
-            (Some("processed"), Some("H1/vorschau.jpg"))
+            (Some("processed"), Some("H1/ergebnis.jpg"))
         );
+        assert_eq!(plate.hdri[0].vorschau_quelle.as_deref(), Some("dienst"));
         assert_eq!(u.drehs[0].hdri[0].zustand, "captured");
         assert_eq!(u.drehs[0].hdri[0].job, None);
+        assert_eq!(u.drehs[0].hdri[0].vorschau, None, "noch nicht hochgeladen: kein Bild");
         assert_eq!(u.drehs[0].karten, ["A001R1AB"]);
         let karten: Vec<Option<&str>> = plate.takes.iter().map(|t| t.karte.as_deref()).collect();
         assert_eq!(karten, [Some("A001R1AB"), Some("A001R1AB"), None], "T3 fehlt noch: Karte nicht eingelesen");

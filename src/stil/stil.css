@@ -1481,6 +1481,9 @@ input[type="checkbox"][role="switch"]:checked::before {
 .hdri-bild {
   aspect-ratio: 2 / 1;
 }
+.hdri-bild img {
+  object-fit: contain;
+}
 .hdri-leer {
   display: grid;
   place-content: center;

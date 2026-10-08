@@ -218,14 +218,14 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
     drehs: [
       {
         id: "d1", name: "Rheinufer", kurzname: "RHEINUFER", datum: "2026-10-28", karten: ["A001R131", "A001R132"],
-        hdri: [{ id: "h0", zustand: "uploaded", erstelltAm: "2026-10-28T08:12:00Z", job: "wartet", vorschau: null }],
+        hdri: [{ id: "h0", zustand: "uploaded", erstelltAm: "2026-10-28T08:12:00Z", job: "wartet", vorschau: "h0/vorschau.jpg", vorschauQuelle: "iphone" }],
         plates: [
           { id: "p1", nummer: 1, slate: "42A", name: "Ufer Süd", hdri: [],
             fotos: ["referenz", "set", "set", "position", "set", "set"].map((art, i) => ({ id: `f${i}`, art, pfad: `p1/f${i}.jpg` })),
             takes: [1, 2, 3].map((n) => ({ id: `t${n}`, nummer: n, art: "take", bewertung: n === 2 ? "circle" : "", clip: `A001C00${n}_261028_R131`, karte: "A001R131", freigegeben: true })) },
           { id: "p2", nummer: 2, slate: "42B", name: "Brücke",
             fotos: [0, 1, 2].map((i) => ({ id: `g${i}`, art: "set", pfad: `p2/g${i}.jpg` })),
-            hdri: [{ id: "h1", zustand: "uploaded", erstelltAm: "2026-10-28T10:40:00Z", job: "processed", vorschau: "h1/vorschau.jpg" }],
+            hdri: [{ id: "h1", zustand: "uploaded", erstelltAm: "2026-10-28T10:40:00Z", job: "processed", vorschau: "h1/ergebnis.jpg", vorschauQuelle: "dienst" }],
             takes: [
               { id: "t4", nummer: 1, art: "take", bewertung: "gut", clip: "A001C011_261028_R132", karte: "A001R132", freigegeben: false },
               { id: "t5", nummer: 2, art: "graukugel", bewertung: "", clip: "A001C012_261028_R132", karte: "A001R132", freigegeben: false },
