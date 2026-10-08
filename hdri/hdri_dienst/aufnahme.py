@@ -73,6 +73,57 @@ def datei(a: Aufnahme, frame: dict) -> Path:
     return p
 
 
+@dataclass
+class Rohbild:
+    """Entwickeltes Bild in Sensor-Ausrichtung, noch ohne Objektivkorrektur und ohne Drehung."""
+
+    bild: np.ndarray
+    drehung: int = 0  # LibRaw-flip: 0 keine, 3 = 180°, 5 = 90° gegen, 6 = 90° im Uhrzeigersinn
+    verzerrung: object | None = None
+    vignette: object | None = None
+
+
+def korrigieren(bild: np.ndarray, roh: Rohbild) -> np.ndarray:
+    """Objektivkorrektur (Randabdunklung, dann Entzerrung) und Drehung in die Anzeige-Ausrichtung."""
+    from . import opcodes
+
+    if roh.vignette is not None:
+        bild = opcodes.vignette_anwenden(bild, roh.vignette)
+    if roh.verzerrung is not None:
+        bild = opcodes.verzerrung_anwenden(bild, roh.verzerrung)
+    k = {0: 0, 3: 2, 5: 1, 6: -1}.get(roh.drehung, 0)
+    return np.ascontiguousarray(np.rot90(bild, k=k)) if k else bild
+
+
+def roh_laden(pfad: Path, halb: bool = False) -> Rohbild:
+    """DNG linear entwickeln (keine Gamma-Kurve, keine Aufhellung, Weissabgleich der Aufnahme), in Sensor-Ausrichtung,
+    dazu die Korrekturen aus `OpcodeList3`. `.npy` (Tests): unverändert, ohne Korrekturen."""
+    pfad = Path(pfad)
+    if pfad.suffix.lower() == ".npy":
+        return Rohbild(np.load(pfad).astype(np.float32))
+    import rawpy
+    import tifffile
+
+    from . import opcodes
+
+    with rawpy.imread(str(pfad)) as raw:
+        drehung = raw.sizes.flip
+        rgb = raw.postprocess(
+            gamma=(1, 1),
+            no_auto_bright=True,
+            output_bps=16,
+            use_camera_wb=True,
+            half_size=halb,
+            user_flip=0,
+            output_color=rawpy.ColorSpace.sRGB,  # Primärfarben sRGB/Rec.709, linear
+        )
+    with tifffile.TiffFile(str(pfad)) as t:
+        tag = t.pages[0].tags.get("OpcodeList3")
+        daten = bytes(tag.value) if tag is not None else b""
+    verz, vign = opcodes.lesen(daten)
+    return Rohbild(rgb.astype(np.float32) / 65535.0, drehung, verz, vign)
+
+
 def bild_laden(pfad: Path, halb: bool = False) -> np.ndarray:
     """Lineares RGB (float32, 0..1, 1 = Weisspunkt) in Anzeige-Ausrichtung (Orientation-Tag angewendet).
 
@@ -110,13 +161,18 @@ def positionen_zusammenfuehren(a: Aufnahme, halb: bool = False, melden=None) -> 
             if melden:
                 melden(f"Position {pos}: keine Bilder da, ausgelassen", (n + 1) / len(gruppen))
             continue
+        roh = None
         for f in vorhanden:
-            bild = bild_laden(datei(a, f), halb=halb)
+            roh = roh_laden(datei(a, f), halb=halb)
+            bild = roh.bild
             zeit, iso = f.get("belichtung_s"), f.get("iso")
             if not zeit or not iso:
                 raise AufnahmeFehler(f"Position {pos}: Belichtungszeit oder ISO fehlt")
             reihe.append(Belichtung(bild, float(zeit), float(iso)))
         hdr, clip = zusammenfuehren(reihe)
+        # Objektivkorrektur erst nach dem Zusammenführen: Sättigung und Gewichte gelten für die Rohwerte des Sensors.
+        hdr = korrigieren(hdr, roh)
+        clip = korrigieren(clip.astype(np.float32), Rohbild(clip, roh.drehung, roh.verzerrung, None)) > 0.5
         hoehe, breite = hdr.shape[:2]
         # Sichtfeld: hfov = kurze Seite, vfov = lange Seite (Hochformat). Liegt das Bild quer, tauschen.
         kurz, lang = float(h["hfov_grad"]), float(h["vfov_grad"])

@@ -167,3 +167,24 @@ def test_server_schreibt_nur_jobs():
         s._anwenden([{"tabelle": "hdri", "feld": "zustand"}])
     with pytest.raises(ServerFehler, match="schreibt hdri_job.geloescht nicht"):
         s._anwenden([{"tabelle": "hdri_job", "feld": "geloescht"}])
+
+
+# OpcodeList3 eines echten DNG (iPhone 13 Pro, Ultraweitwinkel), nur die Korrekturwerte des Objektivs.
+IPHONE_OPCODES = bytes.fromhex("000000020000000e0103000000000000000000b0000000013ff08efb400000000000000000000000bfe1b81b3c3590a1000000000000000040052ed68c6d956c0000000000000000c018aaef1285fb93000000000000000040212c92441fff6a0000000000000000c01aa8c7fd844b52000000000000000040053866a869e05d0000000000000000bfdb00937be8308b0000000000000000000000000000000000000000000000003ff00000000000003fe00000000000003fe00000000000000000000100000003010300000000000000000038400b7fad60000000bfff2837600000004022978d20000000c0338f62e0000000402b3fb9800000003fdfebcfeb8272f63fe01325d7b5460e")
+
+
+def test_opcodes_des_iphone():
+    from hdri_dienst import opcodes
+
+    verz, vign = opcodes.lesen(IPHONE_OPCODES)
+    assert verz.kehrwert and abs(verz.kr[0] - 1.034908) < 1e-5 and verz.cx == 0.5
+    assert abs(vign.k[0] - 3.437342) < 1e-5 and abs(vign.cx - 0.498768) < 1e-5
+    # Randabdunklung: Mitte unverändert, Ecke deutlich aufgehellt
+    bild = np.ones((30, 40, 3), np.float32)
+    v = opcodes.vignette_anwenden(bild, vign)
+    assert abs(v[15, 20, 0] - 1) < 0.05 and v[0, 0, 0] > 4
+    # Entzerrung: Mitte bleibt (Faktor ≈ 0,97 nahe der Mitte), Bildmitte zeigt weiter die Mitte
+    gitter = np.zeros((101, 101, 3), np.float32)
+    gitter[50, 50] = 1
+    e = opcodes.verzerrung_anwenden(gitter, verz)
+    assert e[50, 50, 0] > 0.5
