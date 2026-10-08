@@ -1,7 +1,8 @@
 // Projekt-Einstellungen (Zahnrad), gleiches Verhalten in allen drei Apps (Systemkarte SCHNITTSTELLEN.md):
 // Name änderbar, Kurzname fest, Art, Produktionsfirma, Regie, DoP und die Kamera-Vorgaben. Alles freiwillig.
 // Vorläufig eigenes Formular; sobald das gemeinsame Paket stage-projekt da ist, kommt das Formular von dort.
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { ARTEN, drehsVon, useKonto, type Projekt } from "./konto";
 import { Feld, Status } from "./teile";
 
@@ -223,10 +224,17 @@ export function NeuerDrehort({ projekt, fertig }: { projekt: Projekt; fertig: (i
   const [ausgewichen, setAusgewichen] = useState<string | null>(null);
   const [datum, setDatum] = useState(() => new Date().toLocaleDateString("sv-SE"));
   const [stand, setStand] = useState<{ ton: "fehler" | "laeuft" | "warn"; text: string } | null>(null);
+  // Vergeben sind auch die Kurznamen gelöschter Drehorte (Systemkarte 4ae71dd); vom Server nachgeladen.
+  const [vomServer, setVomServer] = useState<string[]>([]);
+  useEffect(() => {
+    invoke<string[]>("plate_drehort_kurznamen", { zugang: konto.zugang, projektId: projekt.id })
+      .then(setVomServer)
+      .catch(() => setVomServer([]));
+  }, [projekt.id]);
   const vergeben = drehsVon(konto.drehs, projekt)
     .map((d) => d.kurzname)
     .filter((k): k is string => !!k)
-    .concat("STUDIO");
+    .concat(vomServer, "STUDIO");
   const doppelt = !!kurzname && vergeben.includes(kurzname);
 
   async function vorschlagen(n: string) {
@@ -305,7 +313,7 @@ export function NeuerDrehort({ projekt, fertig }: { projekt: Projekt; fertig: (i
       {doppelt && (
         <p className="feld-meldung">
           <Status ton="warn">
-            {kurzname} gibt es im Projekt schon.{" "}
+            {kurzname} ist im Projekt schon vergeben (auch gelöschte Drehorte zählen).{" "}
             <button className="verweis" onClick={() => setKurzname(freierKurzname(kurzname, vergeben))}>
               {freierKurzname(kurzname, vergeben)} verwenden
             </button>

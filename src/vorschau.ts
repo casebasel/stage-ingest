@@ -184,6 +184,7 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
   ],
   plate_soll: () => [],
   plate_projekt_aendern: () => null,
+  plate_drehort_kurznamen: () => ["RHEINUFER", "BRUECKE"],
   plate_drehort_anlegen: (a) => `dreh-happy_end-${String(a.kurzname).toLowerCase()}`,
   plate_projekt_anlegen: (a) => `projekt-${String(a.kurzname).toLowerCase()}`,
   kurzname_vorschlag: (a) => (kurz(String(a.name)) ?? "").slice(0, Number(a.laenge ?? 24)).replace(/_+$/, ""),

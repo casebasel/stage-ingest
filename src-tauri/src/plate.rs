@@ -383,6 +383,17 @@ impl Plate {
         }
     }
 
+    /// Alle Drehort-Kurznamen eines Projekts, auch gelöschter und alter Drehorte (Systemkarte 4ae71dd): ein gelöschter
+    /// Drehort lebte sonst über die abgeleitete ID samt seinen Plates wieder auf. Vor 0017 leer.
+    pub fn drehort_kurznamen(&self, z: &Zugang, projekt_id: &str) -> Result<Vec<String>, String> {
+        let pfad = format!("dreh?projekt_id=eq.{}&select=kurzname", url_teil(projekt_id));
+        match self.lesen(z, &pfad) {
+            Ok(v) => Ok(v.as_array().into_iter().flatten().filter_map(|d| text_oder_nichts(&d["kurzname"])).collect()),
+            // Spalte kurzname gibt es erst ab 0017.
+            Err(_) => Ok(vec![]),
+        }
+    }
+
     /// Drehort anlegen (ab Migration 0017). ID `dreh-<projekt-kurzname>-<drehort-kurzname>` klein, Kurzname danach fest.
     /// Das Datum ist bis Stufe C Pflicht.
     pub fn drehort_anlegen(

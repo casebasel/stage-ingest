@@ -747,6 +747,17 @@ fn kurzname_vorschlag(name: String, laenge: Option<usize>) -> Option<String> {
     struktur::kurzname_vorschlag_bis(&name, laenge.unwrap_or(24))
 }
 
+/// Vergebene Drehort-Kurznamen eines Projekts, einschliesslich gelöschter Drehorte.
+#[tauri::command]
+async fn plate_drehort_kurznamen(
+    plate: State<'_, Arc<plate::Plate>>,
+    zugang: plate::Zugang,
+    projekt_id: String,
+) -> Result<Vec<String>, String> {
+    let p = Arc::clone(&plate);
+    im_hintergrund(move || p.drehort_kurznamen(&zugang, &projekt_id)).await
+}
+
 /// Drehort anlegen (ab Migration 0017; Systemkarte 64185e7/4f197ed).
 #[tauri::command]
 async fn plate_drehort_anlegen(
@@ -874,6 +885,7 @@ pub fn run() {
             plate_projekt_aendern,
             kurzname_vorschlag,
             plate_drehort_anlegen,
+            plate_drehort_kurznamen,
             plate_abmelden,
             stage_projekt,
             projekt_uebersicht,
