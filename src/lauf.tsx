@@ -87,6 +87,8 @@ function useLaufHalten() {
   const [nachpruefung, setNachpruefung] = useState<Nachpruefung | null>(null);
   const [nachpruefFehler, setNachpruefFehler] = useState<{ ordner: string; text: string } | null>(null);
   const laeuft = LAUFEND.includes(phase);
+  const puffer = useRef<Fortschritt[]>([]);
+  const zeitgeber = useRef<ReturnType<typeof setTimeout> | null>(null);
   const kaskadeAktiv = useRef(false);
 
   // Dreh: Projekt (aus dem Plate Assistant gewählt oder getippt), Datum, Drehort.
@@ -283,57 +285,16 @@ function useLaufHalten() {
     const weg = aufFortschritt((f: Fortschritt) => {
       // Bei „Kopie aus Kopie“ bleibt die Phase „nachpruefen“ (Kopf und Einlesen-Seite zeigen keinen Kartenlauf).
       if (f.phase !== "kopieren" && !kaskadeAktiv.current) setPhase(f.phase);
-      setStand((s) => {
-        if (f.phase === "pruefen" && !f.pfad) {
-          // Leerer Pfad: dieses Ziel beginnt mit dem Zurücklesen (Zeit für Tempo und Restzeit).
-          return {
-            ...s,
-            pruefJeZiel: { ...s.pruefJeZiel, [f.ziel]: { nummer: 0, bytes: 0, beginn: Date.now() } },
-            pruefBeginn: s.pruefBeginn || Date.now(),
-            pruefZiel: f.ziel,
-          };
-        }
-        if (f.phase === "pruefen") {
-          // Gemeldet wird nach dem Prüfen einer Datei; Ziele verschiedener Platten melden durcheinander.
-          const i = s.liste.findIndex((d) => d.pfad === f.pfad);
-          const liste = i < 0 ? s.liste : s.liste.slice();
-          if (i >= 0) liste[i] = { ...liste[i], geprueft: liste[i].geprueft | (1 << f.ziel) };
-          const vorher = s.pruefJeZiel[f.ziel];
-          return {
-            ...s,
-            liste,
-            pruefJeZiel: {
-              ...s.pruefJeZiel,
-              [f.ziel]: {
-                nummer: (vorher?.nummer ?? 0) + 1,
-                bytes: (vorher?.bytes ?? 0) + (i >= 0 ? s.liste[i].groesse : 0),
-                beginn: vorher?.beginn ?? Date.now(),
-              },
-            },
-            pruefNummer: s.pruefNummer + 1,
-            pruefBeginn: s.pruefBeginn || Date.now(),
-            pruefZiel: f.ziel,
-            pruefPfad: f.pfad,
-          };
-        }
-        if (f.phase === "nachlesen" || f.phase === "nachpruefen") return { ...s, pruefPfad: f.pfad, pruefNummer: s.pruefNummer + 1 };
-        const m = f.meldung;
-        switch (m.art) {
-          case "begonnen":
-            return { ...s, dateien: m.dateien, bytes: m.bytes };
-          case "datei":
-            return {
-              ...s,
-              datei: m.pfad,
-              dateiNummer: m.nummer + 1,
-              liste: [...s.liste, { pfad: m.pfad, groesse: m.groesse ?? 0, geprueft: 0 }],
-            };
-          case "bytes":
-            return { ...s, gelesen: m.gelesen };
-          case "zielAusgefallen":
-            return { ...s, ausfaelle: [...s.ausfaelle, { ordner: m.ordner, fehler: m.fehler }] };
-        }
-      });
+      // Gesammelt und höchstens alle 100 ms angewendet: eine Karte mit Zehntausenden Dateien schickt sonst für jede
+      // Datei ein Ereignis, und jedes kopierte die ganze Liste (Code-Prüfung 09.10.2026).
+      puffer.current.push(f);
+      if (!zeitgeber.current)
+        zeitgeber.current = setTimeout(() => {
+          zeitgeber.current = null;
+          const ereignisse = puffer.current;
+          puffer.current = [];
+          setStand((s) => fortschrittAnwenden(s, ereignisse));
+        }, 100);
     });
     return () => {
       weg.then((f) => f());
@@ -355,6 +316,7 @@ function useLaufHalten() {
     setFehler(null);
     setErgebnis(null);
     setNachpruefung(null);
+    puffer.current = [];
     setStand({ ...LEER, beginn: Date.now(), zielZahl: ziele.length });
     setPhase("kopieren");
     try {
@@ -415,6 +377,7 @@ function useLaufHalten() {
     const vorher = phase;
     setNachpruefFehler(null);
     setNachpruefung(null);
+    puffer.current = [];
     setStand({ ...LEER, beginn: Date.now() });
     setPhase("nachpruefen");
     try {
@@ -433,6 +396,7 @@ function useLaufHalten() {
     const vorher = phase;
     setKaskade(null);
     setKaskadeFehler(null);
+    puffer.current = [];
     setStand({ ...LEER, beginn: Date.now() });
     setPhase("nachpruefen");
     kaskadeAktiv.current = true;
@@ -531,4 +495,57 @@ export function useLauf() {
   const l = useContext(Kontext);
   if (!l) throw new Error("Lauf fehlt");
   return l;
+}
+
+/** Wendet gesammelte Fortschritts-Ereignisse in einem Durchgang an (Liste einmal kopiert, Suche über einen Index). */
+function fortschrittAnwenden(alt: Stand, ereignisse: Fortschritt[]): Stand {
+  const s: Stand = { ...alt, liste: alt.liste.slice(), pruefJeZiel: { ...alt.pruefJeZiel }, ausfaelle: alt.ausfaelle.slice() };
+  const index = new Map<string, number>();
+  s.liste.forEach((d, i) => index.set(d.pfad, i));
+  for (const f of ereignisse) {
+    if (f.phase === "pruefen" && !f.pfad) {
+      // Leerer Pfad: dieses Ziel beginnt mit dem Zurücklesen (Zeit für Tempo und Restzeit).
+      s.pruefJeZiel[f.ziel] = { nummer: 0, bytes: 0, beginn: Date.now() };
+      s.pruefBeginn = s.pruefBeginn || Date.now();
+      s.pruefZiel = f.ziel;
+    } else if (f.phase === "pruefen") {
+      // Gemeldet wird nach dem Prüfen einer Datei; Ziele verschiedener Platten melden durcheinander.
+      const i = index.get(f.pfad);
+      if (i !== undefined) s.liste[i] = { ...s.liste[i], geprueft: s.liste[i].geprueft | (1 << f.ziel) };
+      const vorher = s.pruefJeZiel[f.ziel];
+      s.pruefJeZiel[f.ziel] = {
+        nummer: (vorher?.nummer ?? 0) + 1,
+        bytes: (vorher?.bytes ?? 0) + (i !== undefined ? s.liste[i].groesse : 0),
+        beginn: vorher?.beginn ?? Date.now(),
+      };
+      s.pruefNummer += 1;
+      s.pruefBeginn = s.pruefBeginn || Date.now();
+      s.pruefZiel = f.ziel;
+      s.pruefPfad = f.pfad;
+    } else if (f.phase === "nachlesen" || f.phase === "nachpruefen") {
+      s.pruefPfad = f.pfad;
+      s.pruefNummer += 1;
+    } else {
+      const m = f.meldung;
+      switch (m.art) {
+        case "begonnen":
+          s.dateien = m.dateien;
+          s.bytes = m.bytes;
+          break;
+        case "datei":
+          s.datei = m.pfad;
+          s.dateiNummer = m.nummer + 1;
+          index.set(m.pfad, s.liste.length);
+          s.liste.push({ pfad: m.pfad, groesse: m.groesse ?? 0, geprueft: 0 });
+          break;
+        case "bytes":
+          s.gelesen = m.gelesen;
+          break;
+        case "zielAusgefallen":
+          s.ausfaelle.push({ ordner: m.ordner, fehler: m.fehler });
+          break;
+      }
+    }
+  }
+  return s;
 }
