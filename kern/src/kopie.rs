@@ -245,10 +245,10 @@ pub fn kopieren(auftrag: &Auftrag, abbruch: &AtomicBool, mut melden: impl FnMut(
                 break;
             }
             block.truncate(n);
-            rechner.dazu(&block);
             laenge += n as u64;
             gelesen += n as u64;
             let block = Arc::new(block);
+            rechner.dazu_geteilt(&block);
             if !senden(&mut kanaele, &zustaende, &mut haengt, abbruch, ZIEL_ZEITGRENZE, &|| {
                 AnZiel::Block(Arc::clone(&block))
             }) {
