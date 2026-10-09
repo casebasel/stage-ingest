@@ -81,6 +81,17 @@ const paSpalte = (id: string, titel: string, feld: string, rechts = false): Spal
   wert: (t) => pa(t, feld),
 });
 
+// Einrichtung je Take (Plate Assistant 0026, 09.10.2026): das Stativ kann sich zwischen Takes ändern. Zuerst
+// `take.lage` (am Take gemessen), sonst das Feld der Plate. Ohne 0026 gilt einfach die Plate.
+const lageSpalte = (id: string, titel: string, lage: string, plate: string, rechts = true): Spalte => ({
+  id,
+  titel,
+  gruppe: "Plate Assistant",
+  quelle: `Plate Assistant (take.lage.${lage}, sonst ${plate})`,
+  rechts,
+  wert: (t) => pa(t, `take.lage.${lage}`) ?? pa(t, plate),
+});
+
 const KATALOG: Spalte[] = [
   // Vorschaubilder: erstes, mittleres, letztes Bild (ART CMD, sonst Quick Look), erst beim Einblenden gerechnet.
   {
@@ -143,20 +154,23 @@ const KATALOG: Spalte[] = [
     rechts: true,
     wert: (t) => uhrzeit(pa(t, "take.start_zeit")),
   },
-  paSpalte("neigungIphone", "Tilt iPhone °", "plate.neigung_grad", true),
-  paSpalte("rollenIphone", "Roll iPhone °", "plate.rollen_grad", true),
-  paSpalte("richtung", "Richtung °", "plate.richtung.azimutGrad", true),
-  paSpalte("hoehe", "Kamerahöhe cm", "plate.kamera_hoehe_cm", true),
-  paSpalte("abstand", "Abstand cm", "plate.abstand_cm", true),
-  paSpalte("stativ", "Stativ", "plate.stativ"),
+  lageSpalte("einrichtung", "Einrichtung", "einrichtung", "plate.einrichtung"),
+  lageSpalte("neigungIphone", "Tilt iPhone °", "neigungGrad", "plate.neigung_grad"),
+  lageSpalte("rollenIphone", "Roll iPhone °", "rollenGrad", "plate.rollen_grad"),
+  lageSpalte("richtung", "Richtung °", "richtung.azimutGrad", "plate.richtung.azimutGrad"),
+  lageSpalte("hoehe", "Kamerahöhe cm", "kameraHoeheCm", "plate.kamera_hoehe_cm"),
+  lageSpalte("abstand", "Abstand cm", "abstandCm", "plate.abstand_cm"),
+  lageSpalte("stativ", "Stativ", "stativ", "plate.stativ", false),
   {
     id: "gps",
     titel: "GPS",
     gruppe: "Plate Assistant",
-    quelle: "Plate Assistant (plate.gps)",
+    quelle: "Plate Assistant (take.lage.gps, sonst plate.gps)",
     wert: (t) => {
-      const lat = pa(t, "plate.gps.lat");
-      const lon = pa(t, "plate.gps.lon");
+      // Lat und Lon immer aus derselben Messung.
+      const amTake = pa(t, "take.lage.gps.lat") && pa(t, "take.lage.gps.lon");
+      const lat = pa(t, amTake ? "take.lage.gps.lat" : "plate.gps.lat");
+      const lon = pa(t, amTake ? "take.lage.gps.lon" : "plate.gps.lon");
       return lat && lon ? `${lat}, ${lon}` : undefined;
     },
   },
@@ -166,6 +180,10 @@ const KATALOG: Spalte[] = [
 
 // Felder des Plate Assistant, die eine Katalogspalte schon zeigt (erscheinen nicht noch einmal unter „Weitere“).
 const IM_KATALOG = new Set([
+  ...["einrichtung", "neigungGrad", "rollenGrad", "richtung.azimutGrad", "kameraHoeheCm", "abstandCm", "stativ", "gps.lat", "gps.lon"].map(
+    (k) => `take.lage.${k}`,
+  ),
+  "plate.einrichtung",
   "take.nummer",
   "take.art",
   "take.bewertung",
