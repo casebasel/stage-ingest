@@ -150,8 +150,9 @@ in KAMERAS.md.
 - ~~Clip ↔ Take: Clipname → Timecode-Überlappung; Klärungsliste~~ gebaut; offen: Info 1 (`PA:<take.id>`, nach dem CAP-Test an der Mini), Zeitfenster der Plate
 - **Entscheid Marlon 10.10.2026 (Slate und Klappe):** draussen mit Schauspielern = „Einstellung“ im Plate Assistant,
   Plate ist eine Art davon (Feld für die Art an `plate`, z. B. 'plate'/'einstellung'; Schema folgt): nur Plates nach
-  `02_PLATES`. ID überall: Info 1 und QR auf jeder Klappe, draussen `PA:<take.id>`, im Studio `ST:<id>` (Form mit der
-  Stage zu klären) → `studio_take`. Studio-Modus im Plate Assistant ändert für den Ingest nichts.
+  `02_PLATES`. ID überall: Info 1 und QR auf jeder Klappe, draussen `PA:<take.id>`, im Studio `ST:<ULID>` → `studio_take`
+  (mit der Stage vereinbart, dort live 2a1193f: QR Q 25 × 25, Info 1 vor REC nur diese Zeichenkette; `STAGE:` als
+  Rückfall mitlesen; offen: ob die Mini 0x0098 schreiben lässt). Studio-Modus im Plate Assistant ändert für den Ingest nichts.
 - QR-Klappe (`PA:<take.id>` im Bild) lesen: **stärkste Quelle**, vor Info 1, Clipname, Timecode und Zeitfenster
   (Systemkarte SCHNITTSTELLEN „Clip ↔ Take“, 09.10.2026). Widersprechen sich QR und Info 1: nach dem QR zuordnen und
   den Clip mit Hinweis in die Klärungsliste (Info 1 kann vom vorigen Take stammen, wenn das Schreiben per CAP scheiterte)
