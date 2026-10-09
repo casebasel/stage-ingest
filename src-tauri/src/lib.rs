@@ -654,12 +654,24 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
     // (gleich gemerkt für die Spalte „Vorschau“), aus der ersten guten Kopie. Nach der Freigabe: die Entscheidung
     // wartet nie darauf. Ein Fehler kostet nur Werte oder Bilder.
     let mut clips_bericht = Vec::new();
+    let mut farbe: Vec<String> = Vec::new();
     if let (Some(erstes), Ok(cache)) = (urteile.iter().find(|u| u.gut()), app.path().app_cache_dir()) {
         for c in clips.iter().filter(|c| c.angaben.is_some()) {
             let _ = app.emit(FORTSCHRITT, Fortschritt::Nachlesen { pfad: format!("Vorschaubilder: {}", c.pfad) });
             let datei = erstes.ordner.join(&c.pfad);
             let csv = struktur::metadatenordner(&erstes.ordner).join(format!("{}.csv", soll::ohne_endung(&c.pfad)));
             let w = technik::lesen(&technik::Anfrage { datei: datei.clone(), csv: csv.is_file().then_some(csv) });
+            // Farbe gegen die Vorgabe des Projekts (0027): nur Warnung, gold im Bericht.
+            if let Some(k) = auftrag.kamera.as_ref() {
+                let f = ingest_kern::clip::farbe_abweichungen(
+                    k,
+                    w.get("gamma").map(String::as_str),
+                    w.get("look").map(String::as_str),
+                );
+                if !f.is_empty() {
+                    farbe.push(format!("{}: {}", c.pfad.rsplit('/').next().unwrap_or(&c.pfad), f.join(", ")));
+                }
+            }
             let werte = [
                 w.get("ei").map(|v| format!("EI {v}")),
                 w.get("weissK").map(|v| format!("{v} K")),
@@ -682,6 +694,9 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
                 });
             }
         }
+    }
+    if !farbe.is_empty() {
+        freigabe.hinweise.push(format!("Farbe weicht vom Projekt ab (Gamma/Look): {}", farbe.join("; ")));
     }
     let version = app.package_info().version.to_string();
     let angaben = ingest_bericht::Angaben {

@@ -73,7 +73,14 @@ export type KartenAuftrag = {
   plateZugang?: { adresse: string; anonKey: string; email: string } | null;
   plateDreh?: string | null;
   plateProjekt?: { id: string; kurzname: string } | null;
-  kamera?: { fps: number | null; codec: string | null; aufloesungPx: string | null } | null;
+  kamera?: {
+    fps: number | null;
+    codec: string | null;
+    aufloesungPx: string | null;
+    /** Farbe (0027): Vorgabe des Projekts, leer = nicht prüfen. */
+    gamma?: string | null;
+    look?: string | null;
+  } | null;
   projektAngaben?: { firma: string | null; regie: string | null; dop: string | null } | null;
   /** Bestehende, abweichende Zielordner zur Seite legen (umbenennen, nie löschen). */
   zurSeite?: string[];

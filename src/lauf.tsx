@@ -352,8 +352,15 @@ function useLaufHalten() {
         // Fest gewähltes Projekt: Karte und Clips gehen in die gemeinsame Datenbank (Tabellen karte/clip).
         plateProjekt: paProjekt ? { id: paProjekt.id, kurzname: paProjekt.kurzname } : null,
         kamera:
-          paProjekt && (paProjekt.fps || paProjekt.codec || paProjekt.aufloesungPx)
-            ? { fps: paProjekt.fps ?? null, codec: paProjekt.codec ?? null, aufloesungPx: paProjekt.aufloesungPx ?? null }
+          paProjekt &&
+          (paProjekt.fps || paProjekt.codec || paProjekt.aufloesungPx || paProjekt.aufnahmeGamma || paProjekt.look)
+            ? {
+                fps: paProjekt.fps ?? null,
+                codec: paProjekt.codec ?? null,
+                aufloesungPx: paProjekt.aufloesungPx ?? null,
+                gamma: paProjekt.aufnahmeGamma || null,
+                look: paProjekt.look || null,
+              }
             : null,
         projektAngaben: paProjekt
           ? { firma: paProjekt.firma ?? null, regie: paProjekt.regie ?? null, dop: paProjekt.dop ?? null }

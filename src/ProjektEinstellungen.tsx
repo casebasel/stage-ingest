@@ -18,7 +18,9 @@ type Werte = Record<
   | "codec"
   | "aufloesung"
   | "aufloesung_px"
-  | "kopien",
+  | "kopien"
+  | "aufnahme_gamma"
+  | "look",
   string
 >;
 
@@ -41,6 +43,8 @@ function ausProjekt(p: Projekt): Werte {
     aufloesung: p.aufloesung ?? "",
     aufloesung_px: p.aufloesungPx ?? "",
     kopien: p.kopien == null ? "" : String(p.kopien),
+    aufnahme_gamma: p.aufnahmeGamma ?? "",
+    look: p.look ?? "",
   };
 }
 
@@ -136,6 +140,12 @@ export function ProjektEinstellungen({ projekt, schliessen }: { projekt: Projekt
       <Feld name="Auflösung" hilfe="Name wie in der Kamera.">{eingabe("aufloesung", "Auflösung", "z. B. 4K UHD")}</Feld>
       <Feld name="Auflösung in Pixeln" hilfe="Breite x Höhe; damit prüft der Ingest die Clips.">
         {eingabe("aufloesung_px", "Auflösung in Pixeln", "z. B. 3840x2160")}
+      </Feld>
+      <Feld name="Aufnahme-Gamma" hilfe="Wie aufgenommen wird, z. B. Log C. Weicht ein Clip ab, warnt der Ingest (sperrt nie).">
+        {eingabe("aufnahme_gamma", "Aufnahme-Gamma", "z. B. Log C")}
+      </Feld>
+      <Feld name="Look" hilfe="Look-Name in der Kamera, z. B. ARRI 709. Weicht ein Clip ab, warnt der Ingest (sperrt nie).">
+        {eingabe("look", "Look", "z. B. ARRI 709")}
       </Feld>
       <Feld
         name="Kopien vor der Freigabe"

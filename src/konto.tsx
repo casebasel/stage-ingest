@@ -25,6 +25,9 @@ export type Projekt = {
   dop?: string | null;
   /** Unabhängige Kopien vor der Freigabe (0025, 1..9; leer = 2). */
   kopien?: number | null;
+  /** Farbe (0027): Vorgabe für Aufnahme-Gamma und Look, leer = keine. */
+  aufnahmeGamma?: string | null;
+  look?: string | null;
 };
 
 /** Arten laut Systemkarte; der Server prüft die Liste. */

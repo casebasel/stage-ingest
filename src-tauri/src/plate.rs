@@ -111,6 +111,11 @@ pub struct Projekt {
     /// Unabhängige Kopien vor der Freigabe (Migration 0025, 1..9; leer = Standard 2), gilt in allen drei Apps.
     #[serde(default)]
     pub kopien: Option<i64>,
+    /// Farbe (0027): Vorgabe für Aufnahme-Gamma und Look, freier Text; leer = keine Vorgabe.
+    #[serde(default)]
+    pub aufnahme_gamma: Option<String>,
+    #[serde(default)]
+    pub look: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -228,7 +233,14 @@ impl Plate {
         let ohne = "projekt?select=id,name,kurzname,aktiv&geloescht=eq.false&order=name.asc";
         // Mit Kopienzahl (ab 0025); ältere Server ohne diese Spalte.
         let mit_kopien = mit.replace("dop&", "dop,kopien&");
-        match self.lesen(z, &mit_kopien).or_else(|_| self.lesen(z, mit)).or_else(|_| self.lesen(z, ohne)) {
+        // Mit Farbe (ab 0027).
+        let mit_farbe = mit.replace("dop&", "dop,kopien,aufnahme_gamma,look&");
+        match self
+            .lesen(z, &mit_farbe)
+            .or_else(|_| self.lesen(z, &mit_kopien))
+            .or_else(|_| self.lesen(z, mit))
+            .or_else(|_| self.lesen(z, ohne))
+        {
             Ok(v) => Ok(projekte_aus(&v)),
             Err(e) if e.contains(" 404") || e.contains("PGRST205") || e.contains("does not exist") => Ok(vec![]),
             Err(e) => Err(e),
@@ -394,6 +406,8 @@ impl Plate {
             "aufloesung",
             "aufloesung_px",
             "kopien",
+            "aufnahme_gamma",
+            "look",
         ];
         if let Some(f) = felder.keys().find(|f| !ERLAUBT.contains(&f.as_str())) {
             return Err(format!("Feld „{f}“ wird hier nicht geändert"));
@@ -666,6 +680,8 @@ fn projekte_aus(v: &Value) -> Vec<Projekt> {
             // 1 am Projekt gilt nie (Abstimmung mit dem Plate Assistant, 09.10.2026): eine einzige Kopie ist nur die
             // lokale Testschwelle; sonst würde eine Karte nach einer Kopie zum Formatieren frei. Dann gilt der Standard 2.
             kopien: p["kopien"].as_i64().filter(|k| (2..=9).contains(k)),
+            aufnahme_gamma: text_oder_nichts(&p["aufnahme_gamma"]),
+            look: text_oder_nichts(&p["look"]),
         })
         .collect()
 }

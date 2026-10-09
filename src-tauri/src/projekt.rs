@@ -563,6 +563,8 @@ mod tests {
             regie: None,
             dop: None,
             kopien: None,
+            aufnahme_gamma: None,
+            look: None,
         };
         let jobs = json!([{"hdri_id": "H1", "zustand": "processed", "ergebnis": {"vorschau": "H1/H1_gemessen.jpg", "vorschau_speicher": "H1/ergebnis.jpg"}}]);
         let u = zusammenfuehren(p, &drehs, &jobs, vec![karte], vec![]);

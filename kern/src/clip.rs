@@ -328,6 +328,41 @@ pub struct Kameraeinstellung {
     pub codec: Option<String>,
     #[serde(default)]
     pub aufloesung_px: Option<String>,
+    /// Farbe (Plate Assistant 0027, Systemkarte 13510c3): Aufnahme-Gamma und Look des Projekts, freier Text.
+    #[serde(default)]
+    pub gamma: Option<String>,
+    #[serde(default)]
+    pub look: Option<String>,
+}
+
+/// Vergleichsform für Gamma und Look: nur Buchstaben und Ziffern, klein („Log C“, „LOG-C“ → „logc“).
+fn farbe_normal(t: &str) -> String {
+    t.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect()
+}
+
+/// Passt der Wert im Clip zur Vorgabe des Projekts? Leere Vorgabe: immer. Gamma: die Vorgabe darf allgemeiner
+/// sein („Log C“ passt zu „LogC3“ und „LogC4“, „LogC4“ nicht zu „LogC3“). Look: gleich bis auf Schreibweise.
+pub fn farbe_passt(vorgabe: &str, im_clip: &str, praefix_erlaubt: bool) -> bool {
+    let v = farbe_normal(vorgabe);
+    let c = farbe_normal(im_clip);
+    v.is_empty() || c == v || (praefix_erlaubt && c.starts_with(&v))
+}
+
+/// Farbe eines Clips gegen die Vorgabe des Projekts, nur Warnungen (gold), wie die übrigen Kameraeinstellungen.
+/// Fehlt der Wert im Clip, gilt das nicht als Abweichung.
+pub fn farbe_abweichungen(soll: &Kameraeinstellung, gamma: Option<&str>, look: Option<&str>) -> Vec<String> {
+    let mut aus = Vec::new();
+    if let (Some(v), Some(c)) = (soll.gamma.as_deref().filter(|v| !v.trim().is_empty()), gamma) {
+        if !farbe_passt(v, c, true) {
+            aus.push(format!("Gamma „{c}“ statt „{v}“"));
+        }
+    }
+    if let (Some(v), Some(c)) = (soll.look.as_deref().filter(|v| !v.trim().is_empty()), look) {
+        if !farbe_passt(v, c, false) {
+            aus.push(format!("Look „{c}“ statt „{v}“"));
+        }
+    }
+    aus
 }
 
 /// Was an einem Clip vom Projekt abweicht, in Klartext. Nur Warnungen: die Freigabe hängt nie daran.
@@ -389,6 +424,20 @@ mod tests {
     }
 
     #[test]
+    fn farbe_vergleichen() {
+        assert!(farbe_passt("Log C", "LOG-C", true));
+        assert!(farbe_passt("Log C", "LogC3", true));
+        assert!(!farbe_passt("LogC4", "LogC3", true));
+        assert!(farbe_passt("ARRI 709", "arri709", false));
+        assert!(!farbe_passt("ARRI 709", "ARRI 709 Rec2020", false));
+        assert!(farbe_passt("", "irgendwas", false));
+        let soll =
+            Kameraeinstellung { gamma: Some("Log C".into()), look: Some("ARRI 709".into()), ..Default::default() };
+        assert_eq!(farbe_abweichungen(&soll, Some("Rec709"), Some("ARRI 709")), vec!["Gamma „Rec709“ statt „Log C“"]);
+        assert!(farbe_abweichungen(&soll, None, None).is_empty(), "fehlt im Clip: keine Abweichung");
+    }
+
+    #[test]
     fn timecode_rechnen() {
         assert_eq!(timecode(0, 25, false), "00:00:00:00");
         assert_eq!(timecode(25 * 3600 * 10 + 12, 25, false), "10:00:00:12");
@@ -439,10 +488,15 @@ mod tests {
             fps: Some(23.976),
             codec: Some(" prores 422  hq".into()),
             aufloesung_px: Some("3840 × 2160".into()),
+            ..Default::default()
         };
         assert!(abweichungen(&c, &gleich).is_empty());
-        let anders =
-            Kameraeinstellung { fps: Some(25.0), codec: Some("ProRes 4444".into()), aufloesung_px: Some("".into()) };
+        let anders = Kameraeinstellung {
+            fps: Some(25.0),
+            codec: Some("ProRes 4444".into()),
+            aufloesung_px: Some("".into()),
+            ..Default::default()
+        };
         assert_eq!(abweichungen(&c, &anders), vec!["23,976 fps statt 25 fps", "ProRes 422 HQ statt ProRes 4444"]);
     }
 
