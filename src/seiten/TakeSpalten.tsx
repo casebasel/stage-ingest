@@ -67,9 +67,16 @@ const tech = (id: string, titel: string, gruppe: Gruppe, quelle: string, rueckfa
   quelle,
   rechts,
   technik: true,
-  // Kamerawerte (Plate Assistant, Build 20): erst die Werte der REC-Klappe am Take (CAP), dann die der Plate (Hand).
-  wert: (t, x) =>
-    x?.[id] ?? (rueckfall?.startsWith("plate.kamera.") ? (pa(t, rueckfall.replace("plate.", "take.")) ?? pa(t, rueckfall)) : rueckfall ? pa(t, rueckfall) : undefined),
+  // Kamerawerte: Clip, dann die Werte der REC-Klappe am Take (CAP, Build 20), dann die Einrichtung am Take
+  // (`take.lage`, 0026: Objektiv und Brennweite können zwischen Takes wechseln), zuletzt die Plate (Hand).
+  wert: (t, x) => {
+    if (x?.[id] !== undefined) return x[id];
+    if (!rueckfall) return undefined;
+    if (!rueckfall.startsWith("plate.kamera.")) return pa(t, rueckfall);
+    const feld = rueckfall.slice("plate.kamera.".length);
+    const lage = feld === "objektiv" || feld === "brennweiteMm" ? pa(t, `take.lage.${feld}`) : undefined;
+    return pa(t, `take.kamera.${feld}`) ?? lage ?? pa(t, rueckfall);
+  },
 });
 
 const paSpalte = (id: string, titel: string, feld: string, rechts = false): Spalte => ({
@@ -136,8 +143,8 @@ const KATALOG: Spalte[] = [
   tech("tint", "Tint", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Take (CAP), sonst Plate", "plate.kamera.tint"),
   tech("nd", "ND", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Take (CAP), sonst Plate", "plate.kamera.nd", false),
   tech("look", "Look", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Take (CAP), sonst Plate", "plate.kamera.look", false),
-  tech("objektiv", "Objektiv", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Take (CAP), sonst Plate", "plate.kamera.objektiv", false),
-  tech("brennweite", "Brennweite mm", "Kamerawerte", "ART CMD, sonst Take (CAP), sonst Plate", "plate.kamera.brennweiteMm"),
+  tech("objektiv", "Objektiv", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Take (CAP), sonst Einrichtung am Take, sonst Plate", "plate.kamera.objektiv", false),
+  tech("brennweite", "Brennweite mm", "Kamerawerte", "ART CMD, sonst Take (CAP), sonst Einrichtung am Take, sonst Plate", "plate.kamera.brennweiteMm"),
   tech("fokus", "Fokus", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Take (CAP), sonst Plate", "plate.kamera.fokus"),
   tech("blende", "Blende", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Take (CAP), sonst Plate", "plate.kamera.blende"),
   // Bewegung: ART CMD (Mittel und Bereich über alle Bilder), sonst der Wert, den der Plate Assistant übernommen hat.
@@ -180,7 +187,7 @@ const KATALOG: Spalte[] = [
 
 // Felder des Plate Assistant, die eine Katalogspalte schon zeigt (erscheinen nicht noch einmal unter „Weitere“).
 const IM_KATALOG = new Set([
-  ...["einrichtung", "neigungGrad", "rollenGrad", "richtung.azimutGrad", "kameraHoeheCm", "abstandCm", "stativ", "gps.lat", "gps.lon"].map(
+  ...["objektiv", "brennweiteMm", "einrichtung", "neigungGrad", "rollenGrad", "richtung.azimutGrad", "kameraHoeheCm", "abstandCm", "stativ", "gps.lat", "gps.lon"].map(
     (k) => `take.lage.${k}`,
   ),
   "plate.einrichtung",
