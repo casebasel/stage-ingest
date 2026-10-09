@@ -19,8 +19,19 @@ use crate::pruefen::EIGENE_ORDNER;
 #[serde(tag = "art", rename_all = "camelCase")]
 pub enum Stand {
     Neu,
-    Vorhanden { dateien: usize },
-    Abweichend { grund: String },
+    Vorhanden {
+        dateien: usize,
+    },
+    /// Ein früherer Lauf wurde unterbrochen (Strom, Kabel, Absturz): alles Vorhandene stammt von dieser Karte
+    /// (gleiche Namen und Grössen), es fehlen Dateien oder das ASC MHL. Lässt sich fortsetzen: Vorhandenes bleibt,
+    /// Fehlendes wird geschrieben, danach wird alles gegen die Karte zurückgelesen.
+    Unterbrochen {
+        vorhanden: usize,
+        gesamt: usize,
+    },
+    Abweichend {
+        grund: String,
+    },
 }
 
 /// Dateien, die das Betriebssystem in Ordner legt und die nichts über die Kopie aussagen.
@@ -37,7 +48,9 @@ fn dateien(ordner: &Path) -> std::io::Result<BTreeMap<String, u64>> {
         .filter_entry(|e| e.depth() != 1 || !EIGENE_ORDNER.contains(&e.file_name().to_string_lossy().as_ref()));
     for e in gang {
         let e = e.map_err(std::io::Error::other)?;
-        if e.file_type().is_file() && !unwichtig(&e.file_name().to_string_lossy()) {
+        let name = e.file_name().to_string_lossy();
+        // Halbe Dateien eines abgebrochenen Laufs (`…ingest-teil`) gehören zu keiner Kopie; Fortsetzen ersetzt sie.
+        if e.file_type().is_file() && !unwichtig(&name) && !name.ends_with(crate::TEIL_ENDUNG) {
             aus.insert(crate::kopie::relativ(ordner, e.path()), e.metadata().map_err(std::io::Error::other)?.len());
         }
     }
@@ -66,6 +79,10 @@ pub fn bestimmen(quelle: &Path, ziel: &Path) -> Stand {
     let fehlen = karte.iter().filter(|(p, _)| !da.contains_key(*p)).count();
     let anders = karte.iter().filter(|(p, g)| da.get(*p).is_some_and(|d| d != *g)).count();
     let fremd = da.keys().filter(|p| !karte.contains_key(*p)).count();
+    // Nur Fehlendes (oder nur das MHL fehlt), nichts Fremdes, nichts mit anderer Grösse: unterbrochener Lauf.
+    if anders == 0 && fremd == 0 && (fehlen > 0 || !ziel.join(crate::mhl::ORDNER).is_dir()) {
+        return Stand::Unterbrochen { vorhanden: karte.len() - fehlen, gesamt: karte.len() };
+    }
     if fehlen + anders + fremd > 0 {
         let mut teile = Vec::new();
         if fehlen > 0 {
@@ -142,13 +159,19 @@ mod tests {
         assert_eq!(bestimmen(&k, &z), Stand::Neu, "nur .DS_Store gilt als leer");
 
         kopie(&k, &z);
-        assert!(matches!(bestimmen(&k, &z), Stand::Abweichend { grund } if grund.contains("ASC MHL")));
+        assert_eq!(bestimmen(&k, &z), Stand::Unterbrochen { vorhanden: 2, gesamt: 2 }, "alles da, nur das MHL fehlt");
         fs::create_dir_all(z.join("ascmhl")).unwrap();
         fs::write(z.join("ascmhl/0001_A004R132.mhl"), b"<hashlist/>").unwrap();
         assert_eq!(bestimmen(&k, &z), Stand::Vorhanden { dateien: 2 });
 
         fs::remove_file(z.join("A004R132/A004C001.mxf")).unwrap();
-        assert!(matches!(bestimmen(&k, &z), Stand::Abweichend { grund } if grund.contains("1 von 2 Dateien fehlen")));
+        // Mit MHL, aber eine Datei fehlt: auch das lässt sich fortsetzen (alles wird danach zurückgelesen).
+        assert_eq!(bestimmen(&k, &z), Stand::Unterbrochen { vorhanden: 1, gesamt: 2 });
+        fs::write(z.join("A004R132/A004C001.mxf.ingest-teil"), b"01").unwrap();
+        assert_eq!(bestimmen(&k, &z), Stand::Unterbrochen { vorhanden: 1, gesamt: 2 }, "halbe Datei zählt nicht");
+        fs::write(z.join("A004R132/fremd.mov"), b"x").unwrap();
+        assert!(matches!(bestimmen(&k, &z), Stand::Abweichend { grund } if grund.contains("nicht von dieser Karte")));
+        fs::remove_file(z.join("A004R132/fremd.mov")).unwrap();
         fs::write(z.join("A004R132/A004C001.mxf"), b"012").unwrap();
         assert!(matches!(bestimmen(&k, &z), Stand::Abweichend { grund } if grund.contains("anderer Grösse")));
     }

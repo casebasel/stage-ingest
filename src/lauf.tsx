@@ -231,8 +231,12 @@ function useLaufHalten() {
   // Zustand jedes Kartenziels: neu, früher vollständig kopiert (nur nachprüfen) oder abweichend (zur Seite legen).
   const [zielStaende, setZielStaende] = useState<ZielStand[]>([]);
   const [zurSeite, setZurSeite] = useState<string[]>([]);
+  const [fortsetzen, setFortsetzen] = useState<string[]>([]);
   const [standZaehler, setStandZaehler] = useState(0);
-  useEffect(() => setZurSeite([]), [quelle?.pfad]);
+  useEffect(() => {
+    setZurSeite([]);
+    setFortsetzen([]);
+  }, [quelle?.pfad]);
   useEffect(() => {
     if (!quelle || ziele.length === 0 || laeuft) {
       setZielStaende([]);
@@ -246,8 +250,14 @@ function useLaufHalten() {
       aktuell = false;
     };
   }, [quelle?.pfad, ziele.join("|"), laeuft, standZaehler]);
+  // Zur Seite legen und Fortsetzen schliessen sich aus: wer das eine wählt, nimmt das andere zurück.
   function zurSeiteUmschalten(ziel: string) {
+    setFortsetzen((f) => f.filter((x) => x !== ziel));
     setZurSeite((z) => (z.includes(ziel) ? z.filter((x) => x !== ziel) : [...z, ziel]));
+  }
+  function fortsetzenUmschalten(ziel: string) {
+    setZurSeite((z) => z.filter((x) => x !== ziel));
+    setFortsetzen((f) => (f.includes(ziel) ? f.filter((x) => x !== ziel) : [...f, ziel]));
   }
 
   // Vorab-Prüfung bei jeder Änderung von Karte, Zielen oder Einstellungen.
@@ -259,13 +269,13 @@ function useLaufHalten() {
       return;
     }
     let aktuell = true;
-    vorabPruefen({ quelle: quelle.pfad, ziele, mitMd5: e.mitMd5, mindestKopien: e.mindestKopien, dreh, zurSeite })
+    vorabPruefen({ quelle: quelle.pfad, ziele, mitMd5: e.mitMd5, mindestKopien: e.mindestKopien, dreh, zurSeite, fortsetzen })
       .then((b) => aktuell && setBefunde(b))
       .catch((err) => aktuell && setBefunde([{ stufe: "fehler", text: String(err) }]));
     return () => {
       aktuell = false;
     };
-  }, [quelle?.pfad, zieleSchluessel, e.mitMd5, e.mindestKopien, laeuft, zurSeite.join("|"), standZaehler]);
+  }, [quelle?.pfad, zieleSchluessel, e.mitMd5, e.mindestKopien, laeuft, zurSeite.join("|"), fortsetzen.join("|"), standZaehler]);
 
   useEffect(() => {
     // Phase ausserhalb des Zustands-Updaters setzen: React darf Updater mehrfach und spät ausführen, ein setPhase
@@ -387,6 +397,7 @@ function useLaufHalten() {
           ? { firma: paProjekt.firma ?? null, regie: paProjekt.regie ?? null, dop: paProjekt.dop ?? null }
           : null,
         zurSeite: zurSeite.filter((z) => ziele.includes(z)),
+        fortsetzen: fortsetzen.filter((z) => ziele.includes(z)),
         wenigerKopienBestaetigt: wenigerBestaetigt,
       });
       setErgebnis(r);
@@ -485,6 +496,8 @@ function useLaufHalten() {
     zielStaende,
     zurSeite,
     zurSeiteUmschalten,
+    fortsetzen,
+    fortsetzenUmschalten,
     staendeNeuLaden: () => setStandZaehler((n) => n + 1),
     vorschau,
     vorschauLaedt,

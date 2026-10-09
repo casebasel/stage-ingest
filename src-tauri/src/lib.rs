@@ -73,6 +73,9 @@ struct KartenAuftrag {
     /// Bestehende, abweichende Zielordner, die der Benutzer zur Seite legen lässt (umbenennen, nie löschen).
     #[serde(default)]
     zur_seite: Vec<PathBuf>,
+    /// Unterbrochene Kopien dieser Karte, die der Benutzer fortsetzen lässt (Vorhandenes bleibt, Fehlendes kommt dazu).
+    #[serde(default)]
+    fortsetzen: Vec<PathBuf>,
     /// Der Benutzer hat bestätigt, mit weniger Zielen als verlangten Kopien einzulesen (steht im Bericht).
     #[serde(default)]
     weniger_kopien_bestaetigt: bool,
@@ -424,7 +427,14 @@ fn verlauf(app: AppHandle) -> Result<Vec<VerlaufEintrag>, String> {
 
 fn befunde(auftrag: &KartenAuftrag) -> Vec<Befund> {
     let (schreiben, vorhandene) = ziele_aufteilen(auftrag);
-    let k = Auftrag { quelle: auftrag.quelle.clone(), ziele: schreiben, mit_md5: auftrag.mit_md5, vorhandene };
+    let fortsetzen = auftrag
+        .fortsetzen
+        .iter()
+        .filter(|z| schreiben.contains(z) && !auftrag.zur_seite.contains(z))
+        .cloned()
+        .collect();
+    let k =
+        Auftrag { quelle: auftrag.quelle.clone(), ziele: schreiben, mit_md5: auftrag.mit_md5, vorhandene, fortsetzen };
     match kopie::groesse(&auftrag.quelle) {
         Ok(bytes) => vorpruefen::vorpruefen_mit(&k, bytes, &auftrag.zur_seite),
         Err(e) => vec![Befund { stufe: Stufe::Fehler, text: e.to_string() }],
@@ -464,12 +474,13 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
     }
     // Ziele aufteilen: frühere, vollständige Kopien werden nur nachgeprüft, nie beschrieben und nie weggeräumt.
     let (schreiben, vorhandene) = ziele_aufteilen(auftrag);
-    // Vom Benutzer bestätigt: abweichende Ordner zur Seite legen (umbenennen, nichts löschen), dann neu kopieren.
+    // Vom Benutzer bestätigt: abweichende oder unterbrochene Ordner zur Seite legen (umbenennen, nichts löschen),
+    // dann neu kopieren.
     let mut zur_seite_gelegt = Vec::new();
     for z in schreiben.iter().filter(|z| auftrag.zur_seite.contains(z)) {
         if matches!(
             ingest_kern::zielstand::bestimmen(&auftrag.quelle, z),
-            ingest_kern::zielstand::Stand::Abweichend { .. }
+            ingest_kern::zielstand::Stand::Abweichend { .. } | ingest_kern::zielstand::Stand::Unterbrochen { .. }
         ) {
             let neu = ingest_kern::zielstand::zur_seite_legen(z, chrono::Local::now())
                 .map_err(|e| format!("{} nicht zur Seite gelegt: {e}", z.display()))?;
@@ -495,11 +506,18 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
             }
         }
     }
+    // Fortsetzen nur, wenn das Ziel noch unterbrochen ist (nicht schon zur Seite gelegt).
+    let fortsetzen: Vec<PathBuf> = schreiben
+        .iter()
+        .filter(|z| auftrag.fortsetzen.contains(z) && !auftrag.zur_seite.contains(z))
+        .cloned()
+        .collect();
     let k = Auftrag {
         quelle: auftrag.quelle.clone(),
         ziele: schreiben.clone(),
         mit_md5: auftrag.mit_md5,
         vorhandene: vorhandene.clone(),
+        fortsetzen: fortsetzen.clone(),
     };
     let kopie = kopie::kopieren(&k, abbruch, |meldung| {
         let _ = app.emit(FORTSCHRITT, Fortschritt::Kopieren { meldung });
@@ -508,8 +526,9 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
     // Abbruch oder Fehler nach dem Kopieren: die Zielordner hat dieser Lauf neu angelegt (vorher leer oder
     // nicht vorhanden); ungeprüft sind sie wertlos und würden den nächsten Versuch blockieren.
     // Nur die in diesem Lauf geschriebenen Ziele; frühere Kopien bleiben immer unberührt.
+    // Fortgesetzte Ziele bleiben stehen (sie enthielten schon vorher Dateien dieser Karte; sonst ginge nichts weiter).
     let wegraeumen = |e: String| {
-        for z in &schreiben {
+        for z in schreiben.iter().filter(|z| !fortsetzen.contains(z)) {
             let _ = std::fs::remove_dir_all(z);
         }
         e
@@ -1716,6 +1735,7 @@ mod gemeinsamer_test {
             kamera: None,
             projekt_angaben: None,
             zur_seite: vec![],
+            fortsetzen: vec![],
             weniger_kopien_bestaetigt: false,
         };
         let k = Auftrag { quelle: karte, ziele: auftrag.ziele.clone(), mit_md5: false, ..Default::default() };

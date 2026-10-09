@@ -39,6 +39,12 @@ pub fn aus_kopie(
         crate::zielstand::Stand::Vorhanden { .. } => {
             return Err(format!("{} enthält diese Kopie schon vollständig.", ziel.display()))
         }
+        crate::zielstand::Stand::Unterbrochen { vorhanden, gesamt } => {
+            return Err(format!(
+            "{} enthält eine unterbrochene Kopie ({vorhanden} von {gesamt} Dateien). Bitte ein anderes Ziel wählen.",
+            ziel.display()
+        ))
+        }
         crate::zielstand::Stand::Abweichend { grund } => {
             return Err(format!("{} existiert schon ({grund}). Bitte ein anderes Ziel wählen.", ziel.display()))
         }

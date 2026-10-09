@@ -40,6 +40,10 @@ pub struct Auftrag {
     /// Frühere, vollständige Kopien dieser Karte (`zielstand::Stand::Vorhanden`). Sie werden nie beschrieben und
     /// nie weggeräumt, nur am Ende als Ziele angehängt, damit das Zurücklesen sie gegen die Karte prüft.
     pub vorhandene: Vec<PathBuf>,
+    /// Ziele (Teil von `ziele`) mit einer unterbrochenen Kopie dieser Karte (`zielstand::Stand::Unterbrochen`):
+    /// vorhandene Dateien gleicher Grösse bleiben, nur Fehlendes wird geschrieben; zurückgelesen wird alles. Nach
+    /// einem erneuten Abbruch wird hier nichts gelöscht (nur die eigenen halben Dateien), damit es weitergehen kann.
+    pub fortsetzen: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -87,7 +91,8 @@ pub enum Meldung {
 
 enum AnZiel {
     Ordner(PathBuf),
-    Neu(PathBuf),
+    /// Neue Datei: Pfad und Grösse auf der Karte (zum Fortsetzen: gleich grosse vorhandene Datei bleibt).
+    Neu(PathBuf, u64),
     Block(Arc<Vec<u8>>),
     Fertig(FileTime),
     /// Alles gelesen: Verzeichnisse auf die Platte bringen.
@@ -148,7 +153,7 @@ pub fn kopieren(auftrag: &Auftrag, abbruch: &AtomicBool, mut melden: impl FnMut(
         return Err(Fehler::KeinZiel);
     }
     for ziel in &auftrag.ziele {
-        ziel_vorbereiten(ziel)?;
+        ziel_vorbereiten(ziel, auftrag.fortsetzen.contains(ziel))?;
     }
     let beginn = Utc::now();
     let (ordner, eintraege, ausgelassen) = inhalt(&auftrag.quelle)?;
@@ -164,7 +169,8 @@ pub fn kopieren(auftrag: &Auftrag, abbruch: &AtomicBool, mut melden: impl FnMut(
         let zustand: Zustand = Arc::new(Mutex::new(None));
         let z = Arc::clone(&zustand);
         let wurzel = ziel.clone();
-        faeden.push(thread::spawn(move || schreiben(&wurzel, rx, &z)));
+        let fortsetzen = auftrag.fortsetzen.contains(ziel);
+        faeden.push(thread::spawn(move || schreiben(&wurzel, rx, &z, fortsetzen)));
         kanaele.push(Some(tx));
         zustaende.push(zustand);
     }
@@ -213,7 +219,9 @@ pub fn kopieren(auftrag: &Auftrag, abbruch: &AtomicBool, mut melden: impl FnMut(
             }
         };
         let rel_pfad = PathBuf::from(rel);
-        if !senden(&mut kanaele, &zustaende, &mut haengt, abbruch, ZIEL_ZEITGRENZE, &|| AnZiel::Neu(rel_pfad.clone())) {
+        if !senden(&mut kanaele, &zustaende, &mut haengt, abbruch, ZIEL_ZEITGRENZE, &|| {
+            AnZiel::Neu(rel_pfad.clone(), *groesse)
+        }) {
             ergebnis = Err(Fehler::Abgebrochen);
             break;
         }
@@ -291,7 +299,7 @@ pub fn kopieren(auftrag: &Auftrag, abbruch: &AtomicBool, mut melden: impl FnMut(
         // Halbe Kopie ist wertlos und würde den nächsten Versuch blockieren. Die Zielordner waren vor
         // diesem Lauf leer oder neu (ziel_vorbereiten), enthalten also nur, was dieser Lauf geschrieben hat.
         // Vorhandene Kopien (`auftrag.vorhandene`) stehen nicht in `ziele` und bleiben unberührt.
-        for ziel in &auftrag.ziele {
+        for ziel in auftrag.ziele.iter().filter(|z| !auftrag.fortsetzen.contains(z)) {
             let _ = std::fs::remove_dir_all(ziel);
         }
     }
@@ -332,7 +340,17 @@ pub fn ueberblick_dateien(quelle: &Path) -> Ergebnis<std::collections::BTreeMap<
 
 /// Legt den Zielordner an. Ein bestehender, nicht leerer Ordner wird nie überschrieben; was nur das Betriebssystem
 /// hineingelegt hat (z. B. `.DS_Store` nach dem Öffnen im Finder), zählt als leer, wie in `zielstand`.
-fn ziel_vorbereiten(ziel: &Path) -> Ergebnis<()> {
+/// Beim Fortsetzen bleibt der Ordner, nur halbe Dateien des abgebrochenen Laufs (`…ingest-teil`) werden entfernt.
+fn ziel_vorbereiten(ziel: &Path, fortsetzen: bool) -> Ergebnis<()> {
+    if fortsetzen {
+        for e in walkdir::WalkDir::new(ziel).into_iter().flatten() {
+            if e.file_type().is_file() && e.file_name().to_string_lossy().ends_with(TEIL_ENDUNG) {
+                std::fs::remove_file(e.path())
+                    .map_err(|q| Fehler::ZielSchreiben { pfad: e.path().into(), quelle: q })?;
+            }
+        }
+        return Ok(());
+    }
     if ziel.exists() {
         let leer = std::fs::read_dir(ziel)
             .map_err(|e| Fehler::ZielSchreiben { pfad: ziel.into(), quelle: e })?
@@ -457,7 +475,7 @@ fn festschreiben(ausstehend: &mut Vec<Ausstehend>, beruehrt: &mut BTreeSet<PathB
 
 /// Schreib-Faden eines Ziels. Jede Datei entsteht unter `<name>.ingest-teil` und wird erst umbenannt, wenn sie sicher
 /// auf der Platte ist (siehe [`festschreiben`]). Nach einem Fehler nimmt der Faden weiter Nachrichten an und verwirft sie.
-fn schreiben(wurzel: &Path, rx: Receiver<AnZiel>, zustand: &Mutex<Option<String>>) {
+fn schreiben(wurzel: &Path, rx: Receiver<AnZiel>, zustand: &Mutex<Option<String>>, fortsetzen: bool) {
     let mut offen: Option<(std::fs::File, PathBuf, PathBuf)> = None;
     let mut ausstehend: Vec<Ausstehend> = Vec::new();
     #[cfg_attr(not(target_os = "macos"), allow(unused_mut, unused_variables))]
@@ -476,8 +494,14 @@ fn schreiben(wurzel: &Path, rx: Receiver<AnZiel>, zustand: &Mutex<Option<String>
                     std::fs::create_dir_all(&o)?;
                     beruehrt.extend(o.parent().map(Path::to_path_buf));
                 }
-                AnZiel::Neu(rel) => {
+                AnZiel::Neu(rel, groesse) => {
                     let endgueltig = wurzel.join(&rel);
+                    // Fortsetzen: schon vorhandene, gleich grosse Datei bleibt (das Zurücklesen prüft sie gegen die
+                    // Karte); ihre Blöcke laufen ins Leere, weil keine Datei offen ist.
+                    if fortsetzen && std::fs::metadata(&endgueltig).is_ok_and(|m| m.is_file() && m.len() == groesse) {
+                        offen = None;
+                        return Ok(());
+                    }
                     let mut teil = endgueltig.clone().into_os_string();
                     teil.push(".");
                     teil.push(TEIL_ENDUNG);

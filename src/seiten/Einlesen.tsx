@@ -260,8 +260,12 @@ function Auftrag({ pflicht, zurEinrichtung, laufwerke }: { pflicht: boolean; zur
   // Ein Ziel mit zu wenig Platz oder mit Fehler zählt nicht als Kopie (lieber nein als ein falsches Ja).
   const stand = (i: number) => lauf.zielStaende[i];
   // Eine frühere, vollständige Kopie braucht keinen Platz; ein abweichender Ordner zählt nur, wenn er zur Seite gelegt wird.
-  const knappHier = (i: number) => stand(i)?.art !== "vorhanden" && istKnapp(geraete[i]);
-  const gesperrtHier = (i: number) => stand(i)?.art === "abweichend" && !lauf.zurSeite.includes(lauf.ziele[i]);
+  // Beim Fortsetzen fehlt nur ein Teil; den genauen Platz prüft die Vorab-Prüfung.
+  const knappHier = (i: number) =>
+    stand(i)?.art !== "vorhanden" && !lauf.fortsetzen.includes(lauf.ziele[i]) && istKnapp(geraete[i]);
+  const gesperrtHier = (i: number) =>
+    (stand(i)?.art === "abweichend" && !lauf.zurSeite.includes(lauf.ziele[i])) ||
+    (stand(i)?.art === "unterbrochen" && !lauf.zurSeite.includes(lauf.ziele[i]) && !lauf.fortsetzen.includes(lauf.ziele[i]));
   const { zeilen, unabhaengig } = zaehlung(
     e.ziele.map((_, i) => (i === betroffen || knappHier(i) || gesperrtHier(i) ? null : geraete[i])),
   );
@@ -398,6 +402,40 @@ function Auftrag({ pflicht, zurEinrichtung, laufwerke }: { pflicht: boolean; zur
                       {st?.art === "vorhanden" && (
                         <span className="unterzeile">
                           <Status ton="ok">Diese Karte liegt hier schon vollständig · wird nicht neu geschrieben, nur nachgeprüft</Status>
+                        </span>
+                      )}
+                      {st?.art === "unterbrochen" && zielPfad && (
+                        <span className="unterzeile ziel-konflikt">
+                          {lauf.fortsetzen.includes(zielPfad) ? (
+                            <>
+                              <Status ton="warn">
+                                Wird fortgesetzt: {st.vorhanden} von {st.gesamt} Dateien bleiben, der Rest kommt dazu; danach wird alles
+                                zurückgelesen
+                              </Status>
+                              <button className="verweis" onClick={() => lauf.fortsetzenUmschalten(zielPfad)}>
+                                Rückgängig
+                              </button>
+                            </>
+                          ) : lauf.zurSeite.includes(zielPfad) ? (
+                            <>
+                              <Status ton="warn">Wird zur Seite gelegt (umbenannt in …_ALT_Datum_Zeit, nichts gelöscht) und neu kopiert</Status>
+                              <button className="verweis" onClick={() => lauf.zurSeiteUmschalten(zielPfad)}>
+                                Rückgängig
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <Status ton="warn">
+                                Unterbrochene Kopie dieser Karte: {st.vorhanden} von {st.gesamt} Dateien sind schon da
+                              </Status>
+                              <button className="knopf knopf-klein" onClick={() => lauf.fortsetzenUmschalten(zielPfad)}>
+                                Fortsetzen
+                              </button>
+                              <button className="knopf knopf-klein" onClick={() => lauf.zurSeiteUmschalten(zielPfad)}>
+                                Zur Seite legen und neu kopieren
+                              </button>
+                            </>
+                          )}
                         </span>
                       )}
                       {st?.art === "abweichend" && zielPfad && (

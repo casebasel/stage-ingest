@@ -77,6 +77,8 @@ export type KartenAuftrag = {
   projektAngaben?: { firma: string | null; regie: string | null; dop: string | null } | null;
   /** Bestehende, abweichende Zielordner zur Seite legen (umbenennen, nie löschen). */
   zurSeite?: string[];
+  /** Unterbrochene Kopien fortsetzen (Vorhandenes bleibt, Fehlendes kommt dazu, danach alles zurücklesen). */
+  fortsetzen?: string[];
   /** Bewusst mit weniger Zielen als verlangten Kopien gestartet. */
   wenigerKopienBestaetigt?: boolean;
 };
@@ -175,7 +177,11 @@ export const einlesenVorschau = (zugang: unknown, projekt: unknown, quelle: stri
   invoke<EinlesenVorschau>("einlesen_vorschau", { zugang, projekt, quelle });
 
 /** Zustand eines Zielordners vor dem Einlesen (kern/zielstand.rs). */
-export type ZielStand = { art: "neu" } | { art: "vorhanden"; dateien: number } | { art: "abweichend"; grund: string };
+export type ZielStand =
+  | { art: "neu" }
+  | { art: "vorhanden"; dateien: number }
+  | { art: "unterbrochen"; vorhanden: number; gesamt: number }
+  | { art: "abweichend"; grund: string };
 export const zieleStand = (quelle: string, ziele: string[]) => invoke<ZielStand[]>("ziele_stand", { quelle, ziele });
 
 /** Kopie aus Kopie (Kaskade): fehlende Kopie aus einer geprüften Kopie, geprüft gegen die Prüfsummen der Karte. */

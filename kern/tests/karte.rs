@@ -108,6 +108,49 @@ fn viele_kleine_dateien_alle_festgeschrieben_ohne_teil_reste() {
 }
 
 #[test]
+fn unterbrochene_kopie_fortsetzen_und_alles_nachpruefen() {
+    use ingest_kern::zielstand::{bestimmen, Stand};
+    let t = tempfile::tempdir().unwrap();
+    karte(&t.path().join("karte"));
+    let quelle = t.path().join("karte");
+    let ziel = t.path().join("nas/A001R132");
+    // Erster Lauf vollständig, dann „Stromausfall“: eine Datei fehlt, eine halbe liegt noch da, kein MHL.
+    kopieren(
+        &Auftrag { quelle: quelle.clone(), ziele: vec![ziel.clone()], ..Default::default() },
+        &AtomicBool::new(false),
+        |_| {},
+    )
+    .unwrap();
+    fs::remove_file(ziel.join("A001R132/A001C002_261007_R132.mov")).unwrap();
+    fs::write(ziel.join("A001R132/A001C002_261007_R132.mov.ingest-teil"), b"zwei").unwrap();
+    assert_eq!(bestimmen(&quelle, &ziel), Stand::Unterbrochen { vorhanden: 2, gesamt: 3 });
+
+    // Abbruch beim Fortsetzen: nichts wird gelöscht.
+    let fortsetzen = Auftrag {
+        quelle: quelle.clone(),
+        ziele: vec![ziel.clone()],
+        fortsetzen: vec![ziel.clone()],
+        ..Default::default()
+    };
+    assert!(kopieren(&fortsetzen, &AtomicBool::new(true), |_| {}).is_err());
+    assert!(ziel.join("A001R132/A001C001_261007_R132.mov").is_file(), "Vorhandenes bleibt beim Abbruch");
+
+    // Fortsetzen: Fehlendes kommt dazu, keine halben Dateien bleiben, alles wird gegen die Karte zurückgelesen.
+    let kopie = kopieren(&fortsetzen, &AtomicBool::new(false), |_| {}).unwrap();
+    assert!(!ziel.join("A001R132/A001C002_261007_R132.mov.ingest-teil").exists());
+    let urteile = zurueckpruefen(&kopie, false, &AtomicBool::new(false), |_, _| {}).unwrap();
+    assert!(urteile[0].gut() && urteile[0].geprueft == 3, "{:?}", urteile[0]);
+
+    // Eine vorhandene, gleich grosse, aber verfälschte Datei bleibt beim Fortsetzen liegen und fällt beim Zurücklesen auf.
+    let ale = ziel.join("A001R132/A001R132.ale");
+    fs::write(&ale, b"Heaxing\n").unwrap();
+    fs::remove_file(ziel.join("A001R132/A001C002_261007_R132.mov")).unwrap();
+    let kopie = kopieren(&fortsetzen, &AtomicBool::new(false), |_| {}).unwrap();
+    let urteile = zurueckpruefen(&kopie, false, &AtomicBool::new(false), |_, _| {}).unwrap();
+    assert!(matches!(urteile[0].abweichungen[..], [Abweichung::Pruefsumme { .. }]), "{:?}", urteile[0]);
+}
+
+#[test]
 fn karte_an_zwei_ziele_kopieren_und_freigeben() {
     let t = tempfile::tempdir().unwrap();
     karte(&t.path().join("karte"));
@@ -322,8 +365,13 @@ fn vorhandene_kopie_wird_nachgeprueft_und_nie_weggeraeumt() {
 
     // Zweiter Lauf: neues Ziel b, vorhandenes a.
     let b = t.path().join("nas/A001R132");
-    let zweit =
-        Auftrag { quelle: t.path().join("karte"), ziele: vec![b.clone()], mit_md5: false, vorhandene: vec![a.clone()] };
+    let zweit = Auftrag {
+        quelle: t.path().join("karte"),
+        ziele: vec![b.clone()],
+        mit_md5: false,
+        vorhandene: vec![a.clone()],
+        ..Default::default()
+    };
     let kopie2 = kopieren(&zweit, &AtomicBool::new(false), |_| {}).unwrap();
     assert_eq!(kopie2.ziele.len(), 2);
     assert!(!kopie2.ziele[0].vorhanden && kopie2.ziele[1].vorhanden);
@@ -338,8 +386,13 @@ fn vorhandene_kopie_wird_nachgeprueft_und_nie_weggeraeumt() {
     // Abbruch in einem weiteren Lauf: das neue Ziel wird weggeräumt, die vorhandene Kopie nicht.
     let c = t.path().join("usb/A001R132");
     let abbruch = AtomicBool::new(false);
-    let dritt =
-        Auftrag { quelle: t.path().join("karte"), ziele: vec![c.clone()], mit_md5: false, vorhandene: vec![a.clone()] };
+    let dritt = Auftrag {
+        quelle: t.path().join("karte"),
+        ziele: vec![c.clone()],
+        mit_md5: false,
+        vorhandene: vec![a.clone()],
+        ..Default::default()
+    };
     let r = kopieren(&dritt, &abbruch, |m| {
         if matches!(m, Meldung::Bytes { .. }) {
             abbruch.store(true, std::sync::atomic::Ordering::Relaxed);

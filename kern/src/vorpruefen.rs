@@ -67,11 +67,16 @@ pub fn vorpruefen_mit(auftrag: &Auftrag, bytes: u64, zur_seite: &[std::path::Pat
     let mut kennungen: HashMap<String, Vec<&Path>> = HashMap::new();
     // Platz, den die Karte auf einem Zielmedium belegt: jede Datei auf ganze Blöcke des Ziels aufgerundet (exFAT
     // z. B. 128 KB pro Block), ohne pauschalen Zuschlag (Marlon, 09.10.2026). Ohne Dateiliste: die Kartengrösse.
-    let groessen: Vec<u64> =
-        crate::kopie::ueberblick_dateien(&quelle).map(|d| d.into_values().collect()).unwrap_or_default();
-    let belegt = |ort: &Path| -> u64 {
+    let dateien = crate::kopie::ueberblick_dateien(&quelle).unwrap_or_default();
+    // Beim Fortsetzen zählt nur, was im Ziel noch fehlt (vorhandene gleich grosse Dateien bleiben).
+    let belegt = |ort: &Path, ziel: &Path| -> u64 {
+        let fortsetzen = auftrag.fortsetzen.iter().any(|z| z == ziel);
+        let fehlt = |p: &String, g: &u64| !fortsetzen || !std::fs::metadata(ziel.join(p)).is_ok_and(|m| m.len() == *g);
         match blockgroesse(ort).filter(|b| *b > 0) {
-            Some(b) if !groessen.is_empty() => groessen.iter().map(|g| g.div_ceil(b) * b).sum(),
+            Some(b) if !dateien.is_empty() => {
+                dateien.iter().filter(|(p, g)| fehlt(p, g)).map(|(_, g)| g.div_ceil(b) * b).sum()
+            }
+            _ if fortsetzen => dateien.iter().filter(|(p, g)| fehlt(p, g)).map(|(_, g)| *g).sum(),
             _ => bytes,
         }
     };
@@ -80,7 +85,7 @@ pub fn vorpruefen_mit(auftrag: &Auftrag, bytes: u64, zur_seite: &[std::path::Pat
     for ziel in &auftrag.ziele {
         if let Some(ort) = crate::struktur::vorhandener_vorfahr(ziel) {
             if let Ok(v) = geraet::volume_kennung(ort) {
-                *je_volume.entry(v).or_default() += belegt(ort);
+                *je_volume.entry(v).or_default() += belegt(ort, ziel);
             }
         }
     }
@@ -104,6 +109,14 @@ pub fn vorpruefen_mit(auftrag: &Auftrag, bytes: u64, zur_seite: &[std::path::Pat
                 "Bestehender, unvollständiger Ordner wird zur Seite gelegt (umbenannt, nicht gelöscht) und neu kopiert: {}",
                 ziel.display()
             )));
+        } else if auftrag.fortsetzen.iter().any(|z| z == ziel)
+            && matches!(crate::zielstand::bestimmen(&quelle, ziel), crate::zielstand::Stand::Unterbrochen { .. })
+        {
+            befunde.push(warnung(format!(
+                "Unterbrochene Kopie wird fortgesetzt: Vorhandenes bleibt, Fehlendes kommt dazu, danach wird alles gegen \
+                 die Karte zurückgelesen: {}",
+                ziel.display()
+            )));
         } else if !matches!(crate::zielstand::bestimmen(&quelle, ziel), crate::zielstand::Stand::Neu) {
             befunde.push(fehler(format!(
                 "Zielordner existiert schon und passt nicht zu dieser Karte: {}. In der Ziel-Liste „Zur Seite legen“ wählen.",
@@ -113,7 +126,7 @@ pub fn vorpruefen_mit(auftrag: &Auftrag, bytes: u64, zur_seite: &[std::path::Pat
         let noetig = geraet::volume_kennung(&ort_echt)
             .ok()
             .and_then(|v| je_volume.get(&v).copied())
-            .unwrap_or_else(|| belegt(&ort_echt));
+            .unwrap_or_else(|| belegt(&ort_echt, ziel));
         match frei(&ort_echt) {
             Some(f) if f < noetig => befunde.push(fehler(format!(
                 "Zu wenig Platz auf {}: {} frei, {} nötig",
