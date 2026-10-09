@@ -45,9 +45,15 @@ Offen aus der Prüfung (nach Wirkung):
 - „Karte zweimal lesen“ ist aus: ein Kartenleser, der beim einzigen Lesen falsch liefert, ergibt gleich falsche
   Kopien. Entscheidung bewusst treffen
 
-Offen aus dem Vergleich (nicht gewählt, 09.10.2026): Push aufs Handy bei fertig/fehlgeschlagen, Fortsetzen nach
-Unterbruch, Vorschaubilder (erstes/mittleres/letztes Bild) in Tabelle und PDF, Tilt/Roll als Kurve mit Export,
-Live-Protokoll auf jedem Ziel, Kiosk-Ansicht, Codex-HDE (`.arx`) erkennen.
+Gebaut in 0.1.20 (09.10.2026): **Einsortieren** aus `<Datum>_OHNE_DREHORT` (Umbenennen auf derselben Platte, volle
+Prüfung gegen ASC MHL, `karte.speicherort` und Stage `ingest.karteVerschoben` nachgeführt), **Vorschaubilder** (ART CMD
+nach Rec.709, sonst Quick Look; Spalte „Vorschau“ und Abschnitt „Clips“ im Bericht), **Fortsetzen nach Unterbruch**
+(Vorhandenes bleibt, Fehlendes kommt dazu, alles wird zurückgelesen).
+
+Offen aus dem Vergleich (nicht gewählt, 09.10.2026): Push aufs Handy bei fertig/fehlgeschlagen, Tilt/Roll als Kurve mit
+Export, Live-Protokoll auf jedem Ziel, Kiosk-Ansicht, Codex-HDE (`.arx`) erkennen. Offen beim Fortsetzen: eine beim
+Fortsetzen behaltene, verfälschte Datei gleicher Grösse fällt beim Zurücklesen auf; dann „Zur Seite legen und neu
+kopieren“ (die App löscht sie nicht selbst).
 
 ## Laufend, ohne fremde Abhängigkeit
 
