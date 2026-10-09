@@ -1338,8 +1338,21 @@ input[type="checkbox"][role="switch"]:checked::before {
 .baum-klappe:hover:not(:disabled) {
   color: var(--text);
 }
+/* Plates unter ihrem Drehort: eingerückt, mit einer Linie vom Pfeil des Drehorts nach unten (Marlon, 09.10.2026:
+   „besser sehen, dass sie zu Studio gehören“). */
+.baum-dreh + .baum-dreh {
+  margin-top: 6px;
+}
+.baum-name-dreh {
+  font-weight: 600;
+}
 .baum-kinder {
-  margin-left: 20px;
+  margin: 2px 0 4px 9px;
+  padding-left: 19px;
+  border-left: 1px solid var(--linie-stark);
+}
+.baum-warn {
+  color: var(--warn);
 }
 .baum-knoten {
   display: grid;

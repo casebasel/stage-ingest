@@ -377,7 +377,7 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
                 const offen = !zu.has(d.id);
                 const takes = d.plates.flatMap((p) => p.takes);
                 return (
-                  <li key={d.id}>
+                  <li key={d.id} className="baum-dreh">
                     <div className="baum-zeile">
                       <button
                         className="baum-klappe"
@@ -398,7 +398,7 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
                         aria-current={auswahl.art === "dreh" && auswahl.id === d.id ? "true" : undefined}
                         onClick={() => setAuswahl({ art: "dreh", id: d.id })}
                       >
-                        <span className="baum-name">{d.name}</span>
+                        <span className="baum-name baum-name-dreh">{d.name}</span>
                         <span className="baum-info zahl">
                           {d.kurzname && `${d.kurzname} · `}
                           {datumKurz(d.datum)}
@@ -424,7 +424,12 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
                                   {p.takes.length} {p.takes.length === 1 ? "Take" : "Takes"}
                                   {p.fotos.length > 0 && ` · ${p.fotos.length} Fotos`}
                                   {p.hdri.length > 0 && " · HDRI"}
-                                  {fehlt && " · Karte fehlt"}
+                                  {fehlt && (
+                                    <>
+                                      {" · "}
+                                      <span className="baum-warn">Karte fehlt</span>
+                                    </>
+                                  )}
                                 </span>
                               </button>
                             </li>
