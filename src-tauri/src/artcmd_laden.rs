@@ -39,28 +39,7 @@ pub fn laden(datenordner: &Path) -> Result<PathBuf, String> {
         .map_err(|e| format!("ART CMD nicht von ARRI ladbar ({e}). Von Hand: arri.com → ARRI Reference Tool → CMD."))?;
     let mut daten = Vec::new();
     antwort.into_reader().take(HOECHSTENS).read_to_end(&mut daten).map_err(|e| format!("Download abgebrochen: {e}"))?;
-    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(daten))
-        .map_err(|e| format!("Paket von ARRI nicht lesbar (ARRI hat den Link vielleicht geändert): {e}"))?;
-    for i in 0..zip.len() {
-        let mut eintrag = zip.by_index(i).map_err(|e| e.to_string())?;
-        // Nur Pfade innerhalb des Zielordners (kein „../“).
-        let Some(rel) = eintrag.enclosed_name() else { continue };
-        let pfad = neu.join(rel);
-        if eintrag.is_dir() {
-            std::fs::create_dir_all(&pfad).map_err(|e| e.to_string())?;
-            continue;
-        }
-        if let Some(o) = pfad.parent() {
-            std::fs::create_dir_all(o).map_err(|e| e.to_string())?;
-        }
-        let mut datei = std::fs::File::create(&pfad).map_err(|e| e.to_string())?;
-        std::io::copy(&mut eintrag, &mut datei).map_err(|e| e.to_string())?;
-        #[cfg(unix)]
-        if let Some(modus) = eintrag.unix_mode() {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&pfad, std::fs::Permissions::from_mode(modus & 0o755));
-        }
-    }
+    entpacken(daten, &neu)?;
     let programm = walkdir::WalkDir::new(&neu)
         .into_iter()
         .flatten()
@@ -86,6 +65,54 @@ pub fn laden(datenordner: &Path) -> Result<PathBuf, String> {
         return Err(format!("ART CMD geladen, antwortet aber nicht wie erwartet ({})", aus.status));
     }
     Ok(pfad)
+}
+
+/// Entpackt ein ZIP nach `ziel`. Verknüpfungen (z. B. `libArriImageSdk.9.dylib` → `libArriImageSdk.9.0.1.dylib` im
+/// Paket von ART CMD) werden als Verknüpfungen angelegt, sonst lädt macOS die Bibliothek nicht und ART CMD bricht
+/// mit SIGABRT ab (Marlon, 09.10.2026). Nur Pfade und Verknüpfungsziele innerhalb von `ziel`.
+fn entpacken(daten: Vec<u8>, ziel: &Path) -> Result<(), String> {
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(daten))
+        .map_err(|e| format!("Paket von ARRI nicht lesbar (ARRI hat den Link vielleicht geändert): {e}"))?;
+    for i in 0..zip.len() {
+        let mut eintrag = zip.by_index(i).map_err(|e| e.to_string())?;
+        // Nur Pfade innerhalb des Zielordners (kein „../“).
+        let Some(rel) = eintrag.enclosed_name() else { continue };
+        let pfad = ziel.join(&rel);
+        if eintrag.is_dir() {
+            std::fs::create_dir_all(&pfad).map_err(|e| e.to_string())?;
+            continue;
+        }
+        if let Some(o) = pfad.parent() {
+            std::fs::create_dir_all(o).map_err(|e| e.to_string())?;
+        }
+        let modus = eintrag.unix_mode().unwrap_or(0o644);
+        if modus & 0o170000 == 0o120000 {
+            let mut verweis = String::new();
+            eintrag.read_to_string(&mut verweis).map_err(|e| e.to_string())?;
+            // Nur relative Ziele im selben Paket (kein absoluter Pfad, kein „..“).
+            let v = Path::new(verweis.trim());
+            if v.is_absolute() || v.components().any(|k| matches!(k, std::path::Component::ParentDir)) {
+                return Err(format!("Verknüpfung im Paket zeigt nach aussen: {}", rel.display()));
+            }
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(v, &pfad).map_err(|e| e.to_string())?;
+            #[cfg(not(unix))]
+            {
+                // Windows: das Ziel liegt daneben; eine Kopie tut es auch.
+                let quelle = pfad.parent().map(|o| o.join(v)).unwrap_or_default();
+                let _ = std::fs::copy(quelle, &pfad);
+            }
+            continue;
+        }
+        let mut datei = std::fs::File::create(&pfad).map_err(|e| e.to_string())?;
+        std::io::copy(&mut eintrag, &mut datei).map_err(|e| e.to_string())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&pfad, std::fs::Permissions::from_mode(modus & 0o755));
+        }
+    }
+    Ok(())
 }
 
 /// ARRI Reference Tool Viewer (spielt ARRIRAW, ARRICORE und ProRes in MXF; QuickTime kann das nicht). Installiert
@@ -147,4 +174,58 @@ pub fn viewer_installieren(cache: &Path) -> Result<(), String> {
     let pkg = pkg.ok_or("Im Paket von ARRI fehlt der Installer (.pkg)")?;
     std::process::Command::new("open").arg(&pkg).status().map_err(|e| format!("Installer startet nicht: {e}"))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn verknuepfungen_bleiben_verknuepfungen() {
+        let mut daten = Vec::new();
+        {
+            let mut z = zip::ZipWriter::new(std::io::Cursor::new(&mut daten));
+            let o = zip::write::SimpleFileOptions::default().unix_permissions(0o755);
+            z.start_file("art/lib/libArriImageSdk.9.0.1.dylib", o).unwrap();
+            z.write_all(b"bibliothek").unwrap();
+            z.add_symlink("art/lib/libArriImageSdk.9.dylib", "libArriImageSdk.9.0.1.dylib", o).unwrap();
+            z.start_file("art/bin/art-cmd", o).unwrap();
+            z.write_all(b"programm").unwrap();
+            z.finish().unwrap();
+        }
+        let t = tempfile::tempdir().unwrap();
+        entpacken(daten, t.path()).unwrap();
+        let v = t.path().join("art/lib/libArriImageSdk.9.dylib");
+        assert!(std::fs::symlink_metadata(&v).unwrap().file_type().is_symlink());
+        assert_eq!(std::fs::read(&v).unwrap(), b"bibliothek");
+    }
+
+    #[test]
+    fn verknuepfung_nach_aussen_wird_abgelehnt() {
+        let mut daten = Vec::new();
+        {
+            let mut z = zip::ZipWriter::new(std::io::Cursor::new(&mut daten));
+            let o = zip::write::SimpleFileOptions::default();
+            z.add_symlink("art/lib/boese", "../../../etc/passwd", o).unwrap();
+            z.finish().unwrap();
+        }
+        let t = tempfile::tempdir().unwrap();
+        assert!(entpacken(daten, t.path()).is_err());
+    }
+}
+
+#[cfg(test)]
+mod echt {
+    /// Echtes Paket von ARRI (nur von Hand: `ART_ZIP=<pfad> cargo test -p stage-ingest echtes_paket -- --ignored`).
+    #[test]
+    #[ignore]
+    fn echtes_paket() {
+        let Ok(zip) = std::env::var("ART_ZIP") else { return };
+        let t = tempfile::tempdir().unwrap();
+        super::entpacken(std::fs::read(zip).unwrap(), t.path()).unwrap();
+        let lib = t.path().join("art-cmd_1.0.0_macos_universal/lib/libArriImageSdk.9.dylib");
+        assert!(std::fs::symlink_metadata(&lib).unwrap().file_type().is_symlink());
+        assert!(std::fs::metadata(&lib).unwrap().len() > 1_000_000, "zeigt auf die echte Bibliothek");
+    }
 }
