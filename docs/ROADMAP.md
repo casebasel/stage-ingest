@@ -55,6 +55,15 @@ Export, Live-Protokoll auf jedem Ziel, Kiosk-Ansicht, Codex-HDE (`.arx`) erkenne
 Fortsetzen behaltene, verfälschte Datei gleicher Grösse fällt beim Zurücklesen auf; dann „Zur Seite legen und neu
 kopieren“ (die App löscht sie nicht selbst).
 
+## Farbe (Systemkarte 13510c3, Entscheide Marlon 09.10.2026; noch nicht beauftragt)
+
+Farbe reist als Angabe an bestehenden Datensätzen (Aufnahme-Gamma, Look, CDL, EI, Weissabgleich, Tint), Vorrang Clip →
+CAP → Hand, Warnung statt Sperre. Projekt-Vorgabe Aufnahme-Gamma/Look (z. B. „Log C“, „ARRI 709“); weicht ein Clip
+ab (eingebrannter Look), warnt der Ingest gold. Abspielfassungen der Plates: Rec.709 (BT.1886), ProRes 422 HQ,
+`plate_version.farbraum = rec709-bt1886`. OCIO-, LUT- und Look-Dateien nie in die Datenbank oder auf die Karte, nur
+Namen und Verweise. Ideen: Gamma, CDL, „Look eingebrannt“ aus Clip-Kopf bzw. ART CMD; ALE-Spalten Gamma, Look_name,
+ASC_SOP/ASC_SAT; Berichtszeile „EI · K · Tint · Look · Gamma“. Reihenfolge bestimmt Marlon.
+
 ## Laufend, ohne fremde Abhängigkeit
 
 - ~~Clips gegen die Kameraeinstellungen des Projekts (fps, Codec, Auflösung `BxH`), nur Warnung~~ gebaut (Systemkarte 0d270db); aktiv, sobald der Plate Assistant Migration 0016 liefert. Sensor-fps/-modus nach dem Test an echtem Clip.
