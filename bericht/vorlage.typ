@@ -80,8 +80,8 @@
     inset: (x: 3pt, y: 4pt),
     align: (x, y) => horizon + left,
     ..bilder.map(c => (
-      mono(c.name),
-      stack(dir: ltr, spacing: 3pt, ..c.bilder.map(b => image(b, width: 38mm))),
+      [#mono(c.name) #if c.werte != "" [ \ #text(fill: leise)[#c.werte]]],
+      if c.bilder.len() > 0 { stack(dir: ltr, spacing: 3pt, ..c.bilder.map(b => image(b, width: 38mm))) } else { [] },
     )).flatten(),
   )
 ]

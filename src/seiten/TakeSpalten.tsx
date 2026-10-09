@@ -142,6 +142,8 @@ const KATALOG: Spalte[] = [
   tech("weissK", "Weissabgleich K", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Take (CAP), sonst Plate", "plate.kamera.weissK"),
   tech("tint", "Tint", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Take (CAP), sonst Plate", "plate.kamera.tint"),
   tech("nd", "ND", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Take (CAP), sonst Plate", "plate.kamera.nd", false),
+  tech("gamma", "Gamma", "Kamerawerte", "Clip-Metadaten / ART CMD (Aufnahme-Gamma)", undefined, false),
+  tech("cdl", "CDL", "Kamerawerte", "Clip-Metadaten / ART CMD", undefined, false),
   tech("look", "Look", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Take (CAP), sonst Plate", "plate.kamera.look", false),
   tech("objektiv", "Objektiv", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Take (CAP), sonst Einrichtung am Take, sonst Plate", "plate.kamera.objektiv", false),
   tech("brennweite", "Brennweite mm", "Kamerawerte", "ART CMD, sonst Take (CAP), sonst Einrichtung am Take, sonst Plate", "plate.kamera.brennweiteMm"),

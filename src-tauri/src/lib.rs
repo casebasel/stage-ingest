@@ -728,19 +728,36 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
         ));
     }
     // Bericht auf jedes Ziel, auch auf fehlerhafte (dort belegt er den Fehler), soweit schreibbar.
-    // Vorschaubilder für den Bericht (und gleich gemerkt für die Spalte „Vorschau“), aus der ersten guten Kopie.
-    // Nach der Freigabe: die Entscheidung wartet nie darauf. Ein Fehler kostet nur die Bilder.
-    let mut bilder = Vec::new();
+    // Abschnitt „Clips“ im Bericht: Kamerawerte (EI · K · Tint · Look · Gamma, Systemkarte Farbe) und Vorschaubilder
+    // (gleich gemerkt für die Spalte „Vorschau“), aus der ersten guten Kopie. Nach der Freigabe: die Entscheidung
+    // wartet nie darauf. Ein Fehler kostet nur Werte oder Bilder.
+    let mut clips_bericht = Vec::new();
     if let (Some(erstes), Ok(cache)) = (urteile.iter().find(|u| u.gut()), app.path().app_cache_dir()) {
         for c in clips.iter().filter(|c| c.angaben.is_some()) {
             let _ = app.emit(FORTSCHRITT, Fortschritt::Nachlesen { pfad: format!("Vorschaubilder: {}", c.pfad) });
-            if let Ok(dateien) =
-                vorschaubilder::erzeugen(&erstes.ordner.join(&c.pfad), auftrag.art_cmd.as_deref(), &cache)
-            {
-                let jpegs: Vec<Vec<u8>> = dateien.iter().filter_map(|p| std::fs::read(p).ok()).collect();
-                if !jpegs.is_empty() {
-                    bilder.push((soll::ohne_endung(c.pfad.rsplit('/').next().unwrap_or(&c.pfad)).to_owned(), jpegs));
-                }
+            let datei = erstes.ordner.join(&c.pfad);
+            let csv = struktur::metadatenordner(&erstes.ordner).join(format!("{}.csv", soll::ohne_endung(&c.pfad)));
+            let w = technik::lesen(&technik::Anfrage { datei: datei.clone(), csv: csv.is_file().then_some(csv) });
+            let werte = [
+                w.get("ei").map(|v| format!("EI {v}")),
+                w.get("weissK").map(|v| format!("{v} K")),
+                w.get("tint").map(|v| format!("Tint {v}")),
+                w.get("look").cloned(),
+                w.get("gamma").cloned(),
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" · ");
+            let bilder: Vec<Vec<u8>> = vorschaubilder::erzeugen(&datei, auftrag.art_cmd.as_deref(), &cache)
+                .map(|d| d.iter().filter_map(|p| std::fs::read(p).ok()).collect())
+                .unwrap_or_default();
+            if !werte.is_empty() || !bilder.is_empty() {
+                clips_bericht.push(ingest_bericht::ClipBericht {
+                    name: soll::ohne_endung(c.pfad.rsplit('/').next().unwrap_or(&c.pfad)).to_owned(),
+                    werte,
+                    bilder,
+                });
             }
         }
     }
@@ -749,7 +766,7 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
         version: &version,
         mit_md5: auftrag.mit_md5,
         projekt: projekt_zeilen(auftrag),
-        bilder,
+        clips: clips_bericht,
     };
     let berichte: Vec<Result<PathBuf, String>> = (0..urteile.len())
         .map(|i| {
@@ -1088,7 +1105,7 @@ fn kaskade_ausfuehren(
         version: &version,
         mit_md5: true,
         projekt: zusammenfassung.as_ref().map(|z| z.projekt.clone().into_iter().collect()).unwrap_or_default(),
-        bilder: Vec::new(),
+        clips: Vec::new(),
     };
     let bericht = ingest_bericht::pdf(&fuer_bericht, &urteile, &kennungen, &freigabe, 1, &b_angaben)
         .map_err(|e| e.to_string())

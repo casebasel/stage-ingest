@@ -57,7 +57,11 @@ fn bericht_wird_gesetzt() {
             mit_md5: true,
             projekt: vec![("Regie".into(), "Ada Lovelace".into())],
             // Abschnitt „Clips“ mit echten JPEGs (drei Bilder wie im Ingest).
-            bilder: vec![("A001C001_261007_R132".into(), vec![jpeg(); 3])],
+            clips: vec![ingest_bericht::ClipBericht {
+                name: "A001C001_261007_R132".into(),
+                werte: "EI 800 · 5600 K · Tint 0 · ARRI 709 · LogC3".into(),
+                bilder: vec![jpeg(); 3],
+            }],
         },
     )
     .unwrap();

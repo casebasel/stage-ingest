@@ -36,8 +36,17 @@ pub struct Angaben<'a> {
     pub mit_md5: bool,
     /// Projektangaben für den Kopf, nur gefüllte (z. B. „Projekt“, „Produktionsfirma“, „Regie“, „DoP“).
     pub projekt: Vec<(String, String)>,
-    /// Vorschaubilder pro Clip (Clipname, JPEGs: erstes, mittleres, letztes Bild); leer = kein Abschnitt „Clips“.
-    pub bilder: Vec<(String, Vec<Vec<u8>>)>,
+    /// Abschnitt „Clips“: pro Clip Vorschaubilder und Kamerawerte; leer = kein Abschnitt.
+    pub clips: Vec<ClipBericht>,
+}
+
+/// Ein Clip im Abschnitt „Clips“.
+pub struct ClipBericht {
+    pub name: String,
+    /// Kamerawerte in einer Zeile (Systemkarte, Farbe): „EI 800 · 5600 K · Tint 0 · ARRI 709 · LogC3“; leer = keine.
+    pub werte: String,
+    /// JPEGs: erstes, mittleres, letztes Bild (leer = keine Vorschau).
+    pub bilder: Vec<Vec<u8>>,
 }
 
 #[derive(Serialize)]
@@ -126,14 +135,15 @@ pub fn pdf(
     let mut eingaben = Dict::new();
     eingaben.insert("daten".into(), json.into_value());
     let bilder: Vec<typst::foundations::Value> = angaben
-        .bilder
+        .clips
         .iter()
-        .map(|(name, jpegs)| {
+        .map(|c| {
             let mut d = Dict::new();
-            d.insert("name".into(), name.clone().into_value());
+            d.insert("name".into(), c.name.clone().into_value());
+            d.insert("werte".into(), c.werte.clone().into_value());
             d.insert(
                 "bilder".into(),
-                jpegs
+                c.bilder
                     .iter()
                     .map(|b| typst::foundations::Bytes::new(b.clone()).into_value())
                     .collect::<Vec<_>>()

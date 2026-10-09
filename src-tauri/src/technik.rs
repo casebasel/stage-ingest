@@ -25,6 +25,11 @@ fn kamerawert(feld: &str) -> Option<&'static str> {
     let hat = |t: &str| k.contains(t);
     Some(if hat("exposureindex") || k.ends_with("iso") {
         "ei"
+    } else if hat("gamma") || hat("transferfunction") || hat("transfercharacteristic") {
+        // Farbe (Systemkarte 13510c3): Aufnahme-Gamma, z. B. „LogC3“, „LogC4“, „Rec709“.
+        "gamma"
+    } else if hat("cdl") || hat("ascsop") || hat("ascsat") {
+        "cdl"
     } else if hat("tint") {
         "tint"
     } else if (hat("whitebalance") && (hat("kelvin") || hat("cct"))) || hat("colortemperature") {
@@ -152,6 +157,9 @@ mod tests {
         assert_eq!(kamerawert("com.arri.camera.CameraSerialNumber"), Some("seriennummer"));
         assert_eq!(kamerawert("com.apple.quicktime.model"), Some("kameramodell"));
         assert_eq!(kamerawert("positional/orientation/tilt"), None);
+        assert_eq!(kamerawert("com.arri.camera.ColorGamma"), Some("gamma"));
+        assert_eq!(kamerawert("com.arri.camera.LookName"), Some("look"));
+        assert_eq!(kamerawert("cdl/sop"), Some("cdl"));
     }
 
     #[test]
