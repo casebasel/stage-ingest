@@ -59,6 +59,34 @@ jobs:
             403) echo "::notice::Server von GitHub aus nicht prüfbar (HTTP 403, vermutlich Cloudflare); Schlüssel-Rolle $ROLLE";;
             *) echo "::warning::Server lehnt den Anon-Key ab oder ist nicht erreichbar (HTTP $CODE, Rolle $ROLLE). Variable SUPABASE_ANON_KEY prüfen.";;
           esac
+      # Mac: mit Developer ID signieren und von Apple beglaubigen, sobald die Geheimnisse eingetragen sind
+      # (docs/RELEASING.md). Dann bleibt „Immer erlauben“ im Schlüsselbund über Updates bestehen und Gatekeeper warnt
+      # nicht mehr. Ohne Geheimnisse wie bisher ad hoc signiert (tauri.conf.json: signingIdentity "-").
+      - name: Apple-Signatur, falls eingerichtet
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          ZERT: ${{ secrets.APPLE_CERTIFICATE }}
+          ZERT_PW: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          IDENT: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          AID: ${{ secrets.APPLE_ID }}
+          APW: ${{ secrets.APPLE_PASSWORD }}
+          TEAM: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -n "$ZERT" ] && [ -n "$IDENT" ]; then
+            { echo "APPLE_CERTIFICATE<<ENDE"; echo "$ZERT"; echo "ENDE"; } >> "$GITHUB_ENV"
+            echo "APPLE_CERTIFICATE_PASSWORD=$ZERT_PW" >> "$GITHUB_ENV"
+            echo "APPLE_SIGNING_IDENTITY=$IDENT" >> "$GITHUB_ENV"
+            echo "::notice::Mac wird mit Developer ID signiert"
+            if [ -n "$AID" ] && [ -n "$APW" ] && [ -n "$TEAM" ]; then
+              { echo "APPLE_ID=$AID"; echo "APPLE_PASSWORD=$APW"; echo "APPLE_TEAM_ID=$TEAM"; } >> "$GITHUB_ENV"
+              echo "::notice::und von Apple beglaubigt (Notarisierung)"
+            else
+              echo "::warning::Ohne APPLE_ID/APPLE_PASSWORD/APPLE_TEAM_ID: signiert, aber nicht beglaubigt"
+            fi
+          else
+            echo "::notice::Keine Developer ID eingetragen: ad hoc signiert (Schlüsselbund fragt nach jedem Update)"
+          fi
       - name: Bauen, signieren, ins Release laden
         uses: tauri-apps/tauri-action@v0
         env:
