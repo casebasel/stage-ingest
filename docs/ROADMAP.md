@@ -63,6 +63,10 @@ ab (eingebrannter Look), warnt der Ingest gold. Abspielfassungen der Plates: Rec
 `plate_version.farbraum = rec709-bt1886`. OCIO-, LUT- und Look-Dateien nie in die Datenbank oder auf die Karte, nur
 Namen und Verweise. Ideen: Gamma, CDL, „Look eingebrannt“ aus Clip-Kopf bzw. ART CMD; ALE-Spalten Gamma, Look_name,
 ASC_SOP/ASC_SAT; Berichtszeile „EI · K · Tint · Look · Gamma“. Reihenfolge bestimmt Marlon.
+Stand 93f1e5d: HDRI-Aufnahme im Plate Assistant sperrt Weissabgleich, ISO und Fokus ab dem ersten Bild (die Reihe
+ändert nur die Belichtungszeit): der HDRI-Dienst darf einen Weissabgleich je Aufnahme annehmen. `plate_version.farbraum`
+ist freier Text (0022), Wert `rec709-bt1886`. CAP-IDs für Look (`0x0041`), WB, Tint, EI und vermutlich CDL (`0x0050`)
+in KAMERAS.md.
 
 ## Laufend, ohne fremde Abhängigkeit
 
