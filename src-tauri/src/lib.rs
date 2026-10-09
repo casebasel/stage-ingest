@@ -512,109 +512,31 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
         .filter(|z| auftrag.fortsetzen.contains(z) && !auftrag.zur_seite.contains(z))
         .cloned()
         .collect();
-    let k = Auftrag {
+    // Kern: kopieren, zurücklesen, zweites Lesen, frühere Kopien, ASC MHL, Freigabe (ingest_kern::ablauf, getestet).
+    let ablauf = ingest_kern::ablauf::Ablauf {
         quelle: auftrag.quelle.clone(),
-        ziele: schreiben.clone(),
-        mit_md5: auftrag.mit_md5,
+        schreiben: schreiben.clone(),
         vorhandene: vorhandene.clone(),
-        fortsetzen: fortsetzen.clone(),
-    };
-    let kopie = kopie::kopieren(&k, abbruch, |meldung| {
-        let _ = app.emit(FORTSCHRITT, Fortschritt::Kopieren { meldung });
-    })
-    .map_err(|e| e.to_string())?;
-    // Abbruch oder Fehler nach dem Kopieren: die Zielordner hat dieser Lauf neu angelegt (vorher leer oder
-    // nicht vorhanden); ungeprüft sind sie wertlos und würden den nächsten Versuch blockieren.
-    // Nur die in diesem Lauf geschriebenen Ziele; frühere Kopien bleiben immer unberührt.
-    // Fortgesetzte Ziele bleiben stehen (sie enthielten schon vorher Dateien dieser Karte; sonst ginge nichts weiter).
-    let wegraeumen = |e: String| {
-        for z in schreiben.iter().filter(|z| !fortsetzen.contains(z)) {
-            let _ = std::fs::remove_dir_all(z);
-        }
-        e
-    };
-    // Ziele auf verschiedenen Platten gleichzeitig zurücklesen, auf derselben Platte nacheinander. Unsichere
-    // Kennungen (Platte nicht eindeutig bestimmbar) alle in eine Gruppe: lieber langsamer als eine Festplatte, die
-    // zwischen zwei Ordnern springt. Kennungen und Ziele der Kopie haben dieselbe Reihenfolge (siehe oben).
-    let platte: Vec<String> =
-        kennungen.iter().map(|k| if k.sicher { format!("platte:{}", k.wert) } else { "unsicher".into() }).collect();
-    let mut urteile = pruefen::zurueckpruefen_je_platte(&kopie, auftrag.mit_md5, &platte, abbruch, |ziel, pfad| {
-        let _ = app.emit(FORTSCHRITT, Fortschritt::Pruefen { ziel, pfad: pfad.to_string() });
-    })
-    .map_err(|e| wegraeumen(e.to_string()))?;
-    if auftrag.zweimal_lesen {
-        let anders = pruefen::quelle_nachlesen(&kopie, auftrag.mit_md5, abbruch, |pfad| {
-            let _ = app.emit(FORTSCHRITT, Fortschritt::Nachlesen { pfad: pfad.to_string() });
-        })
-        .map_err(|e| wegraeumen(e.to_string()))?;
-        if !anders.is_empty() {
-            // Dann sind alle Kopien fraglich, auch wenn sie unter sich übereinstimmen.
-            let text = format!(
-                "Karte liefert beim zweiten Lesen andere Daten ({} Dateien): Kartenleser oder Karte prüfen",
-                anders.len()
-            );
-            for u in &mut urteile {
-                u.kopierfehler.get_or_insert_with(|| text.clone());
-            }
-        }
-    }
-
-    // Frühere Kopien: Die Karte muss auch zur früheren Prüfsumme in deren ASC MHL passen. Sonst ist es eine
-    // andere Karte oder die Daten haben sich verändert; dann zählt die Kopie nicht (Branchenpraxis, Recherche 08.10.).
-    for (u, z) in urteile.iter_mut().zip(&kopie.ziele).filter(|(u, z)| z.vorhanden && u.gut()) {
-        match mhl::abweichungen_zur_historie(&z.ordner, &kopie) {
-            Ok(a) if a.is_empty() => {}
-            Ok(a) => {
-                u.kopierfehler = Some(format!(
-                    "Passt nicht zur früheren Prüfsumme dieser Kopie ({} Dateien, z. B. {}): andere Karte oder veränderte Daten",
-                    a.len(),
-                    a[0]
-                ))
-            }
-            Err(e) => u.kopierfehler = Some(format!("ASC MHL der früheren Kopie nicht lesbar: {e}")),
-        }
-    }
-
-    // ASC MHL nur auf gut geprüfte Ziele. Scheitert es, zählt das Ziel nicht für die Freigabe.
-    let angaben = mhl::Angaben {
+        fortsetzen,
+        kennungen: &kennungen,
+        mit_md5: auftrag.mit_md5,
+        zweimal_lesen: auftrag.zweimal_lesen,
+        mindest_kopien: auftrag.mindest_kopien,
+        ganze_karte: geraet::ist_volume_wurzel(&auftrag.quelle).unwrap_or(false),
         werkzeug: "Stage Ingest".into(),
         version: app.package_info().version.to_string(),
-        zeit: kopie.beginn,
-        nur_pruefen: false,
     };
-    let mhl = urteile
-        .iter_mut()
-        .zip(&kopie.ziele)
-        .map(|(u, z)| {
-            if !u.gut() {
-                return None;
+    let gesichert = ingest_kern::ablauf::sichern(&ablauf, abbruch, |m| {
+        let f = match m {
+            ingest_kern::ablauf::Meldung::Kopieren(meldung) => Fortschritt::Kopieren { meldung },
+            ingest_kern::ablauf::Meldung::Pruefen { ziel, pfad } => {
+                Fortschritt::Pruefen { ziel, pfad: pfad.to_string() }
             }
-            // Frühere Kopie: neue Generation „in-place“ mit `verified` (nichts geschrieben, nur nachgeprüft).
-            let angaben = mhl::Angaben { nur_pruefen: z.vorhanden, ..angaben.clone() };
-            match mhl::schreiben(&u.ordner, &kopie, &angaben) {
-                Ok(p) => Some(p),
-                Err(e) => {
-                    u.kopierfehler = Some(format!("ASC MHL nicht geschrieben: {e}"));
-                    None
-                }
-            }
-        })
-        .collect();
-    // Bringt die Karte eine eigene ASC-MHL-Historie mit, muss sie dazu passen. Unlesbar zählt als Abweichung.
-    let historie_abweichungen = mhl::historie_abgleichen(&kopie).map(|a| a.len()).unwrap_or(1);
-    let umfang = freigabe::Umfang {
-        dateien: kopie.dateien.len(),
-        ganze_karte: geraet::ist_volume_wurzel(&auftrag.quelle).unwrap_or(false),
-        historie_abweichungen,
-    };
-    let mut freigabe = freigabe::beurteilen(&urteile, &kennungen, auftrag.mindest_kopien, umfang);
-    for (u, z) in urteile.iter().zip(&kopie.ziele).filter(|(_, z)| z.vorhanden) {
-        freigabe.hinweise.push(if u.gut() {
-            format!("Frühere Kopie nicht neu geschrieben, vollständig nachgeprüft und gezählt: {}", z.ordner.display())
-        } else {
-            format!("Frühere Kopie weicht von der Karte ab und zählt nicht: {}", z.ordner.display())
-        });
-    }
+            ingest_kern::ablauf::Meldung::Nachlesen { pfad } => Fortschritt::Nachlesen { pfad: pfad.to_string() },
+        };
+        let _ = app.emit(FORTSCHRITT, f);
+    })?;
+    let ingest_kern::ablauf::Gesichert { kopie, urteile, mhl, mut freigabe } = gesichert;
     for z in &zur_seite_gelegt {
         freigabe.hinweise.push(format!("Unvollständiger Ordner zur Seite gelegt (nichts gelöscht): {z}"));
     }

@@ -35,11 +35,12 @@ Release nur noch Mac (Windows weiter in der CI geprüft), Zwischenspeicher vorge
 Offen aus der Prüfung (nach Wirkung):
 - Jede Datei einzeln auf die Platte sichern (`sync_all`, am Mac F_FULLFSYNC) bremst Karten mit Tausenden kleiner
   Dateien; bündeln, ohne die Regel „erst umbenennen, wenn sicher auf der Platte“ zu brechen
-- MD5 (nur wenn eingeschaltet) läuft im selben Faden wie das Lesen; schnelle Kartenleser werden auf MD5-Tempo gebremst
+- ~~MD5 im selben Faden wie das Lesen~~ gebaut (0.1.23): eigener Faden, Lesen und MD5 gleichzeitig
 - 8-MB-Puffer pro Block neu angelegt; Pool wiederverwenden
-- Fortschrittsliste der Oberfläche wächst quadratisch mit der Dateizahl (erst ab Zehntausenden Dateien spürbar)
+- ~~Fortschrittsliste quadratisch~~ gebaut (0.1.23): Ereignisse alle 100 ms gesammelt angewendet
 - Karte und Ziele werden vor dem Kopieren mehrfach durchlaufen (Vorab-Prüfung, Zielstand); einmal bestimmen
-- `einlesen` (lib.rs) ist eine Funktion mit 390 Zeilen ohne eigenen Test; `Einlesen.tsx` und `Projekt.tsx` teilen
+- ~~Kern von `einlesen` ohne Test~~ herausgelöst als `ingest_kern::ablauf::sichern` mit Ablauftests (Freigabe,
+  frühere Kopien, Abbruch, Teil der Karte); offen: `Einlesen.tsx` und `Projekt.tsx` teilen
 - Karte mit eigenem `ascmhl/` gilt nie als vorhandene Kopie (wird zur Seite gelegt und neu kopiert; sicher, aber
   unnötig): braucht eine saubere Regel für die Kette auf der Karte
 - „Karte zweimal lesen“ ist aus: ein Kartenleser, der beim einzigen Lesen falsch liefert, ergibt gleich falsche

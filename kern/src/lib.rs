@@ -10,6 +10,7 @@
 //!
 //! Der Kern hat keine Oberfläche und kein Netz; er ist auf Linux, macOS und Windows testbar.
 
+pub mod ablauf;
 pub mod ale;
 pub mod artcmd;
 pub mod clip;
