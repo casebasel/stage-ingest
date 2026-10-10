@@ -8,9 +8,9 @@ import { openPath } from "@tauri-apps/plugin-opener";
 import { ask, message } from "@tauri-apps/plugin-dialog";
 import { ChevronDown, ChevronRight, Image as Bild, MapPinPlus, Play, Plus, RefreshCw, Settings, X } from "lucide-react";
 import { NeuerDrehort, NeuesProjekt, ProjektEinstellungen } from "../ProjektEinstellungen";
-import { useEinstellungen } from "../einstellungen";
 import { useKonto, type Projekt as ProjektT, type Zugang } from "../konto";
 import { useLauf } from "../lauf";
+import { gemerkt, merken, useEinstellungen } from "../einstellungen";
 import { Status, type Ton } from "../teile";
 import { kurz } from "./Einlesen";
 import { SpaltenKopf, SpaltenMenue, SpaltenZellen, useTakeSpalten, type Spalte, type TakeMitWerten } from "./TakeSpalten";
@@ -26,7 +26,19 @@ type HdriStand = {
   /** "dienst" = gerechnetes Panorama, "iphone" = Vorschau der Aufnahme vom iPhone. */
   vorschauQuelle: "dienst" | "iphone" | null;
 };
-type PlateStand = { id: string; nummer: number; slate: string; name: string; fotos: FotoStand[]; hdri: HdriStand[]; takes: TakeStand[] };
+type PlateStand = {
+  id: string;
+  nummer: number;
+  slate: string;
+  name: string;
+  /** Art der Einstellung (0028): "plate" oder "location". */
+  art: string;
+  /** Filmszene ohne Buchstaben, leer ohne Drehbuch. */
+  szene: string;
+  fotos: FotoStand[];
+  hdri: HdriStand[];
+  takes: TakeStand[];
+};
 type DrehStand = { id: string; name: string; kurzname: string; datum: string; plates: PlateStand[]; hdri: HdriStand[]; karten: string[] };
 type Karte = {
   drehOrdner: string;
@@ -370,77 +382,7 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
               />
               <BaumKnopf an={auswahl.art === "karten"} onClick={() => setAuswahl({ art: "karten" })} text="Karten" zahl={u.karten.length} />
             </ul>
-            <h3 className="baum-titel">Drehorte</h3>
-            {u.drehs.length === 0 && <p className="baum-leer">Noch kein Drehort. Oben „Neuer Drehort“.</p>}
-            <ul>
-              {u.drehs.map((d) => {
-                const offen = !zu.has(d.id);
-                const takes = d.plates.flatMap((p) => p.takes);
-                return (
-                  <li key={d.id} className="baum-dreh">
-                    <div className="baum-zeile">
-                      <button
-                        className="baum-klappe"
-                        aria-label={offen ? `${d.name} zuklappen` : `${d.name} aufklappen`}
-                        aria-expanded={offen}
-                        disabled={d.plates.length === 0}
-                        onClick={() => {
-                          const n = new Set(zu);
-                          if (offen) n.add(d.id);
-                          else n.delete(d.id);
-                          setZu(n);
-                        }}
-                      >
-                        {d.plates.length > 0 && (offen ? <ChevronDown size={14} /> : <ChevronRight size={14} />)}
-                      </button>
-                      <button
-                        className="baum-knoten"
-                        aria-current={auswahl.art === "dreh" && auswahl.id === d.id ? "true" : undefined}
-                        onClick={() => setAuswahl({ art: "dreh", id: d.id })}
-                      >
-                        <span className="baum-name baum-name-dreh">{d.name}</span>
-                        <span className="baum-info zahl">
-                          {d.kurzname && `${d.kurzname} · `}
-                          {datumKurz(d.datum)}
-                          {takes.length > 0 && ` · ${takes.filter((t) => t.freigegeben).length}/${takes.length}`}
-                        </span>
-                      </button>
-                    </div>
-                    {offen && d.plates.length > 0 && (
-                      <ul className="baum-kinder">
-                        {d.plates.map((p) => {
-                          const fehlt = p.takes.some((t) => !t.karte);
-                          return (
-                            <li key={p.id}>
-                              <button
-                                className="baum-knoten"
-                                aria-current={auswahl.art === "plate" && auswahl.id === p.id ? "true" : undefined}
-                                onClick={() => setAuswahl({ art: "plate", id: p.id })}
-                              >
-                                <span className="baum-name">
-                                  <span className="zahl">{plateTitel(p)}</span> {p.name}
-                                </span>
-                                <span className="baum-info zahl">
-                                  {p.takes.length} {p.takes.length === 1 ? "Take" : "Takes"}
-                                  {p.fotos.length > 0 && ` · ${p.fotos.length} Fotos`}
-                                  {p.hdri.length > 0 && " · HDRI"}
-                                  {fehlt && (
-                                    <>
-                                      {" · "}
-                                      <span className="baum-warn">Karte fehlt</span>
-                                    </>
-                                  )}
-                                </span>
-                              </button>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
+            <Gliederung u={u} auswahl={auswahl} setAuswahl={setAuswahl} zu={zu} setZu={setZu} />
           </nav>
 
           <section className="detail" aria-label="Einzelheiten">
@@ -1086,5 +1028,159 @@ function ZuKlaeren({
         })}
       </tbody>
     </table>
+  );
+}
+
+type Gliederungsart = "drehort" | "szene" | "art";
+type Eintrag = { p: PlateStand; d: DrehStand };
+type Gruppe = { schluessel: string; titel: string; info?: string; dreh?: DrehStand; eintraege: Eintrag[] };
+
+/** Art einer Einstellung für die Gliederung: On Location (plate.art), Studio (Drehort STUDIO…), sonst Plate.
+ *  Die Studio-Einstellungen der Stage kommen mit der Studio-Spiegelung dazu. */
+function artVon(p: PlateStand, d: DrehStand): "Plate" | "On Location" | "Studio" {
+  if (p.art === "location") return "On Location";
+  if (d.kurzname.toUpperCase().startsWith("STUDIO")) return "Studio";
+  return "Plate";
+}
+
+function gruppen(u: Uebersicht, art: Gliederungsart): Gruppe[] {
+  const alle: Eintrag[] = u.drehs.flatMap((d) => d.plates.map((p) => ({ p, d })));
+  if (art === "drehort")
+    return u.drehs.map((d) => {
+      const takes = d.plates.flatMap((p) => p.takes);
+      return {
+        schluessel: `d:${d.id}`,
+        titel: d.name,
+        info: `${d.kurzname ? `${d.kurzname} · ` : ""}${datumKurz(d.datum)}${
+          takes.length ? ` · ${takes.filter((t) => t.freigegeben).length}/${takes.length}` : ""
+        }`,
+        dreh: d,
+        eintraege: d.plates.map((p) => ({ p, d })),
+      };
+    });
+  const nach = new Map<string, Eintrag[]>();
+  for (const e of alle) {
+    const k = art === "szene" ? e.p.szene || "" : artVon(e.p, e.d);
+    nach.set(k, [...(nach.get(k) ?? []), e]);
+  }
+  const reihe = art === "art" ? ["Plate", "On Location", "Studio"] : [...nach.keys()].sort((a, b) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b, "de", { numeric: true })));
+  return reihe
+    .filter((k) => nach.has(k))
+    .map((k) => {
+      const eintraege = (nach.get(k) ?? []).sort((a, b) => (a.p.slate || plateTitel(a.p)).localeCompare(b.p.slate || plateTitel(b.p), "de", { numeric: true }));
+      const takes = eintraege.flatMap((e) => e.p.takes);
+      return {
+        schluessel: `${art}:${k}`,
+        titel: art === "szene" ? (k ? `Szene ${k}` : "Ohne Szene") : k,
+        info: `${eintraege.length} ${eintraege.length === 1 ? "Einstellung" : "Einstellungen"}${
+          takes.length ? ` · ${takes.filter((t) => t.freigegeben).length}/${takes.length}` : ""
+        }`,
+        eintraege,
+      };
+    });
+}
+
+/** Seitenleiste unter „Alle Takes / Zu klären / Karten“: nach Drehort, Szene oder Art gegliedert (Marlon, 10.10.2026). */
+function Gliederung({
+  u,
+  auswahl,
+  setAuswahl,
+  zu,
+  setZu,
+}: {
+  u: Uebersicht;
+  auswahl: Auswahl;
+  setAuswahl: (a: Auswahl) => void;
+  zu: Set<string>;
+  setZu: (z: Set<string>) => void;
+}) {
+  const [art, setArt] = useState<Gliederungsart>(() => gemerkt<Gliederungsart>("baumGliederung", "drehort"));
+  useEffect(() => merken("baumGliederung", art), [art]);
+  const liste = gruppen(u, art);
+  return (
+    <>
+      <div className="baum-gliederung" role="group" aria-label="Gliedern nach">
+        {(
+          [
+            ["drehort", "Drehort"],
+            ["szene", "Szene"],
+            ["art", "Art"],
+          ] as [Gliederungsart, string][]
+        ).map(([id, text]) => (
+          <button key={id} aria-pressed={art === id} onClick={() => setArt(id)}>
+            {text}
+          </button>
+        ))}
+      </div>
+      {u.drehs.length === 0 && <p className="baum-leer">Noch kein Drehort. Oben „Neuer Drehort“.</p>}
+      <ul>
+        {liste.map((g) => {
+          const offen = !zu.has(g.schluessel);
+          const umschalten = () => {
+            const n = new Set(zu);
+            if (offen) n.add(g.schluessel);
+            else n.delete(g.schluessel);
+            setZu(n);
+          };
+          return (
+            <li key={g.schluessel} className="baum-dreh">
+              <div className="baum-zeile">
+                <button
+                  className="baum-klappe"
+                  aria-label={offen ? `${g.titel} zuklappen` : `${g.titel} aufklappen`}
+                  aria-expanded={offen}
+                  disabled={g.eintraege.length === 0}
+                  onClick={umschalten}
+                >
+                  {g.eintraege.length > 0 && (offen ? <ChevronDown size={14} /> : <ChevronRight size={14} />)}
+                </button>
+                <button
+                  className="baum-knoten"
+                  aria-current={g.dreh && auswahl.art === "dreh" && auswahl.id === g.dreh.id ? "true" : undefined}
+                  onClick={() => (g.dreh ? setAuswahl({ art: "dreh", id: g.dreh.id }) : umschalten())}
+                >
+                  <span className="baum-name baum-name-dreh">{g.titel}</span>
+                  {g.info && <span className="baum-info zahl">{g.info}</span>}
+                </button>
+              </div>
+              {offen && g.eintraege.length > 0 && (
+                <ul className="baum-kinder">
+                  {g.eintraege.map(({ p, d }) => {
+                    const fehlt = p.takes.some((t) => !t.karte);
+                    const a = artVon(p, d);
+                    return (
+                      <li key={p.id}>
+                        <button
+                          className="baum-knoten"
+                          aria-current={auswahl.art === "plate" && auswahl.id === p.id ? "true" : undefined}
+                          onClick={() => setAuswahl({ art: "plate", id: p.id })}
+                        >
+                          <span className="baum-name">
+                            <span className="zahl">{plateTitel(p)}</span> {p.name}
+                            {art !== "art" && a !== "Plate" && <span className="baum-art">{a === "On Location" ? "On Loc" : a}</span>}
+                          </span>
+                          <span className="baum-info zahl">
+                            {art !== "drehort" && `${d.name} ${datumKurz(d.datum)} · `}
+                            {p.takes.length} {p.takes.length === 1 ? "Take" : "Takes"}
+                            {p.fotos.length > 0 && ` · ${p.fotos.length} Fotos`}
+                            {p.hdri.length > 0 && " · HDRI"}
+                            {fehlt && (
+                              <>
+                                {" · "}
+                                <span className="baum-warn">Karte fehlt</span>
+                              </>
+                            )}
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </>
   );
 }

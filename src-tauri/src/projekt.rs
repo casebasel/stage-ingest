@@ -82,6 +82,10 @@ pub struct PlateStand {
     pub nummer: i64,
     pub slate: String,
     pub name: String,
+    /// Art der Einstellung (0028): `plate` oder `location`; fehlt das Feld, gilt `plate`.
+    pub art: String,
+    /// Filmszene ohne Buchstaben (z. B. „42“), leer ohne Drehbuch.
+    pub szene: String,
     pub fotos: Vec<FotoStand>,
     pub hdri: Vec<HdriStand>,
     pub takes: Vec<TakeStand>,
@@ -384,6 +388,8 @@ pub fn zusammenfuehren(
                 nummer: p["nummer"].as_i64().unwrap_or(0),
                 slate: format!("{}{}", text(&p["szene"]), text(&p["buchstabe"])),
                 name: text(&p["name"]),
+                art: Some(text(&p["art"])).filter(|a| !a.is_empty()).unwrap_or_else(|| "plate".into()),
+                szene: text(&p["szene"]),
                 fotos: fotos.into_iter().map(|(_, f)| f).collect(),
                 hdri: hdri_alle.iter().filter(|h| text(&h["plate_id"]) == pid).map(|h| hdri_stand(h)).collect(),
                 takes,

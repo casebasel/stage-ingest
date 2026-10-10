@@ -267,7 +267,7 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
         id: "d1", name: "Rheinufer", kurzname: "RHEINUFER", datum: "2026-10-28", karten: ["A001R131", "A001R132"],
         hdri: [{ id: "h0", zustand: "uploaded", erstelltAm: "2026-10-28T08:12:00Z", job: "wartet", vorschau: "h0/vorschau.jpg", vorschauQuelle: "iphone" }],
         plates: [
-          { id: "p1", nummer: 1, slate: "42A", name: "Ufer Süd", hdri: [],
+          { id: "p1", nummer: 1, slate: "42A", name: "Ufer Süd", art: "plate", szene: "42", hdri: [],
             fotos: [
               ...["referenz", "set", "position"].map((art, i) => ({ id: `f${i}`, art, pfad: `p1/f${i}.jpg` })),
               ...[1, 2].map((n) => ({ id: `v${n}`, art: "vorschau", pfad: `p1/v${n}.jpg`, takeId: `t${n}` })),
@@ -277,7 +277,7 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
               datei: `/Volumes/NAS/A001R131/A001C00${n}_261028_R131.mov`, csv: `/Volumes/NAS/05_METADATEN/A001C00${n}_261028_R131.csv`,
               werte: { "take.start_tc": `14:0${n}:10:00`, "take.start_zeit": `2026-10-28T12:0${n}:10Z`, "plate.kamera_hoehe_cm": 142, "plate.abstand_cm": 800, "plate.stativ": true, "plate.richtung.azimutGrad": 212.4, "plate.gps.lat": 47.5596, "plate.gps.lon": 7.5886, "plate.kamera.objektiv": "Signature Prime 35", "plate.notiz": "Gegenlicht" },
             })) },
-          { id: "p2", nummer: 2, slate: "42B", name: "Brücke",
+          { id: "p2", nummer: 2, slate: "42B", name: "Brücke", art: "location", szene: "42",
             fotos: [0, 1, 2].map((i) => ({ id: `g${i}`, art: "set", pfad: `p2/g${i}.jpg` })),
             hdri: [{ id: "h1", zustand: "uploaded", erstelltAm: "2026-10-28T10:40:00Z", job: "processed", vorschau: "h1/ergebnis.jpg", vorschauQuelle: "dienst" }],
             takes: [
@@ -285,7 +285,7 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
               { id: "t5", nummer: 2, art: "graukugel", bewertung: "", clip: "A001C012_261028_R132", karte: "A001R132", freigegeben: false },
               { id: "t6", nummer: 3, art: "take", bewertung: "", clip: "", karte: null, freigegeben: false },
             ] },
-          { id: "p3", nummer: 3, slate: "", name: "Fähre", fotos: [], hdri: [], takes: [] },
+          { id: "p3", nummer: 3, slate: "", name: "Fähre", art: "plate", szene: "", fotos: [], hdri: [], takes: [] },
         ],
       },
       { id: "d2", name: "Gasstrasse", kurzname: "GASSTR", datum: "", karten: [], hdri: [], plates: [] },
