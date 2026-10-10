@@ -134,7 +134,8 @@ in KAMERAS.md.
 
 Szene am Projekt (Nummer, INT/EXT, Tag/Nacht, Kurzbeschreibung; Motive später). Haupt-Szene je Einstellung ergibt den
 Slate Szene + Buchstabe (42A, je Szene über den Film, ohne I/O, über alle Arten); weitere Szenen n:m freiwillig. Ohne
-Drehbuch bleibt `KURZNAME-NN`. Pflege überall, **Ingest als Hauptort**: Szenenliste am Projekt, an der Einstellung
+Drehbuch bleibt `KURZNAME-NN` (Marlon 10.10.: Slate nach Szene, sobald die Einstellung eine Haupt-Szene hat; die
+Ansicht nach Drehort/Szene ist ein Schalter und ändert den Slate nie). Pflege überall, **Ingest als Hauptort**: Szenenliste am Projekt, an der Einstellung
 Haupt-Szene und weitere Szenen, auch nachträglich; Seitenleiste „Szene“ nutzt das. Nach dem ersten Take änderbar **mit
 Warnung** („Clips tragen den alten Slate“). Braucht Migration Stufe B und Schreibrecht des Ingest auf `szene`, die
 Verknüpfung und die Planfelder von `plate` (heute im Code gesperrt, erst nach BESITZ öffnen).
