@@ -10,7 +10,7 @@ use std::process::Command;
 
 const BREITE: u32 = 480;
 
-fn schluessel(datei: &Path) -> Option<String> {
+pub(crate) fn schluessel(datei: &Path) -> Option<String> {
     let m = std::fs::metadata(datei).ok()?;
     let zeit = m.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
     let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -18,9 +18,12 @@ fn schluessel(datei: &Path) -> Option<String> {
     Some(format!("{:016x}", std::hash::Hasher::finish(&h)))
 }
 
-/// Liest ein Bild (TIFF, PNG, JPEG), verkleinert es auf [`BREITE`] und schreibt es als JPEG.
+/// Verkleinert ein Bild auf [`BREITE`] und schreibt es als JPEG.
 fn als_jpeg(von: &Path, nach: &Path) -> Result<(), String> {
-    let bild = image::open(von).map_err(|e| format!("Bild nicht lesbar: {e}"))?;
+    jpeg_schreiben(image::open(von).map_err(|e| format!("Bild nicht lesbar: {e}"))?, nach)
+}
+
+fn jpeg_schreiben(bild: image::DynamicImage, nach: &Path) -> Result<(), String> {
     let bild =
         if bild.width() > BREITE { bild.resize(BREITE, u32::MAX, image::imageops::FilterType::Triangle) } else { bild };
     let rgb = image::DynamicImage::ImageRgb8(bild.to_rgb8());
@@ -28,15 +31,26 @@ fn als_jpeg(von: &Path, nach: &Path) -> Result<(), String> {
     rgb.write_with_encoder(image::codecs::jpeg::JpegEncoder::new_with_quality(&mut aus, 80)).map_err(|e| e.to_string())
 }
 
-/// Ein Bild mit ART CMD rendern (Bildnummer ab 0).
+/// Ein Bild mit ART CMD rendern (Bildnummer ab 0) und als JPEG speichern.
 fn mit_art_cmd(art: &Path, datei: &Path, bild: u64, tmp: &Path, nach: &Path) -> Result<(), String> {
+    jpeg_schreiben(art_cmd_bild(art, datei, bild, BREITE, tmp)?, nach)
+}
+
+/// Ein Bild mit ART CMD rendern (Bildnummer ab 0, Rec.709, `breite` Pixel), im Speicher.
+pub(crate) fn art_cmd_bild(
+    art: &Path,
+    datei: &Path,
+    bild: u64,
+    breite: u32,
+    tmp: &Path,
+) -> Result<image::DynamicImage, String> {
     let _ = std::fs::remove_dir_all(tmp);
     std::fs::create_dir_all(tmp).map_err(|e| e.to_string())?;
     let aus = Command::new(art)
         .args(["process", "--input"])
         .arg(datei)
         .args(["--start", &bild.to_string(), "--duration", "1"])
-        .args(["--target-colorspace", "Rec.709/D65/BT.1886", "--output-width", &BREITE.to_string(), "--output"])
+        .args(["--target-colorspace", "Rec.709/D65/BT.1886", "--output-width", &breite.to_string(), "--output"])
         .arg(tmp.join("%07d.tif"))
         .output()
         .map_err(|e| format!("ART CMD nicht startbar: {e}"))?;
@@ -44,7 +58,7 @@ fn mit_art_cmd(art: &Path, datei: &Path, bild: u64, tmp: &Path, nach: &Path) -> 
         .ok()
         .and_then(|d| d.flatten().map(|e| e.path()).find(|p| p.extension().is_some_and(|x| x == "tif")))
         .ok_or_else(|| format!("ART CMD hat kein Bild geliefert: {}", String::from_utf8_lossy(&aus.stderr).trim()))?;
-    let r = als_jpeg(&tif, nach);
+    let r = image::open(&tif).map_err(|e| format!("Bild nicht lesbar: {e}"));
     let _ = std::fs::remove_dir_all(tmp);
     r
 }

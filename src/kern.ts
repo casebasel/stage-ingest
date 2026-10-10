@@ -110,12 +110,16 @@ export type SollClip = {
 export type Abgleich = {
   gefunden: [SollClip, string][];
   fehlt: SollClip[];
+  /** Über den QR-Code der Klappe im Bild: stärkste Quelle. */
+  ueberQr?: [SollClip, string][];
   /** Über die Take-ID in Info 1 (`PA:`/`ST:`); bei A/B-Kamera mehrere Clips je Take. */
   ueberKennung?: [SollClip, string][];
   ueberTimecode: [SollClip, string][];
   ueberZeitfenster: [SollClip, string][];
   mehrdeutig: [SollClip, string[]][];
   unerwartet: string[];
+  /** Widerspruch in der Kennung (QR gegen Info 1, zwei QR): Pfad und Grund. */
+  pruefen?: [string, string][];
 };
 export const sollVonStage = (adresse: string) => invoke<SollClip[]>("soll_von_stage", { adresse });
 

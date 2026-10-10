@@ -5,6 +5,7 @@ mod karte_db;
 mod plate;
 mod plates;
 mod projekt;
+mod qr;
 mod stage;
 mod technik;
 mod vorschaubilder;
@@ -677,13 +678,7 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
         ));
     }
     // Clip-Angaben aus der ersten guten Kopie (geprüft, nicht von der Karte): für ALE und Timecode-Zuordnung.
-    let clips = urteile.iter().find(|u| u.gut()).map(|u| ale::clips_lesen(&kopie, &u.ordner)).unwrap_or_default();
-    let abgleich = (!auftrag.soll.is_empty()).then(|| soll::abgleichen(&kopie, &auftrag.soll, &clips));
-    if let Some(a) = abgleich.as_ref().filter(|a| !a.fehlt.is_empty()) {
-        // Zusätzliche Warnung; die Freigabe hängt weiter an den geprüften Kopien (Konzept 6a).
-        let liste = a.fehlt.iter().map(|s| format!("{} ({} Take {})", s.clip, s.szene, s.take)).collect::<Vec<_>>();
-        freigabe.hinweise.push(format!("Gedreht, aber nicht auf der Karte: {}", liste.join(", ")));
-    }
+    let mut clips = urteile.iter().find(|u| u.gut()).map(|u| ale::clips_lesen(&kopie, &u.ordner)).unwrap_or_default();
     // Kameraeinstellungen des Projekts (Systemkarte): nur Warnung in Urteil, Bericht und Zusammenfassung.
     let abweichend: std::collections::HashMap<String, Vec<String>> = auftrag
         .kamera
@@ -762,6 +757,28 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
         if !fehler.is_empty() {
             freigabe.hinweise.push(format!("Bewegungsdaten (ART CMD) fehlen: {}", fehler.join("; ")));
         }
+    }
+    // Take-ID im Clip (Systemkarte „Clip ↔ Take“): Info 1 auch aus der CSV von ART CMD (falls die Metadaten des
+    // Containers sie nicht tragen), dann der QR-Code der Klappe im Bild. Nur mit Soll-Liste und ART CMD.
+    if let (Some(erstes), false) = (urteile.iter().find(|u| u.gut()), auftrag.soll.is_empty()) {
+        for c in clips.iter_mut().filter(|c| c.kennung.is_none()) {
+            let csv = struktur::metadatenordner(&erstes.ordner).join(format!("{}.csv", soll::ohne_endung(&c.pfad)));
+            if let Ok(t) = std::fs::read_to_string(&csv) {
+                c.kennung = ingest_kern::kennung::eindeutig(ingest_kern::kennung::in_text(&t)).map(|k| k.text());
+            }
+        }
+        if let (Some(art), Ok(cache)) = (auftrag.art_cmd.as_ref(), app.path().app_cache_dir()) {
+            for c in clips.iter_mut().filter(|c| c.angaben.is_some()) {
+                let _ = app.emit(FORTSCHRITT, Fortschritt::Nachlesen { pfad: format!("QR-Klappe: {}", c.pfad) });
+                c.qr = qr::suchen(&erstes.ordner.join(&c.pfad), art, &cache);
+            }
+        }
+    }
+    let abgleich = (!auftrag.soll.is_empty()).then(|| soll::abgleichen(&kopie, &auftrag.soll, &clips));
+    if let Some(a) = abgleich.as_ref().filter(|a| !a.fehlt.is_empty()) {
+        // Zusätzliche Warnung; die Freigabe hängt weiter an den geprüften Kopien (Konzept 6a).
+        let liste = a.fehlt.iter().map(|s| format!("{} ({} Take {})", s.clip, s.szene, s.take)).collect::<Vec<_>>();
+        freigabe.hinweise.push(format!("Gedreht, aber nicht auf der Karte: {}", liste.join(", ")));
     }
     // Kamerauhr: Clips mit unglaubwürdigem Datum (z. B. 2012-01-01 bei nicht gestellter Uhr) nur melden, nie einsortieren.
     if let Some(t) = kopie
@@ -846,6 +863,9 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
     if let Some(a) = &abgleich {
         for (s, p) in &a.gefunden {
             take_von.insert(soll::ohne_endung(p).to_owned(), (s.take_id.clone(), "clipname"));
+        }
+        for (s, p) in &a.ueber_qr {
+            take_von.insert(soll::ohne_endung(p).to_owned(), (s.take_id.clone(), "qr"));
         }
         for (s, p) in &a.ueber_kennung {
             take_von.insert(soll::ohne_endung(p).to_owned(), (s.take_id.clone(), "info1"));

@@ -940,11 +940,13 @@ function Urteil({ ergebnis, laufwerke }: { ergebnis: KartenErgebnis; laufwerke: 
 
   const gefunden = abgleich
     ? abgleich.gefunden.length +
-      new Set((abgleich.ueberKennung ?? []).map(([s]) => s.takeId)).size +
+      new Set([...(abgleich.ueberQr ?? []), ...(abgleich.ueberKennung ?? [])].map(([s]) => s.takeId)).size +
       abgleich.ueberTimecode.length +
       abgleich.ueberZeitfenster.length
     : 0;
-  const offen = abgleich ? abgleich.fehlt.length + abgleich.mehrdeutig.length + abgleich.unerwartet.length : 0;
+  const offen = abgleich
+    ? abgleich.fehlt.length + abgleich.mehrdeutig.length + abgleich.unerwartet.length + (abgleich.pruefen ?? []).length
+    : 0;
   const summe = ergebnis.kopie.dateien.reduce((n, d) => n + d.groesse, 0);
   const dauer = (Date.parse(ergebnis.kopie.ende) - Date.parse(ergebnis.kopie.beginn)) / 1000 || 0;
   const bericht = ergebnis.berichte.find((b): b is { Ok: string } => "Ok" in b)?.Ok;
@@ -1022,6 +1024,14 @@ function Urteil({ ergebnis, laufwerke }: { ergebnis: KartenErgebnis; laufwerke: 
                     ? "1 Clip ohne eindeutigen Take"
                     : `${abgleich.mehrdeutig.length + abgleich.unerwartet.length} Clips ohne eindeutigen Take`}{" "}
                   (Reiter Abgleich)
+                </Status>
+              </li>
+            )}
+            {abgleich && (abgleich.pruefen ?? []).length > 0 && (
+              <li>
+                <Status ton="warn">
+                  {(abgleich.pruefen ?? []).length === 1 ? "1 Clip" : `${(abgleich.pruefen ?? []).length} Clips`}: QR und
+                  Info 1 widersprechen sich (Reiter Abgleich)
                 </Status>
               </li>
             )}
@@ -1186,6 +1196,8 @@ function AbgleichTabelle({ ergebnis }: { ergebnis: KartenErgebnis }) {
     ...a.fehlt.map((s) => ({ ton: "warn" as Ton, stand: "Fehlt auf der Karte", take: take(s), clip: s.clip, weg: s.bewertung })),
     ...a.mehrdeutig.map(([s, ps]) => ({ ton: "warn" as Ton, stand: "Mehrdeutig, zu klären", take: take(s), clip: ps.map(name).join(", "), weg: "" })),
     ...a.unerwartet.map((p) => ({ ton: "warn" as Ton, stand: "Ohne Take, zu klären", take: "–", clip: name(p), weg: "" })),
+    ...(a.pruefen ?? []).map(([p, grund]) => ({ ton: "warn" as Ton, stand: "Kennung prüfen", take: "–", clip: name(p), weg: grund })),
+    ...(a.ueberQr ?? []).map(([s, p]) => ({ ton: "ok" as Ton, stand: "Da", take: take(s), clip: name(p), weg: "QR" })),
     ...a.gefunden.map(([s, p]) => ({ ton: "ok" as Ton, stand: "Da", take: take(s), clip: name(p), weg: "Clipname" })),
     ...(a.ueberKennung ?? []).map(([s, p]) => ({ ton: "ok" as Ton, stand: "Da", take: take(s), clip: name(p), weg: "Info 1" })),
     ...a.ueberTimecode.map(([s, p]) => ({ ton: "ok" as Ton, stand: "Da", take: take(s), clip: name(p), weg: "Timecode" })),

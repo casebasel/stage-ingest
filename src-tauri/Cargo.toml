@@ -34,9 +34,12 @@ base64 = "0.22"
 walkdir = "2"
 trash = "5"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+# QR-Code der Klappe im Bild lesen (Take-ID `PA:`/`ST:`).
+rqrr = { version = "0.11", default-features = false }
 
 [dev-dependencies]
 tempfile = "3"
+qrcode = { version = "0.14", default-features = false }
 
 # Passwort des Plate-Assistant-Zugangs im Schlüsselbund des Systems, nie in Dateien.
 [target.'cfg(target_os = "macos")'.dependencies]

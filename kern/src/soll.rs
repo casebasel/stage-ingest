@@ -51,6 +51,9 @@ pub struct Abgleich {
     pub gefunden: Vec<(SollClip, String)>,
     /// Erwartet, aber nicht auf der Karte.
     pub fehlt: Vec<SollClip>,
+    /// Über den QR-Code der Klappe im Bild (`PA:`/`ST:` + ULID): stärkste Quelle.
+    #[serde(default)]
+    pub ueber_qr: Vec<(SollClip, String)>,
     /// Über die Take-ID in User Info 1 (`PA:`/`ST:`) zugeordnet: erste Wahl. Mehrere Clips je Take nur von
     /// verschiedenen Kameras (A/B).
     #[serde(default)]
@@ -64,6 +67,10 @@ pub struct Abgleich {
     pub mehrdeutig: Vec<(SollClip, Vec<String>)>,
     /// Clips auf der Karte, zu denen kein Take bekannt ist (Klärungsliste).
     pub unerwartet: Vec<String>,
+    /// Clips mit Widerspruch in der Kennung (QR gegen Info 1, zwei verschiedene QR): Pfad und Grund (Klärungsliste,
+    /// auch wenn der Clip über den QR zugeordnet ist).
+    #[serde(default)]
+    pub pruefen: Vec<(String, String)>,
 }
 
 /// Timecode `HH:MM:SS:FF` (auch `;`) → Bildnummer bei `fps`.
@@ -124,13 +131,40 @@ pub fn abgleichen(kopie: &Kopie, soll: &[SollClip], clips: &[crate::ale::ClipZei
     // Takes, die über Info 1 schon entschieden sind (zugeordnet oder nach „Zu klären“), nach Index in `soll`.
     let mut erledigt: BTreeSet<usize> = BTreeSet::new();
 
-    // Erste Wahl: Take-ID aus User Info 1. Info 1 kann vom vorigen Take stammen, wenn das Schreiben per CAP
-    // scheiterte; deshalb zwei Clips derselben Kamera mit derselben ID → „Zu klären“, und jeder Widerspruch zum
-    // Clipnamen ebenso.
-    let id_von =
-        |c: &crate::ale::ClipZeile| c.kennung.as_deref().and_then(|k| k.split_once(':')).map(|(_, id)| id.to_owned());
+    // Erste Wahl: Take-ID aus dem QR-Code der Klappe, sonst aus User Info 1. Info 1 kann vom vorigen Take stammen,
+    // wenn das Schreiben per CAP scheiterte; deshalb zwei Clips derselben Kamera mit derselben ID → „Zu klären“, und
+    // jeder Widerspruch zum Clipnamen ebenso. Widersprechen sich QR und Info 1, gilt der QR, der Clip kommt zusätzlich
+    // in die Klärungsliste. Zwei verschiedene QR in einem Clip: keine ID, nie automatisch.
+    let nur_id = |k: &str| k.split_once(':').map(|(_, id)| id.to_ascii_uppercase());
+    let id_von = |c: &crate::ale::ClipZeile| match &c.qr[..] {
+        [q] => nur_id(q),
+        [] => c.kennung.as_deref().and_then(nur_id),
+        _ => None,
+    };
+    let mut ueber_qr: BTreeSet<String> = BTreeSet::new();
+    let mut gesperrt: BTreeSet<String> = BTreeSet::new();
     let mut mit_id: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for c in clips {
+        let info1 = c.kennung.as_deref().and_then(nur_id);
+        match &c.qr[..] {
+            [q] => {
+                ueber_qr.insert(c.pfad.clone());
+                if info1.as_ref().is_some_and(|i| Some(i) != nur_id(q).as_ref()) {
+                    a.pruefen.push((
+                        c.pfad.clone(),
+                        format!(
+                            "QR ({q}) und Info 1 ({}) nennen verschiedene Takes; zugeordnet nach dem QR",
+                            c.kennung.as_deref().unwrap_or_default()
+                        ),
+                    ));
+                }
+            }
+            [] => {}
+            mehrere => {
+                gesperrt.insert(ohne_endung(&c.pfad).to_owned());
+                a.pruefen.push((c.pfad.clone(), format!("Verschiedene QR-Codes im Clip: {}", mehrere.join(", "))));
+            }
+        }
         if let Some(id) = id_von(c) {
             mit_id.entry(id).or_default().push(c.pfad.clone());
         }
@@ -167,7 +201,11 @@ pub fn abgleichen(kopie: &Kopie, soll: &[SollClip], clips: &[crate::ale::ClipZei
             }
             for p in kandidaten {
                 bekannt.insert(ohne_endung(&p).to_owned());
-                a.ueber_kennung.push((s.clone(), p));
+                if ueber_qr.contains(&p) {
+                    a.ueber_qr.push((s.clone(), p));
+                } else {
+                    a.ueber_kennung.push((s.clone(), p));
+                }
             }
         } else {
             let mut alle = kandidaten;
@@ -182,6 +220,7 @@ pub fn abgleichen(kopie: &Kopie, soll: &[SollClip], clips: &[crate::ale::ClipZei
         .iter()
         .filter(|(id, _)| take_der_id(id).is_none())
         .flat_map(|(_, ps)| ps.iter().map(|p| ohne_endung(p).to_owned()))
+        .chain(gesperrt)
         .collect();
 
     for (i, s) in soll.iter().enumerate() {
@@ -451,6 +490,7 @@ mod timecode_tests {
             }),
             fehler: None,
             kennung: None,
+            qr: Vec::new(),
         }
     }
 
@@ -580,6 +620,29 @@ mod timecode_tests {
         ClipZeile { kennung: Some(format!("PA:{id}")), ..zeile(pfad, "10:00:00:00", "10:00:10:00") }
     }
 
+    #[test]
+    fn qr_gilt_vor_info1_mit_hinweis() {
+        // Info 1 vom vorigen Take (T1), der QR im Bild sagt T2.
+        let k = kopie(&["A001C004_261028_R1AB.mov"]);
+        let clips = [ClipZeile { qr: vec![format!("PA:{T2}")], ..mit_id("A001C004_261028_R1AB.mov", T1) }];
+        let a = abgleichen(&k, &[take_mit_id(T1, ""), take_mit_id(T2, "")], &clips);
+        let p: Vec<(&str, &str)> = a.ueber_qr.iter().map(|(s, p)| (s.take_id.as_str(), p.as_str())).collect();
+        assert_eq!(p, [(T2, "A001C004_261028_R1AB.mov")]);
+        assert!(a.ueber_kennung.is_empty() && a.mehrdeutig.is_empty());
+        assert_eq!(a.pruefen.len(), 1);
+    }
+
+    #[test]
+    fn zwei_verschiedene_qr_nie_automatisch() {
+        let k = kopie(&["A001C004_261028_R1AB.mov"]);
+        let clips =
+            [ClipZeile { qr: vec![format!("PA:{T1}"), format!("PA:{T2}")], ..mit_id("A001C004_261028_R1AB.mov", T1) }];
+        let a = abgleichen(&k, &[take_mit_id(T1, ""), soll("10:00:01:00", "10:00:05:00")], &clips);
+        assert!(a.ueber_qr.is_empty() && a.ueber_kennung.is_empty() && a.ueber_timecode.is_empty());
+        assert_eq!(a.unerwartet, ["A001C004_261028_R1AB.mov"]);
+        assert_eq!(a.pruefen.len(), 1);
+    }
+
     fn take_mit_id(id: &str, clip: &str) -> SollClip {
         SollClip { take_id: id.into(), clip: clip.into(), ..soll("", "") }
     }
@@ -677,6 +740,7 @@ mod timecode_tests {
             }),
             fehler: None,
             kennung: None,
+            qr: Vec::new(),
         };
         let take = SollClip {
             take_id: "T1".into(),

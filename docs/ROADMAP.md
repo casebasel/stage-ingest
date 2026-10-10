@@ -136,8 +136,8 @@ Vor dem Plate-Dreh nur Robustheit, gebaut in 0.1.30: Nachträge statt verlorener
 gemerkte Projekte/Drehorte (fester Kurzname), Nachtragen in die Datenbank aus `_ingest.json`, Einsortieren auf jeder
 Platte. **Ohne Zeitplan, sofort (Marlon 10.10.2026: „wir warten auf nichts“):** letztes Wort zur Zuordnung Clip ↔ Take
 beim Ingest. ~~Mehrdeutiges in beide Richtungen nach „Zu klären“; Zeitfenster nur im Projekt am Drehtag ± 1, höchstens
-30 min~~ (c139668); ~~Info 1 `PA:`/`ST:` als erste Wahl~~ (gebaut, Ort im Clip am Mini-Test bestätigen); offen: QR, im
-Studio `studio_take` statt CSV, `clip.studio_take_id` schreiben (dann fällt `ingest.karte` weg, die CSV bleibt für
+30 min~~ (c139668); ~~Info 1 `PA:`/`ST:` als erste Wahl~~ (gebaut, Ort im Clip am Mini-Test bestätigen); ~~QR der Klappe~~ (gebaut, an
+echter Klappe prüfen); offen: im Studio `studio_take` statt CSV, `clip.studio_take_id` schreiben (dann fällt `ingest.karte` weg, die CSV bleibt für
 Resolve); HDRI-EXR mit Prüfsumme aufs NAS, dann `linked`, dann Rohdaten löschen; eine Pfadregel relativ zum Projektordner.
 
 ## Szene an der Einstellung (Entscheid Marlon 10.10.2026, wartet auf Stufe B beim Plate Assistant)
