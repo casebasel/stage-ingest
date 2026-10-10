@@ -454,6 +454,11 @@ pub fn zusammenfuehren(
         }
     }
     let einsortieren = einsortierbar(&karten, &drehs, &take_zu_dreh, &clip_zu_dreh);
+    // Anzeige: dieselbe Karte auf mehreren Zielen einmal (neuester Durchgang gewinnt). Vorher wurde schon beim Laden
+    // zusammengefasst, dann sah das Einsortieren nur eine Kopie (Prüfung der Systemkarte, 10.10.2026).
+    let mut karten = karten;
+    karten.sort_by(|a, b| (&a.inhalt.karte, &b.inhalt.beginn).cmp(&(&b.inhalt.karte, &a.inhalt.beginn)));
+    karten.dedup_by(|a, b| a.inhalt.karte == b.inhalt.karte);
     Uebersicht { projekt, drehs, karten, zu_klaeren, unlesbar, hinweis: None, einsortieren }
 }
 
@@ -507,9 +512,9 @@ pub fn laden(plate: &Plate, zugang: Option<&Zugang>, projekt: Projekt, basis: &[
         karten.extend(g);
         unlesbar.extend(k);
     }
-    // Dieselbe Karte auf mehreren Zielen: einmal zählen (neuester Durchgang gewinnt).
+    // Alle Kopien bleiben drin (Einsortieren, Clip-Suche und „Zu klären“ brauchen jede Platte); nur die Kartenliste
+    // der Anzeige fasst dieselbe Karte zusammen (in `zusammenfuehren`).
     karten.sort_by(|a, b| (&a.inhalt.karte, &b.inhalt.beginn).cmp(&(&b.inhalt.karte, &a.inhalt.beginn)));
-    karten.dedup_by(|a, b| a.inhalt.karte == b.inhalt.karte);
     let (drehs, jobs, hinweis) = match zugang {
         Some(z) => match plate.projekt_drehs(z, &projekt) {
             Ok(v) => {
@@ -642,7 +647,18 @@ mod tests {
             look: None,
         };
         let jobs = json!([{"hdri_id": "H1", "zustand": "processed", "ergebnis": {"vorschau": "H1/H1_gemessen.jpg", "vorschau_speicher": "H1/ergebnis.jpg"}}]);
-        let u = zusammenfuehren(p, &drehs, &jobs, vec![karte], vec![]);
+        // Zwei Platten mit derselben Karte, dazu dieselbe Karte zweimal unter OHNE_DREHORT.
+        let zweite = GefundeneKarte { datei: "y".into(), ..karte.clone() };
+        let ohne = |datei: &str| GefundeneKarte {
+            dreh_ordner: "2026-10-28_OHNE_DREHORT".into(),
+            datei: datei.into(),
+            inhalt: KartenZusammenfassung { karte: "A002R1AB".into(), ..karte.inhalt.clone() },
+        };
+        let (o1, o2) = (ohne("o1"), ohne("o2"));
+        let u = zusammenfuehren(p, &drehs, &jobs, vec![karte, zweite, o1, o2], vec![]);
+        assert_eq!(u.karten.len(), 2, "Anzeige: jede Karte einmal");
+        assert_eq!(u.einsortieren.len(), 1);
+        assert_eq!(u.einsortieren[0].kopien.len(), 2, "Einsortieren erreicht jede Platte");
         let plate = &u.drehs[0].plates[0];
         assert_eq!((plate.slate.as_str(), plate.fotos.len()), ("42A", 1));
         assert_eq!(plate.fotos[0].pfad, "P1/F1.jpg");
@@ -658,10 +674,9 @@ mod tests {
         assert_eq!(u.drehs[0].karten, ["A001R1AB"]);
         let karten: Vec<Option<&str>> = plate.takes.iter().map(|t| t.karte.as_deref()).collect();
         assert_eq!(karten, [Some("A001R1AB"), Some("A001R1AB"), None], "T3 fehlt noch: Karte nicht eingelesen");
-        assert_eq!(u.zu_klaeren.len(), 1);
-        assert_eq!(
-            (u.zu_klaeren[0].clip.as_str(), u.zu_klaeren[0].karte.as_str()),
-            ("A001C005_261028_R1AB", "A001R1AB")
-        );
+        let offen: Vec<&OffenerClip> = u.zu_klaeren.iter().filter(|o| o.karte == "A001R1AB").collect();
+        assert_eq!(offen.len(), 1);
+        assert_eq!(offen[0].dateien.len(), 2, "beide Kopien des offenen Clips");
+        assert_eq!(offen[0].clip, "A001C005_261028_R1AB");
     }
 }
