@@ -138,7 +138,7 @@ Platte. **Ohne Zeitplan, sofort (Marlon 10.10.2026: „wir warten auf nichts“)
 beim Ingest. ~~Mehrdeutiges in beide Richtungen nach „Zu klären“; Zeitfenster nur im Projekt am Drehtag ± 1, höchstens
 30 min~~ (c139668); ~~Info 1 `PA:`/`ST:` als erste Wahl~~ (gebaut, Ort im Clip am Mini-Test bestätigen); ~~QR der Klappe~~ (gebaut, an
 echter Klappe prüfen); ~~im Studio `studio_take` statt CSV, `clip.studio_take_id`~~ (gebaut; die CSV der Stage nur noch als Rückfall ohne
-Konto); offen: `qr` in `clip.zuordnung` nach Migration 0029 (bis dahin `info1`); im Studio `studio_take` statt CSV, `clip.studio_take_id` schreiben (dann fällt `ingest.karte` weg, die CSV bleibt für
+Konto); offen: `qr` in `clip.zuordnung` nach Migration 0029 (bis dahin `info1`); `ingest.karte` fällt weg, sobald die Stage `clip` liest (die CSV bleibt für
 Resolve); HDRI-EXR mit Prüfsumme aufs NAS, dann `linked`, dann Rohdaten löschen; eine Pfadregel relativ zum Projektordner.
 
 ## Szene an der Einstellung (Entscheid Marlon 10.10.2026, wartet auf Stufe B beim Plate Assistant)
