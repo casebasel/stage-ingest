@@ -110,6 +110,8 @@ export type SollClip = {
 export type Abgleich = {
   gefunden: [SollClip, string][];
   fehlt: SollClip[];
+  /** Über die Take-ID in Info 1 (`PA:`/`ST:`); bei A/B-Kamera mehrere Clips je Take. */
+  ueberKennung?: [SollClip, string][];
   ueberTimecode: [SollClip, string][];
   ueberZeitfenster: [SollClip, string][];
   mehrdeutig: [SollClip, string[]][];

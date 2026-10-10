@@ -28,6 +28,8 @@ pub struct ClipZeile {
     pub angaben: Option<ClipAngaben>,
     /// Warum keine Angaben gelesen werden konnten.
     pub fehler: Option<String>,
+    /// Take-ID aus User Info 1 (`PA:`/`ST:` + ULID), nur wenn genau eine im Clip steht ([`crate::kennung`]).
+    pub kennung: Option<String>,
 }
 
 /// Liest die Angaben aller Clips einer kopierten Karte (aus einem geprüften Ziel, nicht von der Karte).
@@ -36,9 +38,13 @@ pub fn clips_lesen(kopie: &Kopie, ordner: &Path) -> Vec<ClipZeile> {
         .dateien
         .iter()
         .filter(|d| ist_clip(&d.pfad))
-        .map(|d| match clip::lesen(&ordner.join(&d.pfad)) {
-            Ok(a) => ClipZeile { pfad: d.pfad.clone(), angaben: Some(a), fehler: None },
-            Err(e) => ClipZeile { pfad: d.pfad.clone(), angaben: None, fehler: Some(e.to_string()) },
+        .map(|d| {
+            let pfad = ordner.join(&d.pfad);
+            let kennung = crate::kennung::eindeutig(crate::kennung::aus_datei(&pfad)).map(|k| k.text());
+            match clip::lesen(&pfad) {
+                Ok(a) => ClipZeile { pfad: d.pfad.clone(), angaben: Some(a), fehler: None, kennung },
+                Err(e) => ClipZeile { pfad: d.pfad.clone(), angaben: None, fehler: Some(e.to_string()), kennung },
+            }
         })
         .collect()
 }

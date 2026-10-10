@@ -847,6 +847,9 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
         for (s, p) in &a.gefunden {
             take_von.insert(soll::ohne_endung(p).to_owned(), (s.take_id.clone(), "clipname"));
         }
+        for (s, p) in &a.ueber_kennung {
+            take_von.insert(soll::ohne_endung(p).to_owned(), (s.take_id.clone(), "info1"));
+        }
         for (s, p) in &a.ueber_timecode {
             take_von.insert(soll::ohne_endung(p).to_owned(), (s.take_id.clone(), "timecode"));
         }

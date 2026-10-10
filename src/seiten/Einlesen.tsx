@@ -938,7 +938,12 @@ function Urteil({ ergebnis, laufwerke }: { ergebnis: KartenErgebnis; laufwerke: 
     setAuswurf(null);
   }
 
-  const gefunden = abgleich ? abgleich.gefunden.length + abgleich.ueberTimecode.length + abgleich.ueberZeitfenster.length : 0;
+  const gefunden = abgleich
+    ? abgleich.gefunden.length +
+      new Set((abgleich.ueberKennung ?? []).map(([s]) => s.takeId)).size +
+      abgleich.ueberTimecode.length +
+      abgleich.ueberZeitfenster.length
+    : 0;
   const offen = abgleich ? abgleich.fehlt.length + abgleich.mehrdeutig.length + abgleich.unerwartet.length : 0;
   const summe = ergebnis.kopie.dateien.reduce((n, d) => n + d.groesse, 0);
   const dauer = (Date.parse(ergebnis.kopie.ende) - Date.parse(ergebnis.kopie.beginn)) / 1000 || 0;
@@ -1182,6 +1187,7 @@ function AbgleichTabelle({ ergebnis }: { ergebnis: KartenErgebnis }) {
     ...a.mehrdeutig.map(([s, ps]) => ({ ton: "warn" as Ton, stand: "Mehrdeutig, zu klären", take: take(s), clip: ps.map(name).join(", "), weg: "" })),
     ...a.unerwartet.map((p) => ({ ton: "warn" as Ton, stand: "Ohne Take, zu klären", take: "–", clip: name(p), weg: "" })),
     ...a.gefunden.map(([s, p]) => ({ ton: "ok" as Ton, stand: "Da", take: take(s), clip: name(p), weg: "Clipname" })),
+    ...(a.ueberKennung ?? []).map(([s, p]) => ({ ton: "ok" as Ton, stand: "Da", take: take(s), clip: name(p), weg: "Info 1" })),
     ...a.ueberTimecode.map(([s, p]) => ({ ton: "ok" as Ton, stand: "Da", take: take(s), clip: name(p), weg: "Timecode" })),
     ...a.ueberZeitfenster.map(([s, p]) => ({ ton: "ok" as Ton, stand: "Da", take: take(s), clip: name(p), weg: "Klappenzeit" })),
   ];

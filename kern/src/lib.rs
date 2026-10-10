@@ -20,6 +20,7 @@ pub mod freigabe;
 pub mod gedaechtnis;
 pub mod geraet;
 pub mod kaskade;
+pub mod kennung;
 pub mod kopie;
 pub mod laufwerke;
 pub mod mhl;

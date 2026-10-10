@@ -134,10 +134,11 @@ in KAMERAS.md.
 
 Vor dem Plate-Dreh nur Robustheit, gebaut in 0.1.30: Nachträge statt verlorener Fehler nach dem Bericht, ohne Netz
 gemerkte Projekte/Drehorte (fester Kurzname), Nachtragen in die Datenbank aus `_ingest.json`, Einsortieren auf jeder
-Platte. **Ab November:** letztes Wort zur Zuordnung Clip ↔ Take beim Ingest, draussen und im Studio (QR und Info 1
-`PA:`/`ST:`, im Studio `studio_take` statt CSV, `clip.studio_take_id` schreiben; dann fällt `ingest.karte` weg, die CSV
-bleibt für Resolve); Zeitfenster nur im Projekt und am Drehtag ± 1; Mehrdeutiges nach „Zu klären“ statt an den letzten
-Take; HDRI-EXR mit Prüfsumme aufs NAS, dann `linked`, dann Rohdaten löschen; eine Pfadregel relativ zum Projektordner.
+Platte. **Ohne Zeitplan, sofort (Marlon 10.10.2026: „wir warten auf nichts“):** letztes Wort zur Zuordnung Clip ↔ Take
+beim Ingest. ~~Mehrdeutiges in beide Richtungen nach „Zu klären“; Zeitfenster nur im Projekt am Drehtag ± 1, höchstens
+30 min~~ (c139668); ~~Info 1 `PA:`/`ST:` als erste Wahl~~ (gebaut, Ort im Clip am Mini-Test bestätigen); offen: QR, im
+Studio `studio_take` statt CSV, `clip.studio_take_id` schreiben (dann fällt `ingest.karte` weg, die CSV bleibt für
+Resolve); HDRI-EXR mit Prüfsumme aufs NAS, dann `linked`, dann Rohdaten löschen; eine Pfadregel relativ zum Projektordner.
 
 ## Szene an der Einstellung (Entscheid Marlon 10.10.2026, wartet auf Stufe B beim Plate Assistant)
 
@@ -169,7 +170,7 @@ Verknüpfung und die Planfelder von `plate` (heute im Code gesperrt, erst nach B
 - ~~Ordnerstruktur `<KURZNAME>/<Datum>_<Dreh>/01_KAMERA … 05_METADATEN`, Bericht nach `04_BERICHTE`~~ bestätigt und gebaut (Projekt vorerst als Text)
 - Projekt aus der gemeinsamen Supabase auswählen, anlegen und ändern (Tabelle `projekt`, Paket `casebasel/stage-projekt` mit der Stage; entschieden 07.10.2026, Systemkarte 58963fa)
 - ~~Plate Assistant lesen (Projekt, Drehort, Takes als Soll-Liste) und Projekt anlegen~~ gebaut (Anmeldung mit eigenem Benutzer, Passwort im Schlüsselbund); offen: Test, sobald Marlon Migrationen 0007–0010 anwendet und den Benutzer anlegt; Fotos; Rückmeldungen (`ingest_meldung`, eigene Migration später)
-- ~~Clip ↔ Take: Clipname → Timecode-Überlappung; Klärungsliste~~ gebaut; offen: Info 1 (`PA:<take.id>`, nach dem CAP-Test an der Mini), Zeitfenster der Plate
+- ~~Clip ↔ Take: Clipname → Timecode-Überlappung; Klärungsliste~~ gebaut, ebenso Info 1 und Zeitfenster der Klappe (siehe Datenfluss)
 - **Entscheid Marlon 10.10.2026 (Slate und Klappe):** draussen mit Schauspielern = „Einstellung“ im Plate Assistant,
   Plate ist eine Art davon (Feld für die Art an `plate`, z. B. 'plate'/'einstellung'; Schema folgt): nur Plates nach
   `02_PLATES`. ID überall: Info 1 und QR auf jeder Klappe, draussen `PA:<take.id>`, im Studio `ST:<ULID>` → `studio_take`

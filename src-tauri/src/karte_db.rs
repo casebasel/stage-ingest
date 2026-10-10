@@ -4,7 +4,7 @@
 //! - Karte erst mit festem Projekt (`projekt_id` Pflicht). ID ARRI `karte-<projekt-kurzname>-<reel>`, andere Kameras
 //!   `karte-<projekt-kurzname>-<name>-JJJJMMTTHHMM` (erste Aufnahme, gegen „UNTITLED“-Kollisionen), alles klein.
 //! - Clip-ID `clip-<karte-id ohne „karte-“>-<clipname klein>`; `name` ohne Endung, gross.
-//! - `zuordnung` `clipname`/`timecode`/`zeitfenster`/`hand`, leer (`null`) = „Zu klären“.
+//! - `zuordnung` `info1`/`clipname`/`timecode`/`zeitfenster`/`hand`, leer (`null`) = „Zu klären“.
 //! - Die Karte vor ihren Clips schicken; ein zweites `_anlegen` derselben ID wird zusammengeführt.
 //!
 //! Hier nur der Aufbau der Änderungen (ohne Netz, getestet); geschickt wird über `plate::Plate::karte_schreiben`.
@@ -36,7 +36,7 @@ pub struct Clip<'a> {
     pub fps: Option<f64>,
     pub dreh_id: Option<&'a str>,
     pub take_id: Option<&'a str>,
-    /// `clipname`/`timecode`/`zeitfenster`/`hand`; leer = zu klären.
+    /// `info1`/`clipname`/`timecode`/`zeitfenster`/`hand`; leer = zu klären.
     pub zuordnung: &'a str,
     pub aus_clip: Option<Value>,
 }
