@@ -1375,8 +1375,14 @@ input[type="checkbox"][role="switch"]:checked::before {
   color: var(--text);
   font-weight: 600;
 }
+.baum-name-zeile {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
 .baum-art {
-  margin-left: 6px;
+  flex: none;
   padding: 0 5px;
   border: 1px solid var(--linie-stark);
   border-radius: 3px;

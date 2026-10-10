@@ -1155,9 +1155,14 @@ function Gliederung({
                           aria-current={auswahl.art === "plate" && auswahl.id === p.id ? "true" : undefined}
                           onClick={() => setAuswahl({ art: "plate", id: p.id })}
                         >
-                          <span className="baum-name">
-                            <span className="zahl">{plateTitel(p)}</span> {p.name}
-                            {art !== "art" && a !== "Plate" && <span className="baum-art">{a === "On Location" ? "On Loc" : a}</span>}
+                          <span className="baum-name-zeile">
+                            <span className="baum-name">
+                              <span className="zahl">{plateTitel(p)}</span> {p.name}
+                            </span>
+                            {/* Kennzeichen nur, wo es etwas sagt: Studio ist in der Drehort-Ansicht schon der Drehort. */}
+                            {art !== "art" && (a === "On Location" || (a === "Studio" && art !== "drehort")) && (
+                              <span className="baum-art">{a === "On Location" ? "On Loc" : a}</span>
+                            )}
                           </span>
                           <span className="baum-info zahl">
                             {art !== "drehort" && `${d.name} ${datumKurz(d.datum)} · `}
