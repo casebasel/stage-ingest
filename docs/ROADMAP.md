@@ -158,7 +158,9 @@ in KAMERAS.md.
   Rückfall mitlesen; offen: ob die Mini 0x0098 schreiben lässt). Studio-Modus im Plate Assistant ändert für den Ingest nichts.
 - QR-Klappe (`PA:<take.id>` im Bild) lesen: **stärkste Quelle**, vor Info 1, Clipname, Timecode und Zeitfenster
   (Systemkarte SCHNITTSTELLEN „Clip ↔ Take“, 09.10.2026). Widersprechen sich QR und Info 1: nach dem QR zuordnen und
-  den Clip mit Hinweis in die Klärungsliste (Info 1 kann vom vorigen Take stammen, wenn das Schreiben per CAP scheiterte)
+  den Clip mit Hinweis in die Klärungsliste (Info 1 kann vom vorigen Take stammen, wenn das Schreiben per CAP scheiterte).
+  Lesefenster: erste und letzte 8 s des Clips (Klappe und ENDKLAPPE des Plate Assistant, je etwa 2 s nach bestätigtem
+  REC bzw. vor dem Stoppen). Gleicher QR am Anfang und Ende ist kein Widerspruch; zwei verschiedene IDs → „Zu klären“
 - ~~Soll-Liste Studio~~ gebaut (07.10.2026): Stage-CSV-Export, Abgleich nach Kamera+Reel, fehlende Clips als Hinweis vor der Freigabe; offen: Plate-Takes vom Plate Assistant als zweite Quelle
 - ~~ART CMD: Neigung, Rollen, Objektiv pro Bild nach `05_METADATEN`, Mittel/Bereich~~ gebaut (optional, Pfad lokal); offen: Test mit echtem ART CMD und Clip, Vorzeichen prüfen, `aus_clip` an den Plate Assistant
 - ~~ALE pro Karte aus den Clips (Start-TC, fps)~~ gebaut, gegen den Stage-Parser geprüft; ~~an den Stage-Server schicken~~ gebaut (`ingest.karte`), gemeinsam getestet; Stage ist seit 07.10.2026 in Betrieb, offen: erster Test im Studio mit einer echten Karte
