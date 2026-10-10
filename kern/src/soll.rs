@@ -403,7 +403,13 @@ pub fn stage_csv(text: &str) -> Result<Vec<SollClip>, String> {
             take: feld(&z, take),
             start_tc: feld(&z, tc),
             end_tc: feld(&z, tc_ende),
-            bewertung: feld(&z, bew),
+            // Anzeige einheitlich (Systemkarte BEGRIFFE „Bewertung“): Favorit, Gut, Schlecht, nie „Circle“.
+            bewertung: match feld(&z, bew).to_lowercase().as_str() {
+                "circle" | "favorit" => "Favorit".into(),
+                "gut" => "Gut".into(),
+                "schlecht" => "Schlecht".into(),
+                _ => feld(&z, bew),
+            },
             quelle: "stage".into(),
             take_id: String::new(),
             start_zeit: String::new(),
@@ -432,7 +438,7 @@ mod tests {
     const CSV: &str = "File Name,Reel Name,Start TC,End TC,Scene,Shot,Take,Good Take,Comments,Description,Bewertung\n\
         A005C001_120101_R56E.mov,A005,09:24:30:12,09:24:33:07,T00,T00-2,1,,,x,\n\
         A005C002_120101_R56E.mov,A005,09:24:56:20,09:24:59:37,T00,T00-2,2,,,x,Gut\n\
-        A005C003_120101_R56E.mov,A005,23:31:18:05,23:31:20:46,T00,T00-2,3,,,x,\n\
+        A005C003_120101_R56E.mov,A005,23:31:18:05,23:31:20:46,T00,T00-2,3,,,x,Circle\n\
         A006C001_120101_R77A.mov,A006,10:00:00:00,10:00:05:00,T01,T01-1,1,,,x,\n\
         ,,,,T02,T02-1,1,,,ohne Clip,\n\
         ,,10:00:00:20,10:00:01:10,T03,T03-1,1,,,ohne Clipname mit TC,\n";
@@ -470,6 +476,7 @@ mod tests {
         assert_eq!(a.gefunden.len(), 2);
         assert_eq!(a.fehlt.iter().map(|s| s.clip.as_str()).collect::<Vec<_>>(), ["A005C002_120101_R56E"]);
         assert_eq!(a.fehlt[0].bewertung, "Gut");
+        assert_eq!(soll[2].bewertung, "Favorit", "nie „Circle“ (BEGRIFFE „Bewertung“)");
         assert_eq!(a.unerwartet, ["A005C004_120101_R56E.mov"]);
     }
 }
