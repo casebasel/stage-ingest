@@ -2539,7 +2539,7 @@ dependencies = [
 
 [[package]]
 name = "ingest-bericht"
-version = "0.1.27"
+version = "0.1.28"
 dependencies = [
  "chrono",
  "gethostname",
@@ -2556,7 +2556,7 @@ dependencies = [
 
 [[package]]
 name = "ingest-kern"
-version = "0.1.27"
+version = "0.1.28"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -4915,7 +4915,7 @@ dependencies = [
 
 [[package]]
 name = "stage-ingest"
-version = "0.1.27"
+version = "0.1.28"
 dependencies = [
  "base64 0.22.1",
  "chrono",
