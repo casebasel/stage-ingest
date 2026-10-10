@@ -46,6 +46,10 @@ export type KartenErgebnis = {
   abgleich: Abgleich | null;
   berichte: ({ Ok: string } | { Err: string })[];
   freigabe: Freigabe;
+  /** Zeilen, die die Datenbank nicht übernommen hat. */
+  datenbankAbgelehnt?: string[];
+  /** Probleme nach dem Bericht (Datenbank, Zusammenfassung, 02_PLATES, Stage); stehen in …_Nachtrag_….txt. */
+  nachtraege?: string[];
 };
 
 export type Meldung =

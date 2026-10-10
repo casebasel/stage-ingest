@@ -1024,6 +1024,17 @@ function Urteil({ ergebnis, laufwerke }: { ergebnis: KartenErgebnis; laufwerke: 
               {h}
             </p>
           ))}
+          {(ergebnis.nachtraege?.length ?? 0) > 0 && (
+            <div className="nachtraege" role="alert">
+              <Status ton="warn">Nach dem Bericht nicht alles geklappt (die Kopie ist davon nicht betroffen):</Status>
+              <ul>
+                {ergebnis.nachtraege!.map((n) => (
+                  <li key={n}>{n}</li>
+                ))}
+              </ul>
+              <p className="leise">Steht auch als Nachtrag neben dem Bericht in 04_BERICHTE.</p>
+            </div>
+          )}
           {auswurf && (
             <p className="urteil-auswurf">
               <Status ton={auswurf.ton}>{auswurf.text}</Status>
@@ -1247,6 +1258,11 @@ function Metadaten({ ergebnis }: { ergebnis: KartenErgebnis }) {
             <Status ton="leise">Nicht in der Datenbank (kein Projekt aus dem Plate Assistant gewählt)</Status>
           ) : "Err" in db ? (
             <Status ton="warn">Nicht in der Datenbank: {db.Err}</Status>
+          ) : (ergebnis.datenbankAbgelehnt?.length ?? 0) > 0 ? (
+            <Status ton="warn">
+              In der Datenbank, aber {ergebnis.datenbankAbgelehnt!.length} {ergebnis.datenbankAbgelehnt!.length === 1 ? "Zeile" : "Zeilen"} nicht
+              übernommen: {ergebnis.datenbankAbgelehnt!.join("; ")}
+            </Status>
           ) : (
             <Status ton="ok">Karte und Clips in der Datenbank, der Plate Assistant sieht sie</Status>
           )}

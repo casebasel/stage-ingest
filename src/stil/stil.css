@@ -1586,6 +1586,21 @@ input[type="checkbox"][role="switch"]:checked::before {
 .notiz-fehler {
   border-color: var(--rot);
 }
+.nachtraege {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--warn);
+  background: var(--warn-grund);
+  border-radius: var(--rund-klein);
+}
+.nachtraege ul {
+  margin: 6px 0 4px 18px;
+  list-style: disc;
+  font-size: 13px;
+}
+.nachtraege p {
+  font-size: 12px;
+}
 .ohne-drehort {
   margin-bottom: 16px;
 }

@@ -162,6 +162,11 @@ struct KartenErgebnis {
     /// PDF-Bericht je Ziel: Pfad oder Fehlertext.
     berichte: Vec<Result<PathBuf, String>>,
     freigabe: Freigabe,
+    /// Zeilen, die die Datenbank nicht übernommen hat (Karte steht trotzdem drin).
+    datenbank_abgelehnt: Vec<String>,
+    /// Probleme nach dem Bericht (Datenbank, Zusammenfassung, 02_PLATES, Stage): stehen nicht im PDF, darum in
+    /// `04_BERICHTE/<Karte>_Nachtrag_<Zeit>.txt`, im Verlauf und in der Anzeige (Systemkarte „Datenfluss“, 10.10.2026).
+    nachtraege: Vec<String>,
 }
 
 const FORTSCHRITT: &str = "ingest://fortschritt";
@@ -343,6 +348,9 @@ struct VerlaufEintrag {
     fingerabdruck: String,
     #[serde(default)]
     clips: Vec<String>,
+    /// Probleme nach dem Bericht (siehe `KartenErgebnis::nachtraege`).
+    #[serde(default)]
+    nachtraege: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -368,6 +376,7 @@ fn verlauf_anhaengen(app: &AppHandle, e: &KartenErgebnis) -> Result<(), String> 
     let eintrag = VerlaufEintrag {
         fingerabdruck: abdruck.fingerabdruck,
         clips: abdruck.clips,
+        nachtraege: e.nachtraege.clone(),
         beginn: e.kopie.beginn.to_rfc3339(),
         ende: e.kopie.ende.to_rfc3339(),
         karte: e.kopie.quelle.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
@@ -726,6 +735,9 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
         }
     }
 
+    // Ab hier steht nichts mehr im PDF: Probleme gehen in die Nachträge.
+    let mut nachtraege: Vec<String> = Vec::new();
+    let mut datenbank_abgelehnt: Vec<String> = Vec::new();
     // Karte und Clips in die gemeinsame Datenbank (nur mit festem Projekt). Ein Fehler sperrt nichts.
     let datenbank = match (&auftrag.plate_zugang, &auftrag.plate_projekt) {
         (Some(z), Some(p)) => {
@@ -735,9 +747,10 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
             );
             match &r {
                 Ok((_, abgelehnt)) if !abgelehnt.is_empty() => {
-                    freigabe.hinweise.push(format!("Datenbank: nicht übernommen: {}", abgelehnt.join("; ")))
+                    nachtraege.push(format!("Datenbank: nicht übernommen: {}", abgelehnt.join("; ")));
+                    datenbank_abgelehnt = abgelehnt.clone();
                 }
-                Err(e) => freigabe.hinweise.push(format!("Karte nicht in die Datenbank geschrieben: {e}")),
+                Err(e) => nachtraege.push(format!("Karte nicht in die Datenbank geschrieben: {e}")),
                 _ => {}
             }
             Some(r.map(|(id, _)| id))
@@ -779,7 +792,7 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
         };
         for u in urteile.iter().filter(|u| u.gut()) {
             if let Err(e) = uebersicht::schreiben(&struktur::berichtordner(&u.ordner), &z) {
-                freigabe.hinweise.push(format!("Zusammenfassung nicht geschrieben ({}): {e}", u.ordner.display()));
+                nachtraege.push(format!("Zusammenfassung nicht geschrieben ({}): {e}", u.ordner.display()));
             }
         }
     }
@@ -796,7 +809,7 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
                 .emit(FORTSCHRITT, Fortschritt::Nachlesen { pfad: "Plates und Fotos aus dem Plate Assistant".into() });
             let a = plates::ablegen(&app.state::<Arc<plate::Plate>>(), z, dreh_id, &drehordner);
             if !a.fehler.is_empty() {
-                freigabe.hinweise.push(format!("02_PLATES unvollständig: {}", a.fehler.join("; ")));
+                nachtraege.push(format!("02_PLATES unvollständig: {}", a.fehler.join("; ")));
             }
             Some(a)
         }
@@ -813,6 +826,32 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
         }
         stage::karte_melden(adresse, daten)
     });
+    match &stage {
+        Some(Err(e)) => nachtraege.push(format!("Nicht an die Stage gemeldet: {e}")),
+        Some(Ok(d)) if d["ok"] != true => {
+            nachtraege.push(format!("Stage hat die Karte abgelehnt: {}", d["meldung"].as_str().unwrap_or("ohne Grund")))
+        }
+        _ => {}
+    }
+    // Nachträge neben den Bericht auf jedes gute Ziel, damit sie mit der Karte bleiben.
+    if !nachtraege.is_empty() {
+        let text = format!(
+            "Stage Ingest: Nachträge zum Bericht der Karte {} (Einlesen {})\nDie Kopie und ihre Freigabe sind davon nicht betroffen.\n\n- {}\n",
+            geraet::kartenname(&auftrag.quelle),
+            kopie.beginn.to_rfc3339(),
+            nachtraege.join("\n- ")
+        );
+        let name = format!(
+            "{}_Nachtrag_{}.txt",
+            struktur::ordnername(&geraet::kartenname(&auftrag.quelle)),
+            kopie.beginn.format("%Y-%m-%d_%H%M%SZ")
+        );
+        for u in urteile.iter().filter(|u| u.gut()) {
+            let ordner = struktur::berichtordner(&u.ordner);
+            let _ = std::fs::create_dir_all(&ordner);
+            let _ = ingest_kern::sicher_schreiben(&ordner.join(&name), text.as_bytes());
+        }
+    }
     let ergebnis = KartenErgebnis {
         kopie,
         urteile,
@@ -827,6 +866,8 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
         abgleich,
         berichte,
         freigabe,
+        datenbank_abgelehnt,
+        nachtraege,
     };
     if let Err(e) = verlauf_anhaengen(app, &ergebnis) {
         eprintln!("Verlauf nicht geschrieben: {e}"); // die Karte ist trotzdem kopiert und belegt
