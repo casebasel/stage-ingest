@@ -16,7 +16,11 @@ use serde_json::{json, Value};
 
 /// Tabellen, die der Ingest ändern darf (Systemkarte 05dc71c, BESITZ.md). Der Server beschränkt ein persönliches
 /// Konto nicht mehr; diese Liste ist die Sperre. Nie: dreh, plate, take, foto.
-pub const DARF_AENDERN: &[&str] = &["projekt", "ingest_meldung", "hdri_job", "dreh", "karte", "clip"];
+pub const DARF_AENDERN: &[&str] = &["projekt", "ingest_meldung", "hdri_job", "dreh", "karte", "clip", "studio_take"];
+
+/// An `studio_take` (gehört der Stage) nur Bewertung und Notiz (Systemkarte SCHNITTSTELLEN „Studio-Spiegel“: je Feld
+/// gewinnt die jüngere Zeit, die Stage holt sie zurück). Nie anlegen, nie verschieben.
+const STUDIO_TAKE_FELDER: &[&str] = &["bewertung", "notiz"];
 
 /// Felder, die der Ingest an `dreh` (= Drehort) schreiben darf (Systemkarte, Stufe A): anlegen, Name, Datum.
 /// Der Kurzname ist nach dem Anlegen fest; Ort, Kamera und gemessene Werte schreibt nur der Plate Assistant.
@@ -39,6 +43,9 @@ pub fn aenderungen_pruefen(body: &Value) -> Result<(), String> {
         let feld = a["feld"].as_str().unwrap_or("");
         if t == "dreh" && !DREH_FELDER.contains(&feld) {
             return Err(format!("Stage Ingest ändert am Drehort „{feld}“ nicht (gehört dem Plate Assistant)"));
+        }
+        if t == "studio_take" && !STUDIO_TAKE_FELDER.contains(&feld) {
+            return Err(format!("Stage Ingest ändert am Studio-Take „{feld}“ nicht (gehört der Stage)"));
         }
         if (t == "karte" && !KARTE_FELDER.contains(&feld)) || (t == "clip" && !CLIP_FELDER.contains(&feld)) {
             return Err(format!("Stage Ingest ändert an „{t}“ das Feld „{feld}“ nicht (nach dem Anlegen fest)"));
@@ -344,6 +351,60 @@ impl Plate {
         let mut alle = neu.as_array().cloned().unwrap_or_default();
         alle.extend(alt.as_array().cloned().unwrap_or_default());
         Ok(Value::Array(alle))
+    }
+
+    /// Bewertung (`circle` | `gut` | `schlecht` | leer) und Notiz eines Studio-Takes setzen; nur geänderte Felder.
+    pub fn studio_take_bewerten(
+        &self,
+        z: &Zugang,
+        id: &str,
+        bewertung: Option<Option<String>>,
+        notiz: Option<String>,
+    ) -> Result<(), String> {
+        let mut aenderungen = Vec::new();
+        let jetzt = chrono::Utc::now().timestamp_micros();
+        if let Some(b) = bewertung {
+            if b.as_deref().is_some_and(|b| !["circle", "gut", "schlecht"].contains(&b)) {
+                return Err("Bewertung: Favorit, Gut, Schlecht oder keine".into());
+            }
+            aenderungen.push(json!({ "id": ulid_aehnlich(), "tabelle": "studio_take", "datensatz": id,
+                "feld": "bewertung", "wert": b, "zeit": jetzt }));
+        }
+        if let Some(n) = notiz {
+            if n.chars().count() > 20000 {
+                return Err("Notiz: höchstens 20000 Zeichen".into());
+            }
+            aenderungen.push(json!({ "id": ulid_aehnlich(), "tabelle": "studio_take", "datensatz": id,
+                "feld": "notiz", "wert": n, "zeit": jetzt }));
+        }
+        if aenderungen.is_empty() {
+            return Ok(());
+        }
+        let fehler = self.karte_schreiben(z, aenderungen)?;
+        if fehler.is_empty() {
+            Ok(())
+        } else {
+            Err(format!("Nicht übernommen: {}", fehler.join("; ")))
+        }
+    }
+
+    /// Studio-Einstellungen der Stage mit ihren Studio-Takes (Spiegel seit 10.10.2026, Tabellen `einstellung` und
+    /// `studio_take`, nur lesen). Ohne Fremdschlüssel-Einbettung: zwei Abfragen.
+    pub fn studio(&self, z: &Zugang, projekt_id: &str) -> Result<Value, String> {
+        let mut e = self.lesen(z, &format!("einstellung?projekt_id=eq.{}&select=*", url_teil(projekt_id)))?;
+        let ids: Vec<String> =
+            e.as_array().into_iter().flatten().filter_map(|x| x["id"].as_str().map(url_teil)).collect();
+        if ids.is_empty() {
+            return Ok(e);
+        }
+        let takes = self.lesen(z, &format!("studio_take?einstellung_id=in.({})&select=*", ids.join(",")))?;
+        for x in e.as_array_mut().into_iter().flatten() {
+            let id = x["id"].clone();
+            let eigene: Vec<Value> =
+                takes.as_array().into_iter().flatten().filter(|t| t["einstellung_id"] == id).cloned().collect();
+            x["studio_take"] = Value::Array(eigene);
+        }
+        Ok(e)
     }
 
     /// HDRI-Jobs zu diesen Aufnahmen (Tabelle `hdri_job`, ab 0019): Zustand und Ergebnis (mit Pfad der Vorschau).
@@ -890,6 +951,15 @@ mod tests {
         for f in ["_anlegen", "name", "datum"] {
             assert!(aenderungen_pruefen(&json!({"p_aenderungen": [{"tabelle": "dreh", "feld": f}]})).is_ok());
         }
+        // Studio-Take (gehört der Stage): nur Bewertung und Notiz, nie anlegen oder verschieben.
+        for f in ["_anlegen", "einstellung_id", "nummer", "clip_name", "geloescht"] {
+            let body = json!({"p_aenderungen": [{"tabelle": "studio_take", "feld": f}]});
+            assert!(aenderungen_pruefen(&body).is_err(), "studio_take.{f} muss gesperrt sein");
+        }
+        for f in ["bewertung", "notiz"] {
+            assert!(aenderungen_pruefen(&json!({"p_aenderungen": [{"tabelle": "studio_take", "feld": f}]})).is_ok());
+        }
+        assert!(aenderungen_pruefen(&json!({"p_aenderungen": [{"tabelle": "einstellung", "feld": "notiz"}]})).is_err());
         assert!(drehort_kurzname_pruefen("RHEINUFER").is_ok());
         assert!(drehort_kurzname_pruefen("STUDIO").is_err());
         assert!(drehort_kurzname_pruefen("RHEIN__UFER").is_err());

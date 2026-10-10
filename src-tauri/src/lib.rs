@@ -1147,6 +1147,22 @@ async fn karte_einsortieren(
     ergebnis
 }
 
+/// Studio-Take bewerten bzw. Notiz setzen (nur diese zwei Felder; die Stage holt sie zurück).
+#[tauri::command]
+async fn studio_take_bewerten(
+    plate: State<'_, Arc<plate::Plate>>,
+    zugang: plate::Zugang,
+    id: String,
+    // JSON kennt kein „Some(None)“: ob die Bewertung geändert wird, steht getrennt (null = Bewertung entfernen).
+    bewertung_aendern: bool,
+    bewertung: Option<String>,
+    notiz: Option<String>,
+) -> Result<(), String> {
+    let p = Arc::clone(&plate);
+    let bewertung = bewertung_aendern.then_some(bewertung.filter(|b| !b.is_empty()));
+    im_hintergrund(move || p.studio_take_bewerten(&zugang, &id, bewertung, notiz)).await
+}
+
 /// Zur Seite gelegte Kartenordner (`…_ALT_…`) des Projekts auf allen Basen.
 #[tauri::command]
 async fn zur_seite_liste(
@@ -1661,6 +1677,7 @@ pub fn run() {
             karte_wiedererkennen,
             karte_einsortieren,
             zur_seite_liste,
+            studio_take_bewerten,
             zur_seite_wegwerfen,
             artcmd_laden,
             art_viewer,

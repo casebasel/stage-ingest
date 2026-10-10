@@ -289,6 +289,13 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
         ],
       },
       { id: "d2", name: "Gasstrasse", kurzname: "GASSTR", datum: "", karten: [], hdri: [], plates: [] },
+      {
+        id: "d3", name: "Studio", kurzname: "STUDIO", datum: "", karten: [], hdri: [],
+        plates: [
+          { id: "e1", nummer: 1, slate: "STUDIO-01", name: "Fenster Küche", art: "studio", szene: "", fotos: [], hdri: [],
+            takes: [1, 2].map((n) => ({ id: `s${n}`, nummer: n, art: "take", bewertung: n === 1 ? "gut" : "", clip: `A007C00${n}_261010_R11A`, karte: null, freigegeben: false, studio: true, werte: { "take.notiz": n === 1 ? "Licht zu warm" : "" } })) },
+        ],
+      },
     ],
   }),
 };

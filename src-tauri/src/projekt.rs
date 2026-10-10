@@ -128,6 +128,8 @@ pub struct TakeStand {
     /// Eingelesen: Karte und ob freigegeben.
     pub karte: Option<String>,
     pub freigegeben: bool,
+    /// Studio-Take der Stage (`studio_take`): der Ingest darf Bewertung und Notiz setzen.
+    pub studio: bool,
     /// Clipdatei auf einer gefundenen Kopie und die CSV von ART CMD dazu (für `take_technik`).
     pub datei: Option<PathBuf>,
     pub csv: Option<PathBuf>,
@@ -364,6 +366,7 @@ pub fn zusammenfuehren(
                     clip,
                     karte: stand.map(|s| s.karte.clone()),
                     freigegeben: stand.is_some_and(|s| s.freigegeben),
+                    studio: t["studio"] == true,
                     datei: stand.and_then(|s| s.datei.clone()),
                     csv: stand.and_then(|s| s.csv.clone()),
                     werte,
@@ -386,7 +389,10 @@ pub fn zusammenfuehren(
             plates.push(PlateStand {
                 id: pid.clone(),
                 nummer: p["nummer"].as_i64().unwrap_or(0),
-                slate: format!("{}{}", text(&p["szene"]), text(&p["buchstabe"])),
+                // Studio-Einstellung der Stage: ihr fester Name `STUDIO-NN`.
+                slate: Some(text(&p["studio_name"]))
+                    .filter(|n| !n.is_empty())
+                    .unwrap_or_else(|| format!("{}{}", text(&p["szene"]), text(&p["buchstabe"]))),
                 name: text(&p["name"]),
                 art: Some(text(&p["art"])).filter(|a| !a.is_empty()).unwrap_or_else(|| "plate".into()),
                 szene: text(&p["szene"]),
@@ -452,6 +458,47 @@ pub fn zusammenfuehren(
 }
 
 /// Liest Plan und Stand und verbindet beides. Ohne Zugang zum Plate Assistant: nur die Karten.
+/// Hängt die Studio-Einstellungen der Stage (`einstellung` mit `studio_take`) als Plates der Art „studio“ unter ihren
+/// Drehort; gibt es den Drehort hier nicht, unter einen eigenen Eintrag „Studio (Stage)“. So erscheinen sie im Baum, in
+/// den Take-Tabellen und beim Abgleich mit den eingelesenen Karten (über den Clipnamen).
+fn studio_einhaengen(drehs: &mut Value, studio: &Value) {
+    if !drehs.is_array() {
+        *drehs = Value::Array(vec![]);
+    }
+    for e in studio.as_array().into_iter().flatten().filter(|e| e["geloescht"] != true) {
+        let takes: Vec<Value> = e["studio_take"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|t| {
+                let mut t = t.clone();
+                t["art"] = Value::from("take");
+                t["studio"] = Value::from(true);
+                t
+            })
+            .collect();
+        let plate = serde_json::json!({
+            "id": e["id"], "nummer": e["nummer"], "name": e["titel"], "art": "studio", "studio_name": e["name"],
+            "szene": "", "buchstabe": e["buchstabe"], "notiz": e["notiz"], "geloescht": false,
+            "foto": [], "take": takes,
+        });
+        let dreh_id = e["dreh_id"].as_str().unwrap_or("studio").to_owned();
+        let liste = drehs.as_array_mut().expect("Liste");
+        match liste.iter_mut().find(|d| d["id"].as_str() == Some(dreh_id.as_str())) {
+            Some(d) => {
+                if !d["plate"].is_array() {
+                    d["plate"] = Value::Array(vec![]);
+                }
+                d["plate"].as_array_mut().expect("Liste").push(plate);
+            }
+            None => liste.push(serde_json::json!({
+                "id": dreh_id, "name": "Studio (Stage)", "kurzname": "STUDIO", "datum": "", "geloescht": false,
+                "hdri": [], "plate": [plate],
+            })),
+        }
+    }
+}
+
 pub fn laden(plate: &Plate, zugang: Option<&Zugang>, projekt: Projekt, basis: &[PathBuf]) -> Uebersicht {
     let mut karten = Vec::new();
     let mut unlesbar = Vec::new();
@@ -480,6 +527,11 @@ pub fn laden(plate: &Plate, zugang: Option<&Zugang>, projekt: Projekt, basis: &[
         },
         None => (Value::Null, Value::Null, Some("Kein Zugang zum Plate Assistant: nur eingelesene Karten".into())),
     };
+    // Studio der Stage: Einstellungen wie Plates (Art „studio“) unter ihren Drehort hängen.
+    let mut drehs = drehs;
+    if let Some(Ok(studio)) = zugang.map(|z| plate.studio(z, &projekt.id)) {
+        studio_einhaengen(&mut drehs, &studio);
+    }
     let mut u = zusammenfuehren(projekt, &drehs, &jobs, karten, unlesbar);
     u.hinweis = hinweis;
     u
@@ -490,6 +542,23 @@ mod tests {
     use super::*;
     use ingest_kern::uebersicht::{ClipEintrag, KartenZusammenfassung};
     use serde_json::json;
+
+    #[test]
+    fn studio_der_stage_unter_den_drehort() {
+        let mut drehs = json!([{"id": "dreh-test-studio", "name": "Studio", "kurzname": "STUDIO", "plate": []}]);
+        let studio = json!([
+            {"id": "E1", "dreh_id": "dreh-test-studio", "nummer": 1, "name": "STUDIO-01", "titel": "Fenster",
+             "studio_take": [{"id": "T1", "nummer": 1, "clip_name": "A007C001_261010_R11A", "bewertung": "gut"}]},
+            {"id": "E2", "dreh_id": "anderswo", "nummer": 2, "name": "STUDIO-02", "studio_take": []},
+            {"id": "E3", "dreh_id": "dreh-test-studio", "nummer": 3, "geloescht": true}
+        ]);
+        studio_einhaengen(&mut drehs, &studio);
+        let p = &drehs[0]["plate"];
+        assert_eq!(p.as_array().unwrap().len(), 1, "gelöschte nicht");
+        assert_eq!((p[0]["art"].as_str(), p[0]["studio_name"].as_str()), (Some("studio"), Some("STUDIO-01")));
+        assert_eq!(p[0]["take"][0]["studio"], true);
+        assert_eq!(drehs[1]["name"], "Studio (Stage)", "ohne bekannten Drehort ein eigener Eintrag");
+    }
 
     #[test]
     fn plan_und_karten_verbinden() {

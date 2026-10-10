@@ -118,12 +118,23 @@ const GRUNDSPALTEN: Spalte[] = [
     titel: "Art · Bewertung",
     gruppe: "Take",
     quelle: "Plate Assistant",
-    wert: (t) => (
-      <span className="ohne-umbruch">
-        <span className="leise">{ART[t.art] ?? t.art}</span>
-        {BEWERTUNG[t.bewertung] && ` · ${BEWERTUNG[t.bewertung]}`}
-      </span>
-    ),
+    wert: (t) =>
+      t.studio ? (
+        <StudioBewertung t={t} />
+      ) : (
+        <span className="ohne-umbruch">
+          <span className="leise">{ART[t.art] ?? t.art}</span>
+          {BEWERTUNG[t.bewertung] && ` · ${BEWERTUNG[t.bewertung]}`}
+        </span>
+      ),
+  },
+  {
+    id: "notiz",
+    titel: "Notiz",
+    gruppe: "Take",
+    quelle: "Take (bei Studio-Takes hier änderbar)",
+    wert: (t) =>
+      t.studio ? <StudioNotiz t={t} /> : (t.werte?.["take.notiz"] as string | undefined) || undefined,
   },
   { id: "clip", titel: "Clip", gruppe: "Take", quelle: "Plate Assistant / Karte", mono: true, wert: (t) => t.clip || undefined },
   { id: "karte", titel: "Karte", gruppe: "Take", quelle: "Eingelesene Karten", mono: true, wert: (t) => t.karte ?? undefined },
@@ -139,6 +150,76 @@ const GRUNDSPALTEN: Spalte[] = [
   },
 ];
 const FEST = ["take", "abspielen"];
+
+/** Bewertung eines Studio-Takes (gehört der Stage; der Ingest darf Bewertung und Notiz setzen, die Stage holt sie
+ *  jede Minute zurück, je Feld gewinnt die jüngere Zeit). */
+function StudioBewertung({ t }: { t: TakeStand }) {
+  const konto = useKonto();
+  const [wert, setWert] = useState(t.bewertung || "");
+  const [fehler, setFehler] = useState<string | null>(null);
+  const speichern = async (v: string) => {
+    const alt = wert;
+    setWert(v);
+    setFehler(null);
+    try {
+      await invoke("studio_take_bewerten", { zugang: konto.zugang, id: t.id, bewertungAendern: true, bewertung: v || null, notiz: null });
+    } catch (e) {
+      setWert(alt);
+      setFehler(String(e));
+    }
+  };
+  return (
+    <span className="ohne-umbruch" onClick={(ev) => ev.stopPropagation()}>
+      <span className="leise">Studio · </span>
+      <select
+        className="bewertung-wahl"
+        aria-label={`Bewertung Take ${t.nummer}`}
+        value={wert}
+        disabled={konto.verbindung !== "verbunden"}
+        title={fehler ?? "Bewertung (geht an die Stage)"}
+        onChange={(ev) => speichern(ev.target.value)}
+      >
+        <option value="">–</option>
+        <option value="circle">Favorit</option>
+        <option value="gut">Gut</option>
+        <option value="schlecht">Schlecht</option>
+      </select>
+      {fehler && <span className="baum-warn"> nicht gespeichert</span>}
+    </span>
+  );
+}
+
+/** Notiz eines Studio-Takes, gespeichert beim Verlassen des Felds. */
+function StudioNotiz({ t }: { t: TakeStand }) {
+  const konto = useKonto();
+  const anfang = (t.werte?.["take.notiz"] as string | undefined) ?? "";
+  const [wert, setWert] = useState(anfang);
+  const [gespeichert, setGespeichert] = useState(anfang);
+  const [fehler, setFehler] = useState<string | null>(null);
+  return (
+    <input
+      className={`notiz-feld${fehler ? " notiz-fehler" : ""}`}
+      aria-label={`Notiz Take ${t.nummer}`}
+      value={wert}
+      placeholder="Notiz"
+      title={fehler ?? "Notiz (geht an die Stage)"}
+      disabled={konto.verbindung !== "verbunden"}
+      onClick={(ev) => ev.stopPropagation()}
+      onChange={(ev) => setWert(ev.target.value)}
+      onKeyDown={(ev) => ev.key === "Enter" && (ev.target as HTMLInputElement).blur()}
+      onBlur={async () => {
+        if (wert === gespeichert) return;
+        try {
+          await invoke("studio_take_bewerten", { zugang: konto.zugang, id: t.id, bewertungAendern: false, bewertung: null, notiz: wert });
+          setGespeichert(wert);
+          setFehler(null);
+        } catch (e) {
+          setFehler(String(e));
+        }
+      }}
+    />
+  );
+}
 
 /** Spielt die Kopie eines Clips ab, je nach Format: ProRes-MOV/MP4 mit dem Standard-Player (QuickTime), MXF und
  *  ARRIRAW mit dem ARRI Reference Tool Viewer (QuickTime kann sie nicht). Fehlt der Viewer, bietet die App an, ihn bei
@@ -1134,6 +1215,7 @@ type Gruppe = { schluessel: string; titel: string; info?: string; dreh?: DrehSta
  *  Die Studio-Einstellungen der Stage kommen mit der Studio-Spiegelung dazu. */
 function artVon(p: PlateStand, d: DrehStand): "Plate" | "On Location" | "Studio" {
   if (p.art === "location") return "On Location";
+  if (p.art === "studio") return "Studio";
   if (d.kurzname.toUpperCase().startsWith("STUDIO")) return "Studio";
   return "Plate";
 }

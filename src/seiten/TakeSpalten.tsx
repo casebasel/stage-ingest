@@ -15,6 +15,8 @@ export type TakeMitWerten = {
   clip: string;
   karte: string | null;
   freigegeben: boolean;
+  /** Studio-Take der Stage: Bewertung und Notiz im Ingest änderbar. */
+  studio?: boolean;
   datei?: string | null;
   csv?: string | null;
   werte?: Record<string, unknown>;
@@ -189,6 +191,8 @@ const KATALOG: Spalte[] = [
 
 // Felder des Plate Assistant, die eine Katalogspalte schon zeigt (erscheinen nicht noch einmal unter „Weitere“).
 const IM_KATALOG = new Set([
+  "take.notiz",
+  "take.studio",
   ...["objektiv", "brennweiteMm", "einrichtung", "neigungGrad", "rollenGrad", "richtung.azimutGrad", "kameraHoeheCm", "abstandCm", "stativ", "gps.lat", "gps.lon"].map(
     (k) => `take.lage.${k}`,
   ),

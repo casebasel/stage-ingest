@@ -1572,6 +1572,20 @@ input[type="checkbox"][role="switch"]:checked::before {
   border-radius: 2px;
   background: var(--panel-2);
 }
+.bewertung-wahl {
+  height: 22px;
+  padding: 0 4px;
+  font-size: 12px;
+}
+.notiz-feld {
+  width: 100%;
+  min-width: 160px;
+  height: 24px;
+  font-size: 12px;
+}
+.notiz-fehler {
+  border-color: var(--rot);
+}
 .ohne-drehort {
   margin-bottom: 16px;
 }
