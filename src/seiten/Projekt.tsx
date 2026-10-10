@@ -288,9 +288,10 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
   const lauf = useLauf();
   const verbunden = konto.verbindung === "verbunden";
   // Das Projekt kommt aus der Kopfleiste; ohne Verbindung aus dem getippten Namen (nur die Karten auf den Zielen).
-  const projekt: ProjektT | null = verbunden
+  // Ohne Netz das gemerkte Projekt (fester Kurzname), sonst der getippte Name.
+  const projekt: ProjektT | null = lauf.paProjekt
     ? lauf.paProjekt
-    : lauf.projektText.trim()
+    : !verbunden && lauf.projektText.trim()
       ? { id: "", name: lauf.projektText.trim(), kurzname: kurz(lauf.projektText), aktiv: true }
       : null;
   const [u, setU] = useState<Uebersicht | null>(null);

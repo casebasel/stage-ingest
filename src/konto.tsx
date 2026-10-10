@@ -105,8 +105,10 @@ function useKontoHalten() {
   const [konto, setKonto] = useState<{ email: string; ingestRecht: boolean } | null>(null);
   const [verbindung, setVerbindung] = useState<Verbindung>("aus");
   const [meldung, setMeldung] = useState<string | null>(null);
-  const [projekte, setProjekte] = useState<Projekt[]>([]);
-  const [drehs, setDrehs] = useState<DrehKurz[]>([]);
+  // Projekte und Drehorte samt festen Kurznamen werden gemerkt: ohne Netz heissen die Ordner trotzdem wie mit Netz
+  // (Systemkarte „Datenfluss“, 10.10.2026; vorher kam der Name aus getipptem Text).
+  const [projekte, setProjekte] = useState<Projekt[]>(() => gemerkt<Projekt[]>("vorrat.projekte", []));
+  const [drehs, setDrehs] = useState<DrehKurz[]>(() => gemerkt<DrehKurz[]>("vorrat.drehs", []));
   const vollstaendig = !!(zugang.adresse.trim() && zugang.anonKey.trim() && zugang.email.trim());
 
   async function laden(z: Zugang = zugang) {
@@ -117,6 +119,8 @@ function useKontoHalten() {
       ]);
       setProjekte(pr);
       setDrehs(dr);
+      merken("vorrat.projekte", pr);
+      merken("vorrat.drehs", dr);
       setVerbindung("verbunden");
       setMeldung(null);
     } catch (e) {
@@ -176,6 +180,8 @@ function useKontoHalten() {
     setKonto(null);
     setProjekte([]);
     setDrehs([]);
+    merken("vorrat.projekte", []);
+    merken("vorrat.drehs", []);
     setVerbindung("aus");
     setMeldung(null);
   }

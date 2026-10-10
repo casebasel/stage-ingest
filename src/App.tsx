@@ -122,7 +122,8 @@ function ProjektWahl() {
   const lauf = useLauf();
   const konto = useKonto();
   const gesperrt = lauf.laeuft ? "Während eine Karte kopiert, bleibt das Projekt gleich" : undefined;
-  if (konto.verbindung !== "verbunden")
+  // Ohne Netz die gemerkten Projekte (fester Kurzname); nur wenn nie eines geladen wurde, freier Text.
+  if (konto.verbindung !== "verbunden" && konto.projekte.length === 0)
     return (
       <label className="kopf-projekt" title={gesperrt}>
         <span className="unsichtbar">Projekt</span>

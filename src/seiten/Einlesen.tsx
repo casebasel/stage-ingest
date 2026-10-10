@@ -658,7 +658,7 @@ function DrehZeile() {
   const konto = useKonto();
   const verbunden = konto.verbindung === "verbunden";
   const passende = drehsVon(konto.drehs, lauf.paProjekt);
-  const ohneProjekt = verbunden ? !lauf.paProjekt : !lauf.projektText.trim();
+  const ohneProjekt = verbunden ? !lauf.paProjekt : !lauf.paProjekt && !lauf.projektText.trim();
 
   return (
     <div className="dreh">
@@ -668,7 +668,8 @@ function DrehZeile() {
       </label>
       <label className="eingabe-gruppe">
         <span>Drehort</span>
-        {verbunden && passende.length > 0 ? (
+        {/* Ohne Netz die gemerkten Drehorte (fester Kurzname = gleicher Ordner wie mit Netz). */}
+        {passende.length > 0 ? (
           <select
             value={lauf.paDreh?.id ?? (lauf.drehName ? "__hand" : "")}
             onChange={(ev) => {
@@ -693,6 +694,7 @@ function DrehZeile() {
         )}
       </label>
       {ohneProjekt && <Status ton="warn">Oben links ein Projekt wählen</Status>}
+      {!verbunden && lauf.paProjekt && <Status ton="leise">Ohne Netz: Projekt und Drehorte vom letzten Abgleich</Status>}
     </div>
   );
 }
