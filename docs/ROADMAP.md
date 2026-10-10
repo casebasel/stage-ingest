@@ -130,6 +130,15 @@ in KAMERAS.md.
   eine ULID (heute legt `plate.rs` `projekt-<kurzname>` an und verlässt sich auf das Zusammenführen gleicher IDs; nach
   der Umstellung braucht es dafür die Eindeutigkeit des Kurznamens am Server). Studio-Slate ist `STUDIO-NN` (Stage).
 
+## Szene an der Einstellung (Entscheid Marlon 10.10.2026, wartet auf Stufe B beim Plate Assistant)
+
+Szene am Projekt (Nummer, INT/EXT, Tag/Nacht, Kurzbeschreibung; Motive später). Haupt-Szene je Einstellung ergibt den
+Slate Szene + Buchstabe (42A, je Szene über den Film, ohne I/O, über alle Arten); weitere Szenen n:m freiwillig. Ohne
+Drehbuch bleibt `KURZNAME-NN`. Pflege überall, **Ingest als Hauptort**: Szenenliste am Projekt, an der Einstellung
+Haupt-Szene und weitere Szenen, auch nachträglich; Seitenleiste „Szene“ nutzt das. Nach dem ersten Take änderbar **mit
+Warnung** („Clips tragen den alten Slate“). Braucht Migration Stufe B und Schreibrecht des Ingest auf `szene`, die
+Verknüpfung und die Planfelder von `plate` (heute im Code gesperrt, erst nach BESITZ öffnen).
+
 ## Filmlogik (Systemkarte 64edac1 … 64185e7, wartet auf die Migrationen des Plate Assistant)
 
 - Projektseite: Motive, Szenen, Drehorte, geplante Plates anlegen und bearbeiten (Schreibrecht wie die Stage, Regel im Code)
