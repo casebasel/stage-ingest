@@ -184,6 +184,7 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
     { id: "d2", name: "Münsterplatz", datum: "2026-10-28", projektId: projekt.id, produktion: "" },
   ],
   plate_soll: () => [],
+  studio_soll: () => [],
   plate_projekt_aendern: () => null,
   clip_zuordnen: () => null,
   plate_drehort_kurznamen: () => ["RHEINUFER", "BRUECKE"],

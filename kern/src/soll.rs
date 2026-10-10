@@ -362,6 +362,12 @@ fn fenster(s: &SollClip) -> Option<(chrono::DateTime<chrono::Utc>, chrono::DateT
     Some((von - chrono::Duration::seconds(UHR_SPIEL_S), bis))
 }
 
+/// Ortsdatum (Europe/Zurich, `JJJJ-MM-TT`) eines Zeitpunkts in RFC 3339, z. B. der Klappe eines Studio-Takes.
+pub fn ortsdatum(zeit: &str) -> Option<String> {
+    let t = chrono::DateTime::parse_from_rfc3339(zeit).ok()?;
+    Some(t.with_timezone(&chrono_tz::Europe::Zurich).format("%Y-%m-%d").to_string())
+}
+
 /// Tageszeit-Timecode der Kamera am Drehtag (Ortszeit Europe/Zurich) → UTC.
 pub fn tc_als_zeit(drehtag: &str, tc: &str, fps: f64) -> Option<chrono::DateTime<chrono::Utc>> {
     use chrono::TimeZone;

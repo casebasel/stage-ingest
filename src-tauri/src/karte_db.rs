@@ -36,7 +36,9 @@ pub struct Clip<'a> {
     pub fps: Option<f64>,
     pub dreh_id: Option<&'a str>,
     pub take_id: Option<&'a str>,
-    /// `info1`/`clipname`/`timecode`/`zeitfenster`/`hand`; leer = zu klären.
+    /// Studio-Take der Stage (`studio_take.id`); höchstens eines von `take_id` und `studio_take_id` (0022).
+    pub studio_take_id: Option<&'a str>,
+    /// `qr`/`info1`/`clipname`/`timecode`/`zeitfenster`/`hand`; leer = zu klären.
     pub zuordnung: &'a str,
     pub aus_clip: Option<Value>,
 }
@@ -158,6 +160,7 @@ pub fn aenderungen(
             "fps": c.fps,
             "dreh_id": c.dreh_id,
             "take_id": c.take_id,
+            "studio_take_id": c.studio_take_id,
             "zuordnung": Some(c.zuordnung).filter(|z| !z.is_empty()),
             "aus_clip": c.aus_clip,
             "geloescht": false,
@@ -248,7 +251,7 @@ mod tests {
     }
 
     #[test]
-    fn karte_vor_clips_und_zu_klaeren_ist_null() {
+    fn karte_vor_clips_studio_und_ohne_take() {
         let clips = [
             Clip {
                 name: "A007C003_261028_R11A",
@@ -257,6 +260,7 @@ mod tests {
                 fps: Some(25.0),
                 dreh_id: Some("dreh-happy_end-rhein"),
                 take_id: Some("T1"),
+                studio_take_id: None,
                 zuordnung: "clipname",
                 aus_clip: Some(json!({"tiltGrad": -2.5, "rollGrad": 0.1, "tiltBereich": 0.2, "rollBereich": 0.1})),
             },
@@ -267,7 +271,8 @@ mod tests {
                 fps: None,
                 dreh_id: Some("dreh-happy_end-rhein"),
                 take_id: None,
-                zuordnung: "",
+                studio_take_id: Some("01ST1"),
+                zuordnung: "qr",
                 aus_clip: None,
             },
             Clip {
@@ -277,6 +282,7 @@ mod tests {
                 fps: None,
                 dreh_id: None,
                 take_id: None,
+                studio_take_id: None,
                 zuordnung: "",
                 aus_clip: None,
             },
@@ -294,8 +300,9 @@ mod tests {
         assert_eq!(l[1]["wert"]["kamera"], "A");
         assert_eq!(l[1]["wert"]["aus_clip"]["tiltGrad"], -2.5);
         assert_eq!(l[2]["wert"]["kamera"], "B");
-        assert!(l[2]["wert"]["zuordnung"].is_null());
-        assert!(l[2]["wert"]["take_id"].is_null());
+        assert!(l[1]["wert"]["studio_take_id"].is_null());
+        assert_eq!((&l[2]["wert"]["studio_take_id"], &l[2]["wert"]["zuordnung"]), (&json!("01ST1"), &json!("qr")));
+        assert!(l[2]["wert"]["take_id"].is_null(), "Studio-Clip: nie take_id");
         // Eindeutige Änderungs-IDs
         assert_eq!(l.iter().map(|a| a["id"].as_str().unwrap()).collect::<Vec<_>>(), ["A1", "A2", "A3"]);
         crate::plate::aenderungen_pruefen(&json!({ "p_aenderungen": l })).unwrap();

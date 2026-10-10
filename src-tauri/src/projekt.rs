@@ -606,6 +606,8 @@ mod tests {
                         take_id: None,
                         zuordnung: String::new(),
                         abweichungen: vec![],
+                        studio: false,
+
                         dreh_id: None,
                     },
                     ClipEintrag {
@@ -616,6 +618,8 @@ mod tests {
                         take_id: Some("T2".into()),
                         zuordnung: "zeitfenster".into(),
                         abweichungen: vec![],
+                        studio: false,
+
                         dreh_id: None,
                     },
                     ClipEintrag {
@@ -626,6 +630,8 @@ mod tests {
                         take_id: None,
                         zuordnung: String::new(),
                         abweichungen: vec![],
+                        studio: false,
+
                         dreh_id: None,
                     },
                 ],

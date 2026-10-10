@@ -1,7 +1,9 @@
 //! QR-Code der Klappe im Bild (Systemkarte „Clip ↔ Take“, stärkste Quelle): Plate Assistant und Stage zeigen die
 //! Take-ID (`PA:`/`ST:` + ULID, QR 25 × 25, Fehlerkorrektur Q) auf der Klappe. Gelesen werden die ersten und letzten
-//! 8 s des Clips (Klappe und Endklappe), je alle 2 s ein Bild, gerendert mit ARRI ART CMD. Je Ende wird aufgehört,
-//! sobald ein Code gefunden ist. Ohne ART CMD oder für Clips, die ART CMD nicht kennt, gibt es keinen QR.
+//! 8 s des Clips (Klappe und Endklappe), gerendert mit ARRI ART CMD. Je Ende wird aufgehört, sobald ein Code gefunden
+//! ist. Die Klappe hängt schon vor REC im Bild (Anfang: wenige Bilder genügen); die Endklappe ist nur gut 2 s im Bild
+//! (der Plate Assistant meldet „QR genügt“ 2 s nach dem Öffnen), deshalb am Ende ab dem letzten Bild rückwärts im
+//! Abstand von 1 s (Hinweis Systemkarte, 10.10.2026). Ohne ART CMD oder für Clips, die ART CMD nicht kennt, kein QR.
 
 use std::path::Path;
 
@@ -10,8 +12,10 @@ use ingest_kern::kennung::{self, Kennung};
 /// Breite der gerenderten Bilder: ein QR mit 25 Modulen braucht einige Pixel je Modul, auch wenn die Klappe klein
 /// im Bild ist.
 const BREITE: u32 = 1920;
-/// Sekunden ab Anfang bzw. vor dem Ende, in denen gesucht wird.
-const STELLEN_S: [f64; 4] = [1.0, 3.0, 5.0, 7.0];
+/// Sekunden ab dem ersten Bild, in denen gesucht wird.
+const ANFANG_S: [f64; 5] = [0.5, 1.5, 3.0, 5.0, 7.0];
+/// Sekunden vor dem letzten Bild (rückwärts), 1 s Abstand über die letzten 8 s.
+const ENDE_S: [f64; 8] = [0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5];
 
 /// Take-IDs in einem Bild.
 pub fn im_bild(bild: &image::DynamicImage) -> Vec<Kennung> {
@@ -37,8 +41,8 @@ pub fn im_bild(bild: &image::DynamicImage) -> Vec<Kennung> {
 fn stellen(bilder: u64, fps: f64) -> (Vec<u64>, Vec<u64>) {
     let letzte = bilder.saturating_sub(1);
     let zu_bild = |s: f64| ((s * fps).round() as u64).min(letzte);
-    let anfang: Vec<u64> = STELLEN_S.iter().map(|s| zu_bild(*s)).collect();
-    let ende: Vec<u64> = STELLEN_S.iter().map(|s| letzte.saturating_sub((s * fps).round() as u64)).collect();
+    let anfang: Vec<u64> = ANFANG_S.iter().map(|s| zu_bild(*s)).collect();
+    let ende: Vec<u64> = ENDE_S.iter().map(|s| letzte.saturating_sub((s * fps).round() as u64)).collect();
     let mut a = anfang.clone();
     a.dedup();
     let mut e: Vec<u64> = ende.into_iter().filter(|b| !anfang.contains(b)).collect();
@@ -128,12 +132,12 @@ mod tests {
     #[test]
     fn stellen_anfang_und_ende() {
         let (a, e) = stellen(25 * 60, 25.0);
-        assert_eq!(a, [25, 75, 125, 175]);
-        assert_eq!(e, [1474, 1424, 1374, 1324]);
+        assert_eq!(a, [13, 38, 75, 125, 175]);
+        assert_eq!(e, [1486, 1461, 1436, 1411, 1386, 1361, 1336, 1311], "ab dem letzten Bild rückwärts, 1 s Abstand");
         // Kurzer Clip (3 s): keine doppelten Bilder.
         let (a, e) = stellen(75, 25.0);
-        assert_eq!(a, [25, 74]);
-        assert_eq!(e, [49, 0]);
+        assert_eq!(a, [13, 38, 74]);
+        assert_eq!(e, [61, 36, 11, 0]);
     }
 
     fn code_breite(text: &str) -> usize {

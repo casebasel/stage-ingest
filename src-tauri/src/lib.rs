@@ -219,22 +219,50 @@ fn karte_in_datenbank(
         .drehs_mit_plan(z, &projekt.id, None)
         .map(|v| zuordnung::take_zu_dreh(&v))
         .unwrap_or_default();
+    // Studio-Takes (Quelle `studio`) gehen nach `clip.studio_take_id`, nie nach `take_id` (Systemkarte, 0022).
+    let studio: std::collections::HashSet<&str> =
+        auftrag.soll.iter().filter(|s| s.quelle == "studio").map(|s| s.take_id.as_str()).collect();
+    // Drehort eines Studio-Takes: der Drehort seiner Einstellung.
+    let studio_dreh: std::collections::HashMap<String, String> = if studio.is_empty() {
+        Default::default()
+    } else {
+        app.state::<Arc<plate::Plate>>()
+            .studio(z, &projekt.id)
+            .map(|v| {
+                v.as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|e| Some((e["dreh_id"].as_str()?.to_owned(), e["studio_take"].as_array()?.clone())))
+                    .flat_map(|(d, ts)| {
+                        ts.into_iter().filter_map(move |t| Some((t["id"].as_str()?.to_owned(), d.clone())))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
     let namen: Vec<String> = clips.iter().map(|c| soll::ohne_endung(&c.pfad).to_owned()).collect();
     let eintraege: Vec<karte_db::Clip> = clips
         .iter()
         .zip(&namen)
         .map(|(c, name)| {
             let (take, art) = take_von.get(name).map(|(t, a)| (Some(t.as_str()), *a)).unwrap_or((None, ""));
+            let take = take.filter(|t| !t.is_empty());
+            let (take, studio_take) = match take {
+                Some(t) if studio.contains(t) => (None, Some(t)),
+                t => (t, None),
+            };
             let a = c.angaben.as_ref();
             karte_db::Clip {
                 name,
                 start_tc: a.and_then(|a| a.start_tc.as_deref()),
                 end_tc: a.and_then(|a| a.end_tc.as_deref()),
                 fps: a.and_then(|a| a.fps),
-                dreh_id: take
-                    .filter(|t| !t.is_empty())
-                    .and_then(|t| take_dreh.get(t).map(String::as_str).or(auftrag.plate_dreh.as_deref())),
-                take_id: take.filter(|t| !t.is_empty()),
+                dreh_id: match studio_take {
+                    Some(t) => studio_dreh.get(t).map(String::as_str),
+                    None => take.and_then(|t| take_dreh.get(t).map(String::as_str).or(auftrag.plate_dreh.as_deref())),
+                },
+                take_id: take,
+                studio_take_id: studio_take,
                 zuordnung: art,
                 aus_clip: bewegung
                     .iter()
@@ -328,11 +356,11 @@ fn karten_nachtragen_jetzt(
                 start_tc: c.start_tc.as_deref(),
                 end_tc: c.end_tc.as_deref(),
                 fps: None,
-                dreh_id: c
-                    .dreh_id
-                    .as_deref()
-                    .or_else(|| c.take_id.as_ref().and_then(|t| take_dreh.get(t)).map(String::as_str)),
-                take_id: c.take_id.as_deref(),
+                dreh_id: c.dreh_id.as_deref().or_else(|| {
+                    c.take_id.as_ref().filter(|_| !c.studio).and_then(|t| take_dreh.get(t)).map(String::as_str)
+                }),
+                take_id: c.take_id.as_deref().filter(|_| !c.studio),
+                studio_take_id: c.take_id.as_deref().filter(|_| c.studio),
                 zuordnung: &c.zuordnung,
                 aus_clip,
             })
@@ -865,7 +893,9 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
             take_von.insert(soll::ohne_endung(p).to_owned(), (s.take_id.clone(), "clipname"));
         }
         for (s, p) in &a.ueber_qr {
-            take_von.insert(soll::ohne_endung(p).to_owned(), (s.take_id.clone(), "qr"));
+            // `qr` erst nach Migration 0029 (Prüfbedingung von 0018 kennt nur info1 …): bis dahin `info1`, beides heisst
+            // „Take-ID aus der Klappe“ (Absprache Plate Assistant, 10.10.2026).
+            take_von.insert(soll::ohne_endung(p).to_owned(), (s.take_id.clone(), "info1"));
         }
         for (s, p) in &a.ueber_kennung {
             take_von.insert(soll::ohne_endung(p).to_owned(), (s.take_id.clone(), "info1"));
@@ -920,6 +950,8 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
                 .map(|c| {
                     let name = soll::ohne_endung(&c.pfad).to_owned();
                     let (take, art) = take_von.get(&name).cloned().unwrap_or_default();
+                    let studio =
+                        auftrag.soll.iter().any(|s| s.quelle == "studio" && !take.is_empty() && s.take_id == take);
                     ClipEintrag {
                         start_tc: c.angaben.as_ref().and_then(|a| a.start_tc.clone()),
                         end_tc: c.angaben.as_ref().and_then(|a| a.end_tc.clone()),
@@ -928,6 +960,7 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
                         pfad: c.pfad.clone(),
                         abweichungen: abweichend.get(&name).cloned().unwrap_or_default(),
                         dreh_id: None, // nur von Hand gesetzt; sonst stünde der Clip nicht mehr unter „Zu klären“
+                        studio,
                         name,
                     }
                 })
@@ -1487,6 +1520,17 @@ async fn plate_soll(
     im_hintergrund(move || p.soll(&zugang, &dreh_id)).await
 }
 
+/// Studio-Takes des Projekts als Soll-Liste (aus `studio_take`, ersetzt die CSV der Stage).
+#[tauri::command]
+async fn studio_soll(
+    plate: State<'_, Arc<plate::Plate>>,
+    zugang: plate::Zugang,
+    projekt_id: String,
+) -> Result<Vec<SollClip>, String> {
+    let p = Arc::clone(&plate);
+    im_hintergrund(move || p.studio(&zugang, &projekt_id).map(|v| plate::studio_soll_aus(&v))).await
+}
+
 #[tauri::command]
 async fn plate_projekt_anlegen(
     plate: State<'_, Arc<plate::Plate>>,
@@ -1847,6 +1891,7 @@ pub fn run() {
             plate_projekte,
             plate_drehs,
             plate_soll,
+            studio_soll,
             plate_projekt_anlegen,
             plate_projekt_aendern,
             kurzname_vorschlag,

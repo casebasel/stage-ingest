@@ -30,7 +30,7 @@ const DREH_FELDER: &[&str] = &["_anlegen", "name", "datum"];
 /// zusammengeführt); ein Clip zusätzlich umhängen („Zu klären“). Projekt, Name und Reel sind nach dem Anlegen fest.
 // `speicherort` ändert sich beim Einsortieren (Systemkarte; änderbar seit 0018, Plate Assistant 09.10.2026).
 const KARTE_FELDER: &[&str] = &["_anlegen", "speicherort"];
-const CLIP_FELDER: &[&str] = &["_anlegen", "take_id", "dreh_id", "zuordnung"];
+const CLIP_FELDER: &[&str] = &["_anlegen", "take_id", "studio_take_id", "dreh_id", "zuordnung"];
 
 /// Prüft alle Änderungen einer Anfrage an `aenderungen_anwenden`, bevor sie das Netz verlassen.
 pub fn aenderungen_pruefen(body: &Value) -> Result<(), String> {
@@ -843,6 +843,54 @@ fn soll_aus(v: &Value, dreh_id: &str) -> Vec<SollClip> {
     aus
 }
 
+/// Studio-Takes der Stage (`einstellung` mit `studio_take`, aus [`Plate::studio`]) als Soll-Liste: Quelle `studio`,
+/// Take-ID = `studio_take.id` (die Klappe zeigt `ST:<id>`), Szene = Name der Einstellung (`STUDIO-NN`). Ersetzt die
+/// CSV der Stage (Entscheid „Datenfluss“). Das Zeitfenster reicht bis zur nächsten Studio-Klappe im Projekt.
+pub fn studio_soll_aus(v: &Value) -> Vec<SollClip> {
+    let gilt = |x: &&Value| x["geloescht"] != true;
+    let einstellungen: Vec<&Value> = v.as_array().into_iter().flatten().filter(gilt).collect();
+    let mut klappen: Vec<chrono::DateTime<chrono::Utc>> = einstellungen
+        .iter()
+        .flat_map(|e| e["studio_take"].as_array().into_iter().flatten().filter(gilt))
+        .filter_map(|t| chrono::DateTime::parse_from_rfc3339(t["start_zeit"].as_str()?).ok().map(|z| z.to_utc()))
+        .collect();
+    klappen.sort();
+    let mut aus = Vec::new();
+    for e in einstellungen {
+        let szene = text(&e["name"]).or_leer(format!("STUDIO-{:02}", e["nummer"].as_i64().unwrap_or(0)));
+        for t in e["studio_take"].as_array().into_iter().flatten().filter(gilt) {
+            let start = text(&t["start_zeit"]);
+            let von = chrono::DateTime::parse_from_rfc3339(&start).ok().map(|z| z.to_utc());
+            aus.push(SollClip {
+                clip: Some(text(&t["clip_name"]))
+                    .filter(|c| !c.is_empty())
+                    .map(|c| ohne_endung(&c).to_uppercase())
+                    .unwrap_or_default(),
+                szene: szene.clone(),
+                take: t["nummer"].as_i64().map(|n| n.to_string()).unwrap_or_default(),
+                start_tc: text(&t["start_tc"]),
+                end_tc: text(&t["end_tc"]),
+                bewertung: match t["bewertung"].as_str() {
+                    Some("circle") => "Favorit",
+                    Some("gut") => "Gut",
+                    Some("schlecht") => "Schlecht",
+                    _ => "",
+                }
+                .into(),
+                quelle: "studio".into(),
+                take_id: text(&t["id"]),
+                fenster_bis: von
+                    .and_then(|v| klappen.iter().find(|k| **k > v))
+                    .map(|k| k.to_rfc3339())
+                    .unwrap_or_default(),
+                drehtag: ingest_kern::soll::ortsdatum(&start).unwrap_or_default(),
+                start_zeit: start,
+            });
+        }
+    }
+    aus
+}
+
 trait OderLeer {
     fn or_leer(self, sonst: String) -> String;
 }
@@ -914,6 +962,29 @@ mod tests {
             "plate": [{ "id": "01PX", "nummer": 1, "geloescht": false,
                 "take": [{ "id": "01TX", "nummer": 1, "start_zeit": "2026-10-28T10:30:00+00:00", "geloescht": false }] }]
         }])
+    }
+
+    #[test]
+    fn studio_takes_werden_soll_liste() {
+        let v = json!([
+            { "id": "E1", "nummer": 3, "name": "STUDIO-03", "geloescht": false, "studio_take": [
+                { "id": "01ST1", "nummer": 1, "clip_name": "a007c001_261010_r11a.mov", "bewertung": "gut",
+                  "start_zeit": "2026-10-10T12:00:00.000Z", "start_tc": "14:00:00:00", "end_tc": "14:00:20:00" },
+                { "id": "01ST2", "nummer": 2, "clip_name": null, "start_zeit": "2026-10-10T22:30:00.000Z", "geloescht": false },
+                { "id": "01ST9", "nummer": 9, "geloescht": true }
+            ]},
+            { "id": "E0", "nummer": 0, "name": "STUDIO-00", "geloescht": true, "studio_take": [{ "id": "01X", "nummer": 1 }] }
+        ]);
+        let s = studio_soll_aus(&v);
+        assert_eq!(s.len(), 2, "gelöschte Takes und Einstellungen fallen weg");
+        assert_eq!(
+            (s[0].clip.as_str(), s[0].szene.as_str(), s[0].take.as_str()),
+            ("A007C001_261010_R11A", "STUDIO-03", "1")
+        );
+        assert_eq!((s[0].quelle.as_str(), s[0].take_id.as_str(), s[0].bewertung.as_str()), ("studio", "01ST1", "Gut"));
+        assert_eq!(s[0].fenster_bis, "2026-10-10T22:30:00+00:00");
+        assert_eq!(s[1].drehtag, "2026-10-11", "Ortszeit Zürich: 00:30 am Folgetag");
+        assert!(s[1].clip.is_empty() && s[1].fenster_bis.is_empty());
     }
 
     #[test]

@@ -56,6 +56,10 @@ pub struct ClipEintrag {
     /// Abweichungen von den Kameraeinstellungen des Projekts (nur Warnung), z. B. „25 fps statt 24 fps“.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub abweichungen: Vec<String>,
+
+    /// `take_id` ist ein Studio-Take der Stage (`studio_take.id`) → in der Datenbank `clip.studio_take_id`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub studio: bool,
 }
 
 /// Eine gefundene Karte mit Ort.
@@ -163,6 +167,8 @@ mod tests {
                 take_id: Some("01T1".into()),
                 zuordnung: "zeitfenster".into(),
                 abweichungen: vec![],
+                studio: false,
+
                 dreh_id: None,
             }],
         };

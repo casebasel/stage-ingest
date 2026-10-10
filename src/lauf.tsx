@@ -25,7 +25,7 @@ import {
   type SollClip,
 } from "./kern";
 import { gemerkt, merken, useEinstellungen } from "./einstellungen";
-import { drehsVon, plateSoll, useKonto, type DrehKurz, type Projekt } from "./konto";
+import { drehsVon, plateSoll, studioSoll, useKonto, type DrehKurz, type Projekt } from "./konto";
 
 export type Phase = "bereit" | "kopieren" | "pruefen" | "nachlesen" | "nachpruefen" | "fertig" | "fehler";
 
@@ -337,13 +337,23 @@ function useLaufHalten() {
           setSoll({ liste: sollStage, fehler: `Plate Assistant: ${err}`, zeit: Date.now() });
         }
       }
+      // Studio: Takes aus `studio_take` (Entscheid „Datenfluss“). Gibt es sie, ersetzen sie die CSV der Stage, die
+      // dieselben Takes ohne ID trägt; sonst bleibt die CSV der Rückfall.
+      let sollStudio: SollClip[] = [];
+      if (paProjekt) {
+        try {
+          sollStudio = await studioSoll(konto.zugang, paProjekt.id);
+        } catch {
+          sollStudio = [];
+        }
+      }
       const r = await karteEinlesen({
         quelle: quelle.pfad,
         ziele,
         mitMd5: e.mitMd5,
         mindestKopien: e.mindestKopien,
         zweimalLesen: e.zweimalLesen,
-        soll: [...sollStage, ...sollPlate],
+        soll: [...(sollStudio.length ? sollStudio : sollStage), ...sollPlate],
         dreh,
         artCmd: e.artCmd.trim() || null,
         stageAdresse: e.stageAdresse.trim() || null,

@@ -233,3 +233,5 @@ export const drehsVon = (drehs: DrehKurz[], projekt: Projekt | null) =>
   projekt ? drehs.filter((d) => d.projektId === projekt.id || (!d.projektId && d.produktion === projekt.name)) : drehs;
 
 export const plateSoll = (zugang: Zugang, drehId: string) => invoke<SollClip[]>("plate_soll", { zugang, drehId });
+/** Studio-Takes des Projekts (`studio_take`), ersetzt die CSV der Stage. */
+export const studioSoll = (zugang: Zugang, projektId: string) => invoke<SollClip[]>("studio_soll", { zugang, projektId });
