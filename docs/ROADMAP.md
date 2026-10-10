@@ -139,7 +139,13 @@ beim Ingest. ~~Mehrdeutiges in beide Richtungen nach „Zu klären“; Zeitfenst
 30 min~~ (c139668); ~~Info 1 `PA:`/`ST:` als erste Wahl~~ (gebaut, Ort im Clip am Mini-Test bestätigen); ~~QR der Klappe~~ (gebaut, an
 echter Klappe prüfen); ~~im Studio `studio_take` statt CSV, `clip.studio_take_id`~~ (gebaut; die CSV der Stage nur noch als Rückfall ohne
 Konto); offen: `qr` in `clip.zuordnung` nach Migration 0029 (bis dahin `info1`); `ingest.karte` fällt weg, sobald die Stage `clip` liest (die CSV bleibt für
-Resolve); HDRI-EXR mit Prüfsumme aufs NAS, dann `linked`, dann Rohdaten löschen; eine Pfadregel relativ zum Projektordner.
+Resolve); HDRI aufs NAS und Pfadregel: abgestimmt (Systemkarte 7f256b7, „Pfade und HDRI“). Pfade relativ zum Drehordner
+(`<ordner_datum>_<Kurzname>`, über `dreh_id`) bzw. ohne Drehort zum Projektordner, Ablage `nas` | `platte:<Kennung>`;
+`karte.ordner_datum`/`karte.ablage` und `qr` kommen mit 0029 (baut der Plate Assistant auf Marlons Wort; erst nach
+Bestätigung von aussen schreiben). HDRI: EXR, `_ki.exr`, Vorschau und `roh/` mit ASC MHL nach `06_HDRI/<hdri_id>/`,
+Rohdaten im Bucket erst löschen bei `projekt.kopien` geprüften Kopien, `linked` und Bericht ok; `ergebnis.jpg` und
+`vorschau.jpg` im Bucket nie löschen, `vorschau_speicher` unverändert, `gesichert: {ablage, pfad, kopien, am}` erst nach
+erfüllter Löschbedingung. Auf Ada nur ohne nDisplay (lokale Prüfung).
 
 ## Szene an der Einstellung (Entscheid Marlon 10.10.2026, wartet auf Stufe B beim Plate Assistant)
 
