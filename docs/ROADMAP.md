@@ -130,6 +130,15 @@ in KAMERAS.md.
   eine ULID (heute legt `plate.rs` `projekt-<kurzname>` an und verlässt sich auf das Zusammenführen gleicher IDs; nach
   der Umstellung braucht es dafür die Eindeutigkeit des Kurznamens am Server). Studio-Slate ist `STUDIO-NN` (Stage).
 
+## Datenfluss (Entscheid Marlon 10.10.2026, Systemkarte a4aac00 / 15df122)
+
+Vor dem Plate-Dreh nur Robustheit, gebaut in 0.1.30: Nachträge statt verlorener Fehler nach dem Bericht, ohne Netz
+gemerkte Projekte/Drehorte (fester Kurzname), Nachtragen in die Datenbank aus `_ingest.json`, Einsortieren auf jeder
+Platte. **Ab November:** letztes Wort zur Zuordnung Clip ↔ Take beim Ingest, draussen und im Studio (QR und Info 1
+`PA:`/`ST:`, im Studio `studio_take` statt CSV, `clip.studio_take_id` schreiben; dann fällt `ingest.karte` weg, die CSV
+bleibt für Resolve); Zeitfenster nur im Projekt und am Drehtag ± 1; Mehrdeutiges nach „Zu klären“ statt an den letzten
+Take; HDRI-EXR mit Prüfsumme aufs NAS, dann `linked`, dann Rohdaten löschen; eine Pfadregel relativ zum Projektordner.
+
 ## Szene an der Einstellung (Entscheid Marlon 10.10.2026, wartet auf Stufe B beim Plate Assistant)
 
 Szene am Projekt (Nummer, INT/EXT, Tag/Nacht, Kurzbeschreibung; Motive später). Haupt-Szene je Einstellung ergibt den
