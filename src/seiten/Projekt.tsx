@@ -398,7 +398,12 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
               />
             )}
             {auswahl.art === "karten" && (
-              <KartenListe karten={u.karten} einsortieren={u.einsortieren ?? []} neuLaden={() => projekt && laden(projekt)} />
+              <KartenListe
+                karten={u.karten}
+                einsortieren={u.einsortieren ?? []}
+                kurzname={u.projekt.kurzname}
+                neuLaden={() => projekt && laden(projekt)}
+              />
             )}
             {auswahl.art === "dreh" &&
               (() => {
@@ -511,13 +516,24 @@ function AlleTakes({
   );
 }
 
-function KartenListe({ karten, einsortieren, neuLaden }: { karten: Karte[]; einsortieren: Einsortierbar[]; neuLaden: () => void }) {
+function KartenListe({
+  karten,
+  einsortieren,
+  kurzname,
+  neuLaden,
+}: {
+  karten: Karte[];
+  einsortieren: Einsortierbar[];
+  kurzname: string;
+  neuLaden: () => void;
+}) {
   return (
     <>
       <div className="detail-kopf">
         <h2>Eingelesene Karten</h2>
       </div>
       {einsortieren.length > 0 && <OhneDrehort liste={einsortieren} neuLaden={neuLaden} />}
+      <ZurSeiteGelegt kurzname={kurzname} />
       {karten.length ? (
         <table className="tabelle">
           <thead>
@@ -550,6 +566,85 @@ function KartenListe({ karten, einsortieren, neuLaden }: { karten: Karte[]; eins
       )}
     </>
   );
+}
+
+type ZurSeite = { pfad: string; karte: string; drehordner: string; bytes: number; dateien: number; freigegeben: boolean; kopien: number };
+
+/** Zur Seite gelegte Kartenordner (…_ALT_…): in den Papierkorb, sobald die Karte freigegeben ist. So muss nie jemand im
+ *  Finder Kameramaterial löschen (Marlon, 08.10.2026). */
+function ZurSeiteGelegt({ kurzname }: { kurzname: string }) {
+  const e = useEinstellungen();
+  const lauf = useLauf();
+  const [liste, setListe] = useState<ZurSeite[]>([]);
+  const [stand, setStand] = useState<Record<string, { ton: Ton; text: string }>>({});
+  const [zaehler, setZaehler] = useState(0);
+  useEffect(() => {
+    let aus = false;
+    invoke<ZurSeite[]>("zur_seite_liste", { basis: e.ziele, kurzname })
+      .then((l) => !aus && setListe(l))
+      .catch(() => {});
+    return () => {
+      aus = true;
+    };
+  }, [kurzname, e.ziele.join("|"), zaehler]);
+  if (!liste.length) return null;
+  async function wegwerfen(z: ZurSeite) {
+    const ja = await ask(
+      `${z.pfad}\n\n${z.dateien} Dateien, ${bytesKurz(z.bytes)}. Der Ordner kommt in den Papierkorb des Systems (dort noch wiederherstellbar). Die Karte ${z.karte} ist mit ${z.kopien} geprüften Kopien freigegeben.`,
+      { title: "Zur Seite gelegten Ordner wegwerfen", kind: "warning", okLabel: "In den Papierkorb", cancelLabel: "Abbrechen" },
+    );
+    if (!ja) return;
+    try {
+      await invoke("zur_seite_wegwerfen", { pfad: z.pfad });
+      setStand((s) => ({ ...s, [z.pfad]: { ton: "ok", text: "Im Papierkorb" } }));
+      setZaehler((n) => n + 1);
+    } catch (err) {
+      setStand((s) => ({ ...s, [z.pfad]: { ton: "fehler", text: String(err) } }));
+    }
+  }
+  return (
+    <div className="ohne-drehort">
+      <h3 className="detail-titel">Zur Seite gelegt ({liste.length})</h3>
+      <table className="tabelle">
+        <thead>
+          <tr>
+            <th>Ordner</th>
+            <th>Drehordner</th>
+            <th className="rechts">Grösse</th>
+            <th>Karte</th>
+          </tr>
+        </thead>
+        <tbody>
+          {liste.map((z) => (
+            <tr key={z.pfad}>
+              <td className="zahl" title={z.pfad}>
+                {z.pfad.split(/[\\/]/).pop()}
+              </td>
+              <td className="zahl">{z.drehordner}</td>
+              <td className="rechts zahl">{bytesKurz(z.bytes)}</td>
+              <td>
+                {stand[z.pfad] ? (
+                  <Status ton={stand[z.pfad].ton}>{stand[z.pfad].text}</Status>
+                ) : z.freigegeben ? (
+                  <button className="knopf knopf-klein" disabled={lauf.laeuft} onClick={() => wegwerfen(z)}>
+                    In den Papierkorb
+                  </button>
+                ) : (
+                  <Status ton="leise">Bleibt, bis {z.karte} freigegeben ist</Status>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function bytesKurz(n: number): string {
+  if (n >= 1e9) return `${(n / 1e9).toFixed(1).replace(".", ",")} GB`;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1).replace(".", ",")} MB`;
+  return `${Math.max(1, Math.round(n / 1e3))} kB`;
 }
 
 /** Karten unter „<Datum>_OHNE_DREHORT“: einsortieren, sobald alle Clips einem Drehort gehören (Systemkarte). */

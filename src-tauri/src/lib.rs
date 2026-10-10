@@ -1147,6 +1147,32 @@ async fn karte_einsortieren(
     ergebnis
 }
 
+/// Zur Seite gelegte Kartenordner (`…_ALT_…`) des Projekts auf allen Basen.
+#[tauri::command]
+async fn zur_seite_liste(
+    basis: Vec<PathBuf>,
+    kurzname: String,
+) -> Result<Vec<ingest_kern::zielstand::ZurSeite>, String> {
+    im_hintergrund(move || {
+        Ok(basis.iter().flat_map(|b| ingest_kern::zielstand::zur_seite_gelegte(b, &kurzname)).collect())
+    })
+    .await
+}
+
+/// Legt einen zur Seite gelegten Kartenordner in den Papierkorb des Systems (nicht endgültig löschen), nur wenn die
+/// Karte freigegeben ist, und nie während eines Kopiervorgangs (Marlon: nie im Finder löschen müssen).
+#[tauri::command]
+async fn zur_seite_wegwerfen(laufend: State<'_, Laufend>, pfad: PathBuf) -> Result<(), String> {
+    if laufend.aktiv.load(Ordering::SeqCst) {
+        return Err("Während eines Vorgangs wird nichts weggeworfen.".into());
+    }
+    im_hintergrund(move || {
+        ingest_kern::zielstand::wegwerfen_erlaubt(&pfad)?;
+        trash::delete(&pfad).map_err(|e| format!("Nicht in den Papierkorb gelegt: {e}"))
+    })
+    .await
+}
+
 /// Prüft eine bestehende Kopie gegen ihr ASC MHL (vollständig, ohne Cache).
 #[tauri::command]
 async fn ziel_nachpruefen(
@@ -1634,6 +1660,8 @@ pub fn run() {
             clip_vorschaubilder,
             karte_wiedererkennen,
             karte_einsortieren,
+            zur_seite_liste,
+            zur_seite_wegwerfen,
             artcmd_laden,
             art_viewer,
             im_art_viewer,
