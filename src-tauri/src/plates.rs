@@ -24,6 +24,13 @@ fn text(v: &Value) -> String {
 }
 
 /// Ordnername einer Plate: `<Slate>_<Name>`, ohne Slate `P<Nummer>_<Name>`.
+/// Nur echte Plates kommen nach `02_PLATES` (Marlon 10.10.2026: Einstellung ist der Oberbegriff, Arten Plate,
+/// On Location, Studio). `plate.art` = 'location' ist ein Dreh mit Schauspielern draussen: seine Karten liegen wie
+/// jede Karte in `01_KAMERA`, ohne Plate-Ordner. Fehlt das Feld (alte Zeilen), gilt 'plate'.
+pub fn ist_plate(p: &Value) -> bool {
+    p["art"].as_str().is_none_or(|a| a.is_empty() || a == "plate")
+}
+
 pub fn plate_ordner(p: &Value) -> String {
     let slate = format!("{}{}", text(&p["szene"]), text(&p["buchstabe"]));
     let kopf = if slate.is_empty() { format!("P{:03}", p["nummer"].as_i64().unwrap_or(0)) } else { slate };
@@ -98,6 +105,7 @@ pub fn ablegen(plate: &Plate, z: &Zugang, dreh_id: &str, drehordner: &[PathBuf])
         .filter(gilt)
         .flat_map(|d| d["plate"].as_array().into_iter().flatten())
         .filter(gilt)
+        .filter(|p| ist_plate(p))
     {
         let name = plate_ordner(p);
         let inhalt = serde_json::to_vec_pretty(&plate_json(p, &karten)).unwrap_or_default();
@@ -150,6 +158,13 @@ fn vorhanden(p: &Path) -> bool {
 mod tests {
     use super::*;
     use ingest_kern::uebersicht::ClipEintrag;
+
+    #[test]
+    fn nur_plates_kommen_nach_02_plates() {
+        assert!(ist_plate(&serde_json::json!({"nummer": 1})), "ohne Feld: Plate");
+        assert!(ist_plate(&serde_json::json!({"art": "plate"})));
+        assert!(!ist_plate(&serde_json::json!({"art": "location"})));
+    }
 
     #[test]
     fn plate_ordner_und_json() {
