@@ -267,19 +267,28 @@ impl Plate {
         Ok(drehs_aus(&v))
     }
 
-    /// Takes eines Drehorts als Soll-Liste (Gelöschtes auf allen Ebenen ausgefiltert). Gelesen werden alle
-    /// Drehorte desselben Tages: das Zeitfenster eines Takes reicht bis zur nächsten Klappe des Tages, auch an
-    /// einem anderen Drehort (die Kamera zählt den ganzen Tag).
+    /// Takes eines Drehorts als Soll-Liste (Gelöschtes auf allen Ebenen ausgefiltert). Gelesen werden die Drehorte
+    /// desselben Projekts am Drehtag ± 1 (Entscheid „Datenfluss“, 10.10.2026): das Zeitfenster eines Takes reicht bis
+    /// zur nächsten Klappe, auch an einem anderen Drehort (die Kamera zählt den ganzen Tag), aber nie bis zu einer
+    /// Klappe eines anderen Projekts. Ohne Projekt am Drehort (alte Daten): wie früher alle Drehorte des Tages.
     pub fn soll(&self, z: &Zugang, dreh_id: &str) -> Result<Vec<SollClip>, String> {
-        let kopf = self.lesen(z, &format!("dreh?id=eq.{}&select=datum", url_teil(dreh_id)))?;
+        let kopf = self
+            .lesen(z, &format!("dreh?id=eq.{}&select=datum,projekt_id", url_teil(dreh_id)))
+            .or_else(|_| self.lesen(z, &format!("dreh?id=eq.{}&select=datum", url_teil(dreh_id))))?;
         let datum = kopf[0]["datum"].as_str().ok_or("Drehort nicht gefunden")?.to_owned();
-        let v = self.lesen(
-            z,
-            &format!(
-                "dreh?datum=eq.{}&select=id,datum,geloescht,plate(id,nummer,name,szene,buchstabe,geloescht,take(*))",
-                url_teil(&datum)
-            ),
-        )?;
+        let auswahl = "select=id,datum,geloescht,plate(id,nummer,name,szene,buchstabe,geloescht,take(*))";
+        let v = match (kopf[0]["projekt_id"].as_str(), chrono::NaiveDate::parse_from_str(&datum, "%Y-%m-%d")) {
+            (Some(projekt), Ok(tag)) => self.lesen(
+                z,
+                &format!(
+                    "dreh?projekt_id=eq.{}&datum=gte.{}&datum=lte.{}&{auswahl}",
+                    url_teil(projekt),
+                    tag.pred_opt().unwrap_or(tag),
+                    tag.succ_opt().unwrap_or(tag)
+                ),
+            )?,
+            _ => self.lesen(z, &format!("dreh?datum=eq.{}&{auswahl}", url_teil(&datum)))?,
+        };
         Ok(soll_aus(&v, dreh_id))
     }
 

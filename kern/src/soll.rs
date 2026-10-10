@@ -28,8 +28,8 @@ pub struct SollClip {
     /// Take-ID der Quelle (Plate Assistant: ULID), für Rückmeldungen; leer bei der Stage-CSV.
     #[serde(default)]
     pub take_id: String,
-    /// Zeitfenster (Plate Assistant): Tipp auf „Klappe“ (ISO, UTC) bis zur nächsten Klappe desselben Tages
-    /// über alle Drehorte (leer = offen). Der Clip beginnt in diesem Fenster.
+    /// Zeitfenster (Plate Assistant): Tipp auf „Klappe“ (ISO, UTC) bis zur nächsten Klappe im Projekt am Drehtag
+    /// ± 1 über alle Drehorte (leer = offen), höchstens 30 min. Der Clip beginnt in diesem Fenster.
     #[serde(default)]
     pub start_zeit: String,
     #[serde(default)]
@@ -41,7 +41,7 @@ pub struct SollClip {
 
 /// Spielraum zwischen iPhone-Uhr und Kamera-Timecode (laut Plate Assistant „um Sekunden“).
 const UHR_SPIEL_S: i64 = 20;
-/// Ohne nächste Klappe gilt das Fenster so lange.
+/// Längstes Fenster einer Klappe (auch ohne nächste Klappe).
 const FENSTER_OFFEN_S: i64 = 30 * 60;
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -140,6 +140,7 @@ pub fn abgleichen(kopie: &Kopie, soll: &[SollClip], clips: &[crate::ale::ClipZei
             Some((&c.pfad, (tc_bilder(a.start_tc.as_deref()?, fps)?, tc_bilder(a.end_tc.as_deref()?, fps)?), fps))
         })
         .collect();
+    let mut vorschlaege = Vec::new();
     for s in soll.iter().filter(|s| s.clip.trim().is_empty()) {
         let mut beste: Vec<(&String, i64)> = Vec::new();
         for (pfad, bereich, fps) in &frei {
@@ -150,16 +151,9 @@ pub fn abgleichen(kopie: &Kopie, soll: &[SollClip], clips: &[crate::ale::ClipZei
             }
         }
         let max = beste.iter().map(|b| b.1).max();
-        let spitze: Vec<&String> = beste.iter().filter(|b| Some(b.1) == max).map(|b| b.0).collect();
-        match spitze[..] {
-            [] => {}
-            [einer] => {
-                bekannt.insert(ohne_endung(einer).to_owned());
-                a.ueber_timecode.push((s.clone(), einer.clone()));
-            }
-            _ => a.mehrdeutig.push((s.clone(), spitze.into_iter().cloned().collect())),
-        }
+        vorschlaege.push((s.clone(), beste.iter().filter(|b| Some(b.1) == max).map(|b| b.0.clone()).collect()));
     }
+    verteilen(vorschlaege, &mut bekannt, &mut a.ueber_timecode, &mut a.mehrdeutig);
 
     // Letzter Rückfall (Plate Assistant): Zeitfenster der Klappe. Der Timecode der Kamera ist Tageszeit in
     // Ortszeit (Europe/Zurich), die Klappenzeit UTC vom iPhone.
@@ -169,12 +163,13 @@ pub fn abgleichen(kopie: &Kopie, soll: &[SollClip], clips: &[crate::ale::ClipZei
         .map(|(s, _)| s.take_id.clone())
         .chain(a.mehrdeutig.iter().map(|(s, _)| s.take_id.clone()))
         .collect();
+    let mut vorschlaege = Vec::new();
     for s in soll.iter().filter(|s| s.clip.trim().is_empty() && !s.start_zeit.is_empty()) {
         if !s.take_id.is_empty() && zugeordnet.contains(&s.take_id) {
             continue;
         }
         let Some((von, bis)) = fenster(s) else { continue };
-        let treffer: Vec<&String> = clips
+        let treffer: Vec<String> = clips
             .iter()
             .filter(|c| !bekannt.contains(ohne_endung(&c.pfad)))
             .filter(|c| {
@@ -186,20 +181,46 @@ pub fn abgleichen(kopie: &Kopie, soll: &[SollClip], clips: &[crate::ale::ClipZei
                     .or_else(|| start_aus_dateizeit(kopie, c))
                     .is_some_and(|t| t >= von && t < bis)
             })
-            .map(|c| &c.pfad)
+            .map(|c| c.pfad.clone())
             .collect();
-        match treffer[..] {
-            [] => {}
-            [einer] => {
-                bekannt.insert(ohne_endung(einer).to_owned());
-                a.ueber_zeitfenster.push((s.clone(), einer.clone()));
-            }
-            _ => a.mehrdeutig.push((s.clone(), treffer.into_iter().cloned().collect())),
-        }
+        vorschlaege.push((s.clone(), treffer));
     }
+    verteilen(vorschlaege, &mut bekannt, &mut a.ueber_zeitfenster, &mut a.mehrdeutig);
 
     a.unerwartet = auf_karte.into_iter().filter(|(n, _)| !bekannt.contains(n)).map(|(_, p)| p).collect();
     a
+}
+
+/// Ordnet zu, was eindeutig ist, in beide Richtungen: ein Take mit genau einem Kandidaten, und dieser Clip ist von
+/// keinem anderen Take beansprucht. Sonst kommen alle Beteiligten nach „Zu klären“, statt still beim ersten oder
+/// letzten Take zu landen (Entscheid „Datenfluss“, 10.10.2026). Etwa ein Clip, der wegen des Uhren-Spielraums in die
+/// Fenster zweier Klappen fällt.
+fn verteilen(
+    vorschlaege: Vec<(SollClip, Vec<String>)>,
+    bekannt: &mut BTreeSet<String>,
+    eindeutig: &mut Vec<(SollClip, String)>,
+    mehrdeutig: &mut Vec<(SollClip, Vec<String>)>,
+) {
+    let mut beansprucht: BTreeMap<String, usize> = BTreeMap::new();
+    for p in vorschlaege.iter().flat_map(|(_, k)| k) {
+        *beansprucht.entry(p.clone()).or_default() += 1;
+    }
+    for (s, kandidaten) in vorschlaege {
+        match &kandidaten[..] {
+            [] => {}
+            [einer] if beansprucht[einer] == 1 => {
+                bekannt.insert(ohne_endung(einer).to_owned());
+                eindeutig.push((s, einer.clone()));
+            }
+            _ => mehrdeutig.push((s, kandidaten)),
+        }
+    }
+    // Umstrittene Clips gehören keinem Take; sie stehen nicht zusätzlich unter „unerwartet“.
+    for (p, n) in beansprucht {
+        if n > 1 {
+            bekannt.insert(ohne_endung(&p).to_owned());
+        }
+    }
 }
 
 /// Beginn eines Clips ohne Timecode aus der Dateizeit (die Kamera schreibt die Datei zum Ende der Aufnahme fertig).
@@ -209,12 +230,14 @@ fn start_aus_dateizeit(kopie: &Kopie, c: &crate::ale::ClipZeile) -> Option<chron
     Some(ende - chrono::Duration::milliseconds((dauer * 1000.0) as i64))
 }
 
-/// Fenster eines Takes in UTC: Klappe minus Spielraum bis nächste Klappe (oder 30 min).
+/// Fenster eines Takes in UTC: Klappe minus Spielraum bis zur nächsten Klappe, höchstens 30 min. Der Clip beginnt
+/// kurz nach der Klappe; ohne Obergrenze reichte das Fenster des letzten Takes bis zur ersten Klappe des Folgetags.
 fn fenster(s: &SollClip) -> Option<(chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>)> {
     let von = chrono::DateTime::parse_from_rfc3339(&s.start_zeit).ok()?.to_utc();
+    let laengstens = von + chrono::Duration::seconds(FENSTER_OFFEN_S);
     let bis = chrono::DateTime::parse_from_rfc3339(&s.fenster_bis)
-        .map(|b| b.to_utc())
-        .unwrap_or(von + chrono::Duration::seconds(FENSTER_OFFEN_S));
+        .map(|b| b.to_utc().min(laengstens))
+        .unwrap_or(laengstens);
     Some((von - chrono::Duration::seconds(UHR_SPIEL_S), bis))
 }
 
@@ -408,6 +431,66 @@ mod timecode_tests {
         let a = abgleichen(&k, &[soll("00:00:01:00", "00:00:05:00")], &clips);
         assert!(a.ueber_timecode.is_empty());
         assert_eq!(a.mehrdeutig.len(), 1);
+    }
+
+    #[test]
+    fn ein_clip_fuer_zwei_takes_ist_mehrdeutig() {
+        // Zwei Takes überlappen denselben Clip (Clip 2 ohne passenden Take): keiner bekommt ihn still.
+        let k = kopie(&["A001C001_261028_R132.mov", "A001C002_261028_R132.mov"]);
+        let clips = [
+            zeile("A001C001_261028_R132.mov", "10:00:00:00", "10:00:10:00"),
+            zeile("A001C002_261028_R132.mov", "11:00:00:00", "11:00:10:00"),
+        ];
+        let a = abgleichen(&k, &[soll("10:00:01:00", "10:00:04:00"), soll("10:00:05:00", "10:00:09:00")], &clips);
+        assert!(a.ueber_timecode.is_empty());
+        assert_eq!(a.mehrdeutig.len(), 2);
+        assert_eq!(a.unerwartet, ["A001C002_261028_R132.mov"], "der umstrittene Clip steht unter „mehrdeutig“");
+    }
+
+    #[test]
+    fn clip_im_uhrenspielraum_zweier_klappen_ist_mehrdeutig() {
+        // Clip beginnt 09:49:50 UTC: nach Klappe 1 (09:44:55), aber innerhalb der 20 s vor Klappe 2 (09:50:00).
+        // Vorher bekam ihn Take 1 still; jetzt kommen beide Takes nach „Zu klären“.
+        let k = kopie(&["A001C003_261028_R1AB.mov"]);
+        let clips = [zeile("A001C003_261028_R1AB.mov", "10:49:50:00", "10:50:30:00")];
+        let take = |id: &str, von: &str, bis: &str| SollClip {
+            take_id: id.into(),
+            start_zeit: von.into(),
+            fenster_bis: bis.into(),
+            drehtag: "2026-10-28".into(),
+            start_tc: String::new(),
+            end_tc: String::new(),
+            ..soll("", "")
+        };
+        let a = abgleichen(
+            &k,
+            &[
+                take("T1", "2026-10-28T09:44:55+00:00", "2026-10-28T09:50:00+00:00"),
+                take("T2", "2026-10-28T09:50:00+00:00", ""),
+            ],
+            &clips,
+        );
+        assert!(a.ueber_zeitfenster.is_empty());
+        let ids: Vec<&str> = a.mehrdeutig.iter().map(|(s, _)| s.take_id.as_str()).collect();
+        assert_eq!(ids, ["T1", "T2"]);
+        assert!(a.unerwartet.is_empty());
+    }
+
+    #[test]
+    fn fenster_hoechstens_dreissig_minuten() {
+        // Letzte Klappe des Tages 16:00 UTC, nächste erst am Folgetag: ein Clip zwei Stunden später gehört nicht dazu.
+        let k = kopie(&["A001C009_261028_R1AB.mov"]);
+        let clips = [zeile("A001C009_261028_R1AB.mov", "19:00:00:00", "19:01:00:00")];
+        let s = SollClip {
+            take_id: "T9".into(),
+            start_zeit: "2026-10-28T16:00:00+00:00".into(),
+            fenster_bis: "2026-10-29T07:30:00+00:00".into(),
+            drehtag: "2026-10-28".into(),
+            ..soll("", "")
+        };
+        let a = abgleichen(&k, &[s], &clips);
+        assert!(a.ueber_zeitfenster.is_empty());
+        assert_eq!(a.unerwartet, ["A001C009_261028_R1AB.mov"]);
     }
 
     #[test]
