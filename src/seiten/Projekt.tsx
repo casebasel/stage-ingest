@@ -61,6 +61,8 @@ type Uebersicht = {
   unlesbar: string[];
   hinweis: string | null;
   einsortieren: Einsortierbar[];
+  /** Zusammenfassungen (alle Kopien) von Karten, die noch nicht in der Datenbank stehen. */
+  ohneDatenbank?: string[];
 };
 type Einsortierbar = {
   karte: string;
@@ -305,11 +307,31 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
   const [drehortNeu, setDrehortNeu] = useState(false);
   const aktuell = konto.projekte.find((p) => p.id === projekt?.id) ?? projekt;
 
+  const [nachgetragen, setNachgetragen] = useState<{ ton: Ton; text: string } | null>(null);
   async function laden(p: ProjektT) {
     setLaedt(true);
     setFehler(null);
     try {
-      setU(await invoke<Uebersicht>("projekt_uebersicht", { zugang: verbunden ? konto.zugang : null, projekt: p, basis: e.ziele }));
+      const neu = await invoke<Uebersicht>("projekt_uebersicht", { zugang: verbunden ? konto.zugang : null, projekt: p, basis: e.ziele });
+      setU(neu);
+      // Ohne Netz eingelesene Karten in die gemeinsame Datenbank nachtragen, sobald wieder Verbindung ist.
+      if (verbunden && p.id && (neu.ohneDatenbank?.length ?? 0) > 0 && !lauf.laeuft) {
+        invoke<{ karte: string; ergebnis: { Ok: string } | { Err: string } }[]>("karten_nachtragen", {
+          zugang: konto.zugang,
+          projekt: { id: p.id, kurzname: p.kurzname },
+          dateien: neu.ohneDatenbank,
+        })
+          .then((r) => {
+            const fehler = r.filter((x) => "Err" in x.ergebnis);
+            if (!r.length) return;
+            setNachgetragen(
+              fehler.length
+                ? { ton: "warn", text: `Nicht in die Datenbank nachgetragen: ${fehler.map((x) => `${x.karte} (${"Err" in x.ergebnis ? x.ergebnis.Err : ""})`).join("; ")}` }
+                : { ton: "ok", text: `In die Datenbank nachgetragen: ${r.map((x) => x.karte).join(", ")}` },
+            );
+          })
+          .catch((err) => setNachgetragen({ ton: "warn", text: `Nachtragen nicht möglich: ${String(err)}` }));
+      }
     } catch (err) {
       setFehler(String(err));
     }
@@ -409,6 +431,11 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
       {u?.hinweis && (
         <p className="hinweiszeile">
           <Status ton="warn">{u.hinweis}</Status>
+        </p>
+      )}
+      {nachgetragen && (
+        <p className="hinweiszeile">
+          <Status ton={nachgetragen.ton}>{nachgetragen.text}</Status>
         </p>
       )}
 

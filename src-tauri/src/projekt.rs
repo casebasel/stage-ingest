@@ -27,6 +27,9 @@ pub struct Uebersicht {
     pub hinweis: Option<String>,
     /// Karten unter `<Datum>_OHNE_DREHORT`: ob und wohin sie sich einsortieren lassen.
     pub einsortieren: Vec<Einsortierbar>,
+    /// Zusammenfassungen (alle Kopien) von Karten, die noch nicht in der gemeinsamen Datenbank stehen (z. B. ohne Netz
+    /// eingelesen): die App trägt sie nach (Systemkarte „Datenfluss“, 10.10.2026).
+    pub ohne_datenbank: Vec<PathBuf>,
 }
 
 /// Eine Karte unter `<Datum>_OHNE_DREHORT` (alle gefundenen Kopien zusammen). Einsortierbar, wenn jeder Clip über
@@ -454,12 +457,13 @@ pub fn zusammenfuehren(
         }
     }
     let einsortieren = einsortierbar(&karten, &drehs, &take_zu_dreh, &clip_zu_dreh);
+    let ohne_datenbank = karten.iter().filter(|k| k.inhalt.karte_id.is_none()).map(|k| k.datei.clone()).collect();
     // Anzeige: dieselbe Karte auf mehreren Zielen einmal (neuester Durchgang gewinnt). Vorher wurde schon beim Laden
     // zusammengefasst, dann sah das Einsortieren nur eine Kopie (Prüfung der Systemkarte, 10.10.2026).
     let mut karten = karten;
     karten.sort_by(|a, b| (&a.inhalt.karte, &b.inhalt.beginn).cmp(&(&b.inhalt.karte, &a.inhalt.beginn)));
     karten.dedup_by(|a, b| a.inhalt.karte == b.inhalt.karte);
-    Uebersicht { projekt, drehs, karten, zu_klaeren, unlesbar, hinweis: None, einsortieren }
+    Uebersicht { projekt, drehs, karten, zu_klaeren, unlesbar, hinweis: None, einsortieren, ohne_datenbank }
 }
 
 /// Liest Plan und Stand und verbindet beides. Ohne Zugang zum Plate Assistant: nur die Karten.

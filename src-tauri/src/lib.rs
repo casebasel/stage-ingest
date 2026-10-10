@@ -250,6 +250,126 @@ fn karte_in_datenbank(
     Ok((id, abgelehnt))
 }
 
+/// Ergebnis des Nachtragens je Karte.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Nachgetragen {
+    karte: String,
+    ergebnis: Result<String, String>,
+}
+
+/// Trägt Karten, die nicht in der gemeinsamen Datenbank stehen (z. B. ohne Netz eingelesen), aus ihrer Zusammenfassung
+/// `_ingest.json` nach: Karte und Clips mit Take-Zuordnung, Tilt/Roll aus ART CMD, falls die CSV daliegt. Danach steht
+/// die ID der Karte in jeder Kopie der Zusammenfassung. Das Aufnahmedatum der ersten Aufnahme fehlt (nicht gespeichert).
+fn karten_nachtragen_jetzt(
+    p: &plate::Plate,
+    z: &plate::Zugang,
+    projekt: &PlateProjekt,
+    dateien: &[PathBuf],
+) -> Vec<Nachgetragen> {
+    use ingest_kern::uebersicht::KartenZusammenfassung;
+    let lesen = |d: &PathBuf| -> Option<KartenZusammenfassung> { serde_json::from_slice(&std::fs::read(d).ok()?).ok() };
+    // Je Karte alle Kopien.
+    let mut je_karte: std::collections::BTreeMap<String, Vec<(PathBuf, KartenZusammenfassung)>> = Default::default();
+    for d in dateien {
+        if let Some(z) = lesen(d).filter(|z| z.karte_id.is_none()) {
+            je_karte.entry(z.karte.clone()).or_default().push((d.clone(), z));
+        }
+    }
+    let take_dreh = p.drehs_mit_plan(z, &projekt.id, None).map(|v| zuordnung::take_zu_dreh(&v)).unwrap_or_default();
+    let mut aus = Vec::new();
+    for (name, kopien) in je_karte {
+        let (datei, inhalt) = &kopien[0];
+        let dreh = datei.parent().and_then(Path::parent);
+        let kartenordner =
+            dreh.map(|d| d.join(struktur::KAMERA).join(struktur::ordnername(&inhalt.karte))).filter(|o| o.is_dir());
+        let bericht_ok = datei.parent().and_then(|b| std::fs::read_dir(b).ok()).is_some_and(|mut e| {
+            e.any(|x| {
+                x.is_ok_and(|x| {
+                    x.file_name()
+                        .to_string_lossy()
+                        .starts_with(&format!("{}_Bericht_", struktur::ordnername(&inhalt.karte)))
+                })
+            })
+        });
+        let eingelesen_am = chrono::DateTime::parse_from_rfc3339(&inhalt.beginn)
+            .map(|t| t.with_timezone(&chrono::Utc))
+            .unwrap_or_else(|_| chrono::Utc::now());
+        let reel = inhalt.clips.iter().find_map(|c| soll::arri_reel(&c.pfad).map(|(r, k)| format!("{r}{k}")));
+        let karte = karte_db::Karte {
+            projekt_id: &projekt.id,
+            projekt_kurzname: &projekt.kurzname,
+            name: &inhalt.karte,
+            reel: reel.as_deref(),
+            eingelesen_am,
+            erste_aufnahme: None,
+            kopien: inhalt.unabhaengige_kopien,
+            freigegeben: inhalt.freigegeben,
+            speicherort: kartenordner.as_ref().map(|o| o.display().to_string()),
+            bericht_ok,
+        };
+        // Tilt/Roll aus der CSV von ART CMD, falls sie beim Einlesen geschrieben wurde.
+        let aus_clip: Vec<Option<serde_json::Value>> = inhalt
+            .clips
+            .iter()
+            .map(|c| {
+                let csv = dreh?.join(struktur::METADATEN).join(format!("{}.csv", soll::ohne_endung(&c.pfad)));
+                let b = artcmd::auswerten(&std::fs::read_to_string(csv).ok()?).ok()?;
+                serde_json::to_value(b.aus_clip()?).ok()
+            })
+            .collect();
+        let eintraege: Vec<karte_db::Clip> = inhalt
+            .clips
+            .iter()
+            .zip(aus_clip)
+            .map(|(c, aus_clip)| karte_db::Clip {
+                name: &c.name,
+                start_tc: c.start_tc.as_deref(),
+                end_tc: c.end_tc.as_deref(),
+                fps: None,
+                dreh_id: c
+                    .dreh_id
+                    .as_deref()
+                    .or_else(|| c.take_id.as_ref().and_then(|t| take_dreh.get(t)).map(String::as_str)),
+                take_id: c.take_id.as_deref(),
+                zuordnung: &c.zuordnung,
+                aus_clip,
+            })
+            .collect();
+        let (id, aenderungen, ungueltig) =
+            karte_db::aenderungen(&karte, &eintraege, chrono::Utc::now(), plate::ulid_aehnlich);
+        let ergebnis = p.karte_schreiben(z, aenderungen).map(|mut abgelehnt| {
+            abgelehnt.extend(ungueltig.into_iter().map(|n| format!("Clip {n}: Name nicht verwendbar")));
+            // Die ID in jede Kopie der Zusammenfassung, damit nichts doppelt nachgetragen wird.
+            for (d, z) in &kopien {
+                let mut z = z.clone();
+                z.karte_id = Some(id.clone());
+                if let Some(o) = d.parent() {
+                    let _ = ingest_kern::uebersicht::schreiben(o, &z);
+                }
+            }
+            if abgelehnt.is_empty() {
+                id.clone()
+            } else {
+                format!("{id} (nicht übernommen: {})", abgelehnt.join("; "))
+            }
+        });
+        aus.push(Nachgetragen { karte: name, ergebnis });
+    }
+    aus
+}
+
+#[tauri::command]
+async fn karten_nachtragen(
+    plate: State<'_, Arc<plate::Plate>>,
+    zugang: plate::Zugang,
+    projekt: PlateProjekt,
+    dateien: Vec<PathBuf>,
+) -> Result<Vec<Nachgetragen>, String> {
+    let p = Arc::clone(&plate);
+    im_hintergrund(move || Ok(karten_nachtragen_jetzt(&p, &zugang, &projekt, &dateien))).await
+}
+
 /// Daten für `ingest.karte` (Form abgestimmt mit der Stage, Systemkarte b71386f).
 #[allow(clippy::too_many_arguments)]
 fn stage_daten(
@@ -1717,6 +1837,7 @@ pub fn run() {
             clip_vorschaubilder,
             karte_wiedererkennen,
             karte_einsortieren,
+            karten_nachtragen,
             zur_seite_liste,
             studio_take_bewerten,
             zur_seite_wegwerfen,
