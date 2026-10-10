@@ -118,6 +118,9 @@ in KAMERAS.md.
   Farbraum, Zustand geliefert/freigegeben/verworfen. Fest: projekt_id, take_id, version, art; Version eindeutig je
   Take auch unter gelöschten (`version_vergeben`); `pfad`/`mhl_pfad` relativ (kein /, ://, .., Laufwerk);
   `abspielbar` nur mit pfad; `xxh128` 32 kleine Hex-Zeichen.
+- **Regel beim späteren Bearbeiten von Plates** (Systemkarte b2ade5a, Marlon 10.10.2026): `plate.art` ('plate' |
+  'location') nur ändern, solange die Einheit nichts trägt (kein Take, auch kein gelöschter, keine Fotos, kein HDRI,
+  keine Messwerte, kein Soll-Wert); sonst neu anlegen. Der Server prüft es nicht, der Ingest muss es selbst prüfen.
 - **Schritt 2 (wartet auf Rechte vom Plate Assistant):** Takes bewerten + Notiz, Take (und Plate) aus einem Clip
   anlegen, Plates vorab planen, Umbenennen/Verschieben/Papierkorb. Jüngste Änderung gewinnt, Löschen nur Papierkorb.
 - **Umbenennen samt Kurzname** (Drehort und Projekt): Ordner auf allen erreichbaren Zielen umbenennen, Pfade in
