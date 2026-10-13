@@ -498,6 +498,10 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(abweichungen(&c, &anders), vec!["23,976 fps statt 25 fps", "ProRes 422 HQ statt ProRes 4444"]);
+        // Stage auf echte 24,000 fps (Entscheid 13.10.2026): 23,976 ist eine Abweichung, 24 nicht.
+        let kino = Kameraeinstellung { fps: Some(24.0), ..Default::default() };
+        assert_eq!(abweichungen(&c, &kino), vec!["23,976 fps statt 24 fps"]);
+        assert!(abweichungen(&ClipAngaben { bildrate: Some(24.0), ..c.clone() }, &kino).is_empty());
     }
 
     #[test]
