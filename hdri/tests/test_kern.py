@@ -159,6 +159,18 @@ def test_waechter_erkennt_unreal():
     assert stage_aktiv(["explorer.exe", "chrome.exe"]) is None
 
 
+def test_waechter_erkennt_einmessen_von_edge_blending():
+    from hdri_dienst.waechter import messung_aktiv
+
+    ordner = r"C:\claude\tasks\2026-10-10_edge-blending-test"
+    assert messung_aktiv([rf'"C:\Python\pythonw.exe" {ordner}\werkzeuge\anzeige.py --vollbild'])
+    assert messung_aktiv([rf"python.exe {ordner}\ada.py  live"])
+    assert messung_aktiv([rf"python.exe {ordner}\ada.py nachstellen --ecke 2"])
+    # Dauerbetrieb (geplante Aufgaben, Sekunden) und Fremdes zählen nicht.
+    assert messung_aktiv([r"pythonw.exe C:\EdgeBlending\programm\werkzeuge\ada.py betrieb setzen"]) is None
+    assert messung_aktiv([r"python.exe -m hdri_dienst"]) is None
+
+
 def test_server_schreibt_nur_jobs():
     from hdri_dienst.server import Server, ServerFehler
 
