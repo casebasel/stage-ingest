@@ -17,7 +17,8 @@ STAGE_PROZESSE = ("unrealeditor", "unrealeditor-cmd", "unrealgame", "displayclus
 
 
 #: Befehlszeilen von Edge Blending im Messbetrieb (Testbild-Ausgabe, Masken- und Eckenwächter), klein, mit `/`.
-MESS_MERKMALE = ("/werkzeuge/anzeige.py", "ada.py live", "ada.py nachstellen")
+#: Gestartet wird oft mit relativem Pfad (`pythonw.exe werkzeuge\anzeige.py`), darum ohne führenden Schrägstrich.
+MESS_MERKMALE = ("werkzeuge/anzeige.py", "ada.py live", "ada.py nachstellen")
 
 
 class StageAktiv(Exception):

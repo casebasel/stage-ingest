@@ -164,6 +164,10 @@ def test_waechter_erkennt_einmessen_von_edge_blending():
 
     ordner = r"C:\claude\tasks\2026-10-10_edge-blending-test"
     assert messung_aktiv([rf'"C:\Python\pythonw.exe" {ordner}\werkzeuge\anzeige.py --vollbild'])
+    # So startet anzeige.cmd wirklich (relativ, venv-Starter und sein Kind; Korrektur Edge Blending 13.10.2026).
+    assert messung_aktiv([r".venv\Scripts\pythonw.exe  werkzeuge\anzeige.py"])
+    assert messung_aktiv([r'"C:\Users\Ndisplay\AppData\Local\Python\pythoncore-3.12-64\pythonw.exe" werkzeuge\anzeige.py'])
+    assert messung_aktiv([r".venv\Scripts\python.exe werkzeuge\ada.py nachstellen --ecke 1"])
     assert messung_aktiv([rf"python.exe {ordner}\ada.py  live"])
     assert messung_aktiv([rf"python.exe {ordner}\ada.py nachstellen --ecke 2"])
     # Dauerbetrieb (geplante Aufgaben, Sekunden) und Fremdes zählen nicht.
