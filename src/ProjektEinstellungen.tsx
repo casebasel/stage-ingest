@@ -59,7 +59,7 @@ export function ProjektEinstellungen({ projekt, schliessen }: { projekt: Projekt
     if (!w.name.trim()) return "Der Name darf nicht leer sein.";
     for (const k of ["fps", "sensor_fps"] as const) {
       const t = w[k].trim();
-      if (t && !(Number(t.replace(",", ".")) > 0)) return `${k === "fps" ? "Framerate" : "Sensor-Framerate"}: eine Zahl wie 24 oder 23,976.`;
+      if (t && !(Number(t.replace(",", ".")) > 0)) return `${k === "fps" ? "Framerate" : "Sensor-Framerate"}: eine Zahl wie 25 oder 23,976.`;
     }
     // Feldgrenzen der Datenbank (Migration 0016, Systemkarte ee5bc62): Texte höchstens 200 Zeichen.
     const lang = (Object.keys(w) as (keyof Werte)[]).find((k) => w[k].trim().length > 200);
@@ -128,7 +128,7 @@ export function ProjektEinstellungen({ projekt, schliessen }: { projekt: Projekt
       <Feld name="Regie">{eingabe("regie", "Regie")}</Feld>
       <Feld name="DoP">{eingabe("dop", "DoP")}</Feld>
       <Feld name="Framerate" hilfe="Basis des Timecodes. Weichen Clips ab, warnt der Ingest (sperrt nie).">
-        {eingabe("fps", "Framerate", "z. B. 24")}
+        {eingabe("fps", "Framerate", "z. B. 25")}
         <span className="leise">fps</span>
       </Feld>
       <Feld name="Sensor-Framerate" hilfe="Leer = gleich der Framerate.">
