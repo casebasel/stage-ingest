@@ -30,10 +30,9 @@ dann in der Schlüsselbundverwaltung exportieren (.p12 mit Passwort). Die .p12 d
 
 ## Plattformen
 
-Vorerst nur **Mac** (Apple Silicon) im Release (09.10.2026, kein Windows im Einsatz). Unter Windows prüft `ci.yml` bei jedem
-Push weiterhin den Kern (Tests) und die App (übersetzen), damit nichts unbemerkt bricht. Windows wieder ins Release:
-in `release.yml` die drei auskommentierten Zeilen der Matrix einschalten; bestehende Windows-Installationen bekommen
-ab dann wieder Updates.
+**Mac** (Apple Silicon) und **Windows** (x64) im Release; Windows war vom 09. bis 14.10.2026 ausgesetzt und ist auf
+Marlons Wunsch wieder dabei (ab 0.1.35). Ein Release dauert damit etwa 10 statt 3 Minuten. Windows-Installationen von
+0.1.17 holen sich das Update über den Banner.
 
 ## Release auslösen
 

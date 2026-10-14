@@ -19,11 +19,10 @@ jobs:
           - platform: macos-latest
             target: aarch64-apple-darwin
             args: "--target aarch64-apple-darwin"
-          # Windows vorerst ohne Release (Marlon, 09.10.2026: im Moment kein Windows im Einsatz). Wieder einschalten:
-          # diese drei Zeilen entkommentieren. ci.yml prüft Kern und App unter Windows weiterhin bei jedem Push.
-          # - platform: windows-2025
-          #   target: x86_64-pc-windows-msvc
-          #   args: "--target x86_64-pc-windows-msvc"
+          # Windows wieder mit Release (Marlon, 14.10.2026; vom 09. bis 14.10. nur Mac).
+          - platform: windows-2025
+            target: x86_64-pc-windows-msvc
+            args: "--target x86_64-pc-windows-msvc"
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v5
