@@ -2158,12 +2158,13 @@ input[type="checkbox"][role="switch"]:checked::before {
   font-size: 12px;
 }
 
-/* Einstellung im Baum mit 35-mm-Filmrand und Slate, wie die Karten im Plate Assistant (Marlon, 14.10.2026). */
+/* Einstellung im Baum mit feinem 35-mm-Filmrand und Slate, wie die Karten im Plate Assistant (Marlon, 14.10.2026:
+   „viel feiner und dezenter, vor allem schmaler“). */
 .baum-einstellung {
-  grid-template-columns: 24px minmax(0, 1fr);
+  grid-template-columns: 13px minmax(0, 1fr);
   align-content: center;
-  column-gap: 10px;
-  min-height: 60px;
+  column-gap: 9px;
+  min-height: 52px;
   padding-top: 0;
   padding-bottom: 0;
   padding-left: 0;
@@ -2180,32 +2181,37 @@ input[type="checkbox"][role="switch"]:checked::before {
   align-self: stretch;
   display: grid;
   place-items: center;
-  border-radius: var(--rund-klein) 0 0 var(--rund-klein);
-  background: var(--linie);
+  margin: 4px 0;
+  border-radius: 2px;
+  background: oklch(1 0 0 / 0.04);
   overflow: hidden;
 }
-/* Perforation am linken Rand. */
+/* Perforation am linken Rand, klein und leise. */
 .filmrand::before {
   content: "";
   position: absolute;
-  top: 3px;
-  bottom: 3px;
-  left: 3px;
-  width: 5px;
-  background: repeating-linear-gradient(to bottom, oklch(0.08 0 0) 0 4px, transparent 4px 8px);
+  top: 2px;
+  bottom: 2px;
+  left: 1.5px;
+  width: 2.5px;
+  background: repeating-linear-gradient(to bottom, var(--linie-stark) 0 2.5px, transparent 2.5px 5px);
+  opacity: 0.55;
 }
 .filmrand > span {
-  margin-left: 9px;
+  margin-left: 4px;
   overflow: hidden;
-  color: var(--text-2);
+  color: var(--text-aus);
   font-family: var(--mono);
-  font-size: 7.5px;
+  font-size: 6.5px;
   letter-spacing: 0.02em;
   white-space: nowrap;
   writing-mode: vertical-rl;
   transform: rotate(180deg);
-  max-height: 56px;
+  max-height: 44px;
 }
-.baum-einstellung[aria-current="true"] .filmrand {
-  background: var(--auswahl);
+.baum-einstellung[aria-current="true"] .filmrand > span {
+  color: var(--text-3);
+}
+:root[data-theme="light"] .filmrand {
+  background: oklch(0 0 0 / 0.04);
 }
