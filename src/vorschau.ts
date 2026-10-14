@@ -242,7 +242,11 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
   artcmd_laden: () => "/Users/beispiel/Library/Application Support/ch.filmstudiobasel.stage-ingest/art-cmd/art-cmd_1.0.0_macos_universal/bin/art-cmd",
   karte_wiedererkennen: () => ({ art: "nichtFormatiert", beginn: "2026-10-28T10:12:00+01:00", sicher: true, bekannt: 12, neue: 3 }),
   clip_video: () => null,
-  clip_vorschaubilder: () => [],
+  clip_vorschaubilder: () =>
+    ["#3a4250", "#6b5a3e", "#2f3d33"].map(
+      (farbe) =>
+        `data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="480" height="270"><rect width="480" height="270" fill="${farbe}"/><circle cx="240" cy="135" r="60" fill="#c8b48a"/></svg>`)}`,
+    ),
   take_technik: (p) =>
     ((p.anfragen as { datei: string }[]) ?? []).map((_, i) => ({
       codec: "ProRes 4444 XQ", aufloesung: "3840x2160", bildrate: "25", bilder: String(1250 + i * 75), dauer: `0:${50 + i * 3}.0`,

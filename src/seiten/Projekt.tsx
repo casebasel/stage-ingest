@@ -13,7 +13,7 @@ import { gemerkt, merken, useEinstellungen } from "../einstellungen";
 import { Status, type Ton } from "../teile";
 import { kurz } from "./Einlesen";
 import { Abspieler, type AbspielEintrag } from "./Abspieler";
-import { SpaltenKopf, SpaltenMenue, SpaltenZellen, useTakeSpalten, type Spalte, type TakeMitWerten } from "./TakeSpalten";
+import { ClipMitBild, SpaltenKopf, SpaltenMenue, SpaltenZellen, useTakeSpalten, type Spalte, type TakeMitWerten } from "./TakeSpalten";
 
 type TakeStand = TakeMitWerten;
 type FotoStand = { id: string; art: string; pfad: string; takeId?: string | null };
@@ -138,7 +138,14 @@ const GRUNDSPALTEN: Spalte[] = [
     wert: (t) =>
       t.studio ? <StudioNotiz t={t} /> : (t.werte?.["take.notiz"] as string | undefined) || undefined,
   },
-  { id: "clip", titel: "Clip", gruppe: "Take", quelle: "Plate Assistant / Karte", mono: true, wert: (t) => t.clip || undefined },
+  {
+    id: "clip",
+    titel: "Clip",
+    gruppe: "Take",
+    quelle: "Plate Assistant / Karte (darüberfahren: Bild aus der Mitte)",
+    mono: true,
+    wert: (t) => (t.clip ? t.datei ? <ClipMitBild clip={t.clip} datei={t.datei} /> : t.clip : undefined),
+  },
   { id: "karte", titel: "Karte", gruppe: "Take", quelle: "Eingelesene Karten", mono: true, wert: (t) => t.karte ?? undefined },
   {
     id: "stand",

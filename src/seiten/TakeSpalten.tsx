@@ -467,3 +467,51 @@ function ClipVorschau({ datei }: { datei: string }) {
     </span>
   );
 }
+
+/** Clipname mit Bild aus der Mitte des Clips beim Darüberfahren (Marlon, 14.10.2026: „sehen, was in den Clips drin
+ *  ist“). Dieselben Vorschaubilder wie in der Spalte „Vorschau“ und im Bericht, gemerkt im Zwischenspeicher. */
+export function ClipMitBild({ clip, datei }: { clip: string; datei: string }) {
+  const artCmd = useEinstellungen().artCmd.trim();
+  const [lage, setLage] = useState<{ x: number; y: number; oben: boolean } | null>(null);
+  const [bild, setBild] = useState<string | null>(null);
+  const [fehler, setFehler] = useState<string | null>(null);
+  const zeitgeber = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const weg = () => {
+    if (zeitgeber.current) clearTimeout(zeitgeber.current);
+    setLage(null);
+  };
+  useEffect(() => weg, []);
+  function rein(ev: React.MouseEvent<HTMLSpanElement>) {
+    const r = ev.currentTarget.getBoundingClientRect();
+    if (zeitgeber.current) clearTimeout(zeitgeber.current);
+    // Kurz warten: nur zeigen, wenn die Maus wirklich auf dem Clip bleibt.
+    zeitgeber.current = setTimeout(() => {
+      setLage({ x: r.left, y: r.bottom, oben: r.bottom + 220 > window.innerHeight });
+      setFehler(null);
+      vorschauLaden(datei, artCmd)
+        .then((b) => setBild(b.length >= 3 ? b[1] : (b[0] ?? null)))
+        .catch((e) => setFehler(String(e)));
+    }, 250);
+  }
+  return (
+    <span className="clip-mit-bild" onMouseEnter={rein} onMouseLeave={weg}>
+      {clip}
+      {lage && (
+        <span
+          className="clip-bild-schwebe"
+          role="tooltip"
+          style={{ left: lage.x, top: lage.oben ? undefined : lage.y + 6, bottom: lage.oben ? window.innerHeight - lage.y + 30 : undefined }}
+        >
+          {bild ? (
+            <img src={bild} alt={`Bild aus der Mitte von ${clip}`} />
+          ) : (
+            <span className="vorschau-platz" aria-busy={!fehler}>
+              {fehler ? "Kein Bild" : "Bild wird gerechnet …"}
+            </span>
+          )}
+          <span className="clip-bild-text">Mitte des Clips</span>
+        </span>
+      )}
+    </span>
+  );
+}
