@@ -2,6 +2,7 @@
 
 mod artcmd_laden;
 mod karte_db;
+mod mittelbild;
 mod plate;
 mod plates;
 mod projekt;
@@ -966,6 +967,56 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
         }
         _ => None,
     };
+
+    // Mittelbild je Take für das iPhone (0029, foto.quelle = clip): nur Takes des Plate Assistant (nie Studio), mit ART
+    // CMD und erfolgreich geschriebener Karte; im Hintergrund, das Ergebnis wartet nicht darauf.
+    if let (Some(z), Some(pp), Some(art), Some(erstes), Some(Ok(_)), Ok(cache)) = (
+        &auftrag.plate_zugang,
+        &auftrag.plate_projekt,
+        &auftrag.art_cmd,
+        urteile.iter().find(|u| u.gut()),
+        datenbank.as_ref(),
+        app.path().app_cache_dir(),
+    ) {
+        let plate = Arc::clone(&app.state::<Arc<plate::Plate>>());
+        let take_plate =
+            plate.drehs_mit_plan(z, &pp.id, None).map(|v| zuordnung::take_zu_plate(&v)).unwrap_or_default();
+        let paare: Vec<(String, String)> = clips
+            .iter()
+            .filter_map(|c| {
+                let (t, _) = take_von.get(soll::ohne_endung(&c.pfad))?;
+                let plate_take = auftrag.soll.iter().any(|s| s.quelle == "plate" && &s.take_id == t);
+                plate_take.then(|| (t.clone(), c.pfad.clone()))
+            })
+            .collect();
+        let (rel_karte, _, _) = karte_db::ort(&erstes.ordner, None);
+        let auftraege: Vec<mittelbild::Auftrag> = mittelbild::je_take_ein_clip(paare)
+            .into_iter()
+            .filter_map(|(take, pfad)| {
+                let (plate_id, dreh_id) = take_plate.get(&take)?.clone();
+                let original = if rel_karte.starts_with('/') || rel_karte.contains(':') {
+                    pfad.clone()
+                } else {
+                    format!("{rel_karte}/{pfad}")
+                };
+                let klappe = auftrag
+                    .soll
+                    .iter()
+                    .find(|s| s.take_id == take)
+                    .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s.start_zeit).ok())
+                    .map(|t| t.to_utc());
+                Some(mittelbild::Auftrag {
+                    datei: erstes.ordner.join(&pfad),
+                    take_id: take,
+                    plate_id,
+                    dreh_id,
+                    original,
+                    klappe,
+                })
+            })
+            .collect();
+        mittelbild::im_hintergrund(plate, z.clone(), art.clone(), cache, auftraege);
+    }
 
     // Zusammenfassung der Karte neben den Bericht, auf jedes gute Ziel (für die Projektübersicht).
     {

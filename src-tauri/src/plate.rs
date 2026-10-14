@@ -16,7 +16,11 @@ use serde_json::{json, Value};
 
 /// Tabellen, die der Ingest ändern darf (Systemkarte 05dc71c, BESITZ.md). Der Server beschränkt ein persönliches
 /// Konto nicht mehr; diese Liste ist die Sperre. Nie: dreh, plate, take, foto.
-pub const DARF_AENDERN: &[&str] = &["projekt", "ingest_meldung", "hdri_job", "dreh", "karte", "clip", "studio_take"];
+pub const DARF_AENDERN: &[&str] =
+    &["projekt", "ingest_meldung", "hdri_job", "dreh", "karte", "clip", "studio_take", "foto"];
+/// `foto` (gehört dem Plate Assistant): der Ingest legt nur das Mittelbild eines Takes an (`quelle = clip`, 0029), ändert
+/// nie ein bestehendes Foto.
+const FOTO_FELDER: &[&str] = &["_anlegen"];
 
 /// An `studio_take` (gehört der Stage) nur Bewertung und Notiz (Systemkarte SCHNITTSTELLEN „Studio-Spiegel“: je Feld
 /// gewinnt die jüngere Zeit, die Stage holt sie zurück). Nie anlegen, nie verschieben.
@@ -43,6 +47,9 @@ pub fn aenderungen_pruefen(body: &Value) -> Result<(), String> {
         let feld = a["feld"].as_str().unwrap_or("");
         if t == "dreh" && !DREH_FELDER.contains(&feld) {
             return Err(format!("Stage Ingest ändert am Drehort „{feld}“ nicht (gehört dem Plate Assistant)"));
+        }
+        if t == "foto" && (!FOTO_FELDER.contains(&feld) || a["wert"]["quelle"] != "clip") {
+            return Err("Stage Ingest legt an „foto“ nur Mittelbilder an (quelle = clip)".into());
         }
         if t == "studio_take" && !STUDIO_TAKE_FELDER.contains(&feld) {
             return Err(format!("Stage Ingest ändert am Studio-Take „{feld}“ nicht (gehört der Stage)"));
@@ -303,6 +310,52 @@ impl Plate {
     /// Lädt ein Foto aus dem Bucket `fotos` (nur lesen).
     pub fn foto_laden(&self, z: &Zugang, pfad: &str) -> Result<Vec<u8>, String> {
         self.speicher_laden(z, "fotos", pfad)
+    }
+
+    /// Hat der Take schon ein Mittelbild (`foto`, `art = vorschau`, `quelle = clip`)? Dann legt der Ingest kein zweites an.
+    pub fn mittelbild_vorhanden(&self, z: &Zugang, take_id: &str) -> Result<bool, String> {
+        let v = self.lesen(
+            z,
+            &format!("foto?take_id=eq.{}&art=eq.vorschau&quelle=eq.clip&select=id&limit=1", url_teil(take_id)),
+        )?;
+        Ok(v.as_array().is_some_and(|a| !a.is_empty()))
+    }
+
+    /// Lädt das Mittelbild in den Bucket `fotos` (nie überschreiben) und legt den `foto`-Eintrag an.
+    pub fn mittelbild_schreiben(&self, z: &Zugang, jpeg: &[u8], aenderung: Value) -> Result<(), String> {
+        let pfad = aenderung["wert"]["pfad"].as_str().ok_or("Mittelbild ohne Pfad")?.to_owned();
+        let url = format!("{}/storage/v1/object/fotos/{pfad}", z.adresse.trim_end_matches('/'));
+        let mut hochgeladen = false;
+        for neu in [false, true] {
+            let token = self.token(z, neu)?;
+            match agent()
+                .post(&url)
+                .set("apikey", &key_bereinigen(&z.anon_key))
+                .set("Authorization", &format!("Bearer {token}"))
+                .set("Content-Type", "image/jpeg")
+                .set("x-upsert", "false")
+                .send_bytes(jpeg)
+            {
+                Ok(_) => {
+                    hochgeladen = true;
+                    break;
+                }
+                Err(ureq::Error::Status(401, _)) if !neu => continue,
+                Err(e) => return Err(format!("Mittelbild nicht hochgeladen: {}", fehler(e))),
+            }
+        }
+        if !hochgeladen {
+            return Err("Anmeldung beim Plate Assistant abgelehnt".into());
+        }
+        let body = json!({ "p_geraet": geraet_name(), "p_aenderungen": [aenderung] });
+        let v = self.anwenden(z, &body)?;
+        match v[0]["ergebnis"].as_str() {
+            Some("uebernommen" | "aelter" | "doppelt") => Ok(()),
+            _ => Err(format!(
+                "Mittelbild nicht angelegt: {}",
+                v[0]["grund"].as_str().or(v[0]["ergebnis"].as_str()).unwrap_or("unbekannt")
+            )),
+        }
     }
 
     fn speicher_laden(&self, z: &Zugang, bucket: &str, pfad: &str) -> Result<Vec<u8>, String> {

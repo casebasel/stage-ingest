@@ -70,6 +70,19 @@ pub fn take_zu_dreh(drehs: &Value) -> HashMap<String, String> {
     m
 }
 
+/// Take → (Plate, Drehort), für das Mittelbild.
+pub fn take_zu_plate(drehs: &Value) -> HashMap<String, (String, String)> {
+    let mut m = HashMap::new();
+    for d in drehs.as_array().into_iter().flatten().filter(|d| gilt(d)) {
+        for p in d["plate"].as_array().into_iter().flatten().filter(|p| gilt(p)) {
+            for t in p["take"].as_array().into_iter().flatten().filter(|t| gilt(t)) {
+                m.insert(text(&t["id"]), (text(&p["id"]), text(&d["id"])));
+            }
+        }
+    }
+    m
+}
+
 pub fn vorschau(drehs: &Value, clips: &[String], erste: Option<DateTime<Utc>>, jetzt: DateTime<Utc>) -> Vorschau {
     // Clipname → Drehort (erster Treffer gewinnt; derselbe Clipname an zwei Drehorten wäre ein Fehler im Plan).
     let mut clip_dreh: HashMap<String, &Value> = HashMap::new();

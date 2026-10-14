@@ -132,13 +132,53 @@ pub fn clip_id(karte_id: &str, name: &str) -> String {
     format!("clip-{}-{}", karte_id.strip_prefix("karte-").unwrap_or(karte_id), name.to_lowercase())
 }
 
-fn zeit(t: DateTime<Utc>) -> String {
+pub(crate) fn zeit(t: DateTime<Utc>) -> String {
     t.to_rfc3339_opts(SecondsFormat::Millis, true)
 }
 
 /// Änderung für `aenderungen_anwenden`. `id` muss je Änderung eindeutig sein.
 fn aenderung(id: String, tabelle: &str, datensatz: &str, feld: &str, wert: Value, jetzt: DateTime<Utc>) -> Value {
     json!({ "id": id, "tabelle": tabelle, "datensatz": datensatz, "feld": feld, "wert": wert, "zeit": jetzt.timestamp_micros() })
+}
+
+/// Mittelbild eines Takes als Foto (0029: `foto.quelle = clip`; Feldliste 0023, abgestimmt mit dem Plate Assistant
+/// 14.10.2026). `original` ist der Pfad des Clips relativ zum Projektordner mit `#bild=<n>`.
+pub struct Mittelbild<'a> {
+    pub foto_id: &'a str,
+    pub dreh_id: &'a str,
+    pub plate_id: &'a str,
+    pub take_id: &'a str,
+    pub pfad: &'a str,
+    pub zeit: DateTime<Utc>,
+    pub breite: u32,
+    pub hoehe: u32,
+    pub xxh128: &'a str,
+    pub original: &'a str,
+}
+
+pub fn mittelbild_aenderung(m: &Mittelbild, jetzt: DateTime<Utc>, id: String) -> Value {
+    aenderung(
+        id,
+        "foto",
+        m.foto_id,
+        "_anlegen",
+        json!({
+            "dreh_id": m.dreh_id,
+            "plate_id": m.plate_id,
+            "take_id": m.take_id,
+            "art": "vorschau",
+            "quelle": "clip",
+            "pfad": m.pfad,
+            "zeit": zeit(m.zeit),
+            "breite": m.breite,
+            "hoehe": m.hoehe,
+            "xxh128": m.xxh128,
+            "original": m.original.chars().take(1000).collect::<String>(),
+            "geloescht": false,
+            "erstellt_am": zeit(jetzt),
+        }),
+        jetzt,
+    )
 }
 
 /// Neuer Speicherort einer Karte nach dem Einsortieren (`karte.speicherort` ist änderbar, Plate Assistant 0018).
@@ -309,6 +349,37 @@ mod tests {
         assert_eq!(clipname("_x"), None);
         assert_eq!(kamera("A007C003_261028_R11A").as_deref(), Some("A"));
         assert_eq!(kamera("C0001"), None);
+    }
+
+    #[test]
+    fn mittelbild_als_foto_mit_quelle_clip() {
+        let jetzt = "2026-10-15T08:00:00Z".parse().unwrap();
+        let m = Mittelbild {
+            foto_id: "01JA2B3C4D5E6F7G8H9JKMNPQR",
+            dreh_id: "dreh-happy_end-4_stock",
+            plate_id: "01PLATE0000000000000000000",
+            take_id: "01TAKE00000000000000000000",
+            pfad: "01PLATE0000000000000000000/01JA2B3C4D5E6F7G8H9JKMNPQR.jpg",
+            zeit: jetzt,
+            breite: 1280,
+            hoehe: 720,
+            xxh128: "abc",
+            original: "2026-10-14_4_STOCK/01_KAMERA/A007R132/A007R132/A007C005_120101_R132.mxf#bild=212",
+        };
+        let a = mittelbild_aenderung(&m, jetzt, "X1".into());
+        assert_eq!((a["tabelle"].as_str(), a["feld"].as_str()), (Some("foto"), Some("_anlegen")));
+        assert_eq!((a["wert"]["quelle"].as_str(), a["wert"]["art"].as_str()), (Some("clip"), Some("vorschau")));
+        // Pfad im Bucket wie vom Plate Assistant verlangt: <id>/<id>.jpg, je 10–40 Zeichen [A-Za-z0-9_-].
+        let ok = |t: &str| {
+            (10..=40).contains(&t.len()) && t.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        };
+        let (o, d) = m.pfad.split_once('/').unwrap();
+        assert!(ok(o) && d.strip_suffix(".jpg").is_some_and(ok));
+        crate::plate::aenderungen_pruefen(&json!({ "p_aenderungen": [a.clone()] })).unwrap();
+        // Ein anderes Foto (z. B. vom iPhone) ändert der Ingest nie.
+        let mut fremd = a;
+        fremd["wert"]["quelle"] = json!("iphone");
+        assert!(crate::plate::aenderungen_pruefen(&json!({ "p_aenderungen": [fremd] })).is_err());
     }
 
     #[test]
