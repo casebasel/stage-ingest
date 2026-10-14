@@ -8,6 +8,7 @@ mod projekt;
 mod qr;
 mod stage;
 mod technik;
+mod vorschau_video;
 mod vorschaubilder;
 mod zuordnung;
 
@@ -1088,7 +1089,31 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
     if let Err(e) = verlauf_anhaengen(app, &ergebnis) {
         eprintln!("Verlauf nicht geschrieben: {e}"); // die Karte ist trotzdem kopiert und belegt
     }
+    vorschauen_vorrechnen(app, auftrag, &ergebnis);
     Ok(ergebnis)
+}
+
+/// Player der Projektseite: die Vorschauen der eben eingelesenen ARRI-Clips im Hintergrund vorrechnen (aus der ersten
+/// guten Kopie), damit die Leertaste sofort spielt. Nach der Freigabe, nie davor; pausiert, solange die nächste Karte
+/// kopiert wird (ART CMD und Zurücklesen sollen sich die Platte nicht teilen).
+fn vorschauen_vorrechnen(app: &AppHandle, auftrag: &KartenAuftrag, e: &KartenErgebnis) {
+    let (Some(art), Some(erstes), Ok(cache)) =
+        (auftrag.art_cmd.clone(), e.urteile.iter().find(|u| u.gut()), app.path().app_cache_dir())
+    else {
+        return;
+    };
+    let dateien: Vec<PathBuf> = e.clips.iter().map(|c| erstes.ordner.join(&c.pfad)).collect();
+    let aktiv = Arc::clone(&app.state::<Laufend>().aktiv);
+    std::thread::spawn(move || {
+        for d in dateien {
+            // Erst warten, bis kein Kopiervorgang mehr läuft (der eigene ist beim Aufruf noch als aktiv markiert).
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            while aktiv.load(Ordering::SeqCst) {
+                std::thread::sleep(std::time::Duration::from_secs(5));
+            }
+            let _ = vorschau_video::erzeugen(&d, Some(&art), &cache);
+        }
+    });
 }
 
 /// Ergebnis von „Kopie aus Kopie“ (Kaskade): die neue Kopie, Urteile (Quelle zuerst) und die neue Freigabe der Karte.
@@ -1768,6 +1793,31 @@ async fn clip_vorschaubilder(app: AppHandle, datei: PathBuf, art_cmd: Option<Pat
     .await
 }
 
+/// Abspielbare Vorschau eines Clips für den Player der App (siehe `vorschau_video`). Gibt den Pfad zurück und gibt
+/// genau diese Datei für das Fenster frei (Asset-Protokoll, sonst ist nichts freigegeben).
+#[tauri::command]
+async fn clip_video(
+    app: AppHandle,
+    datei: PathBuf,
+    art_cmd: Option<PathBuf>,
+    nur_vorhanden: bool,
+) -> Result<Option<PathBuf>, String> {
+    let cache = app.path().app_cache_dir().map_err(|e| e.to_string())?;
+    let art = art_cmd.filter(|p| !p.as_os_str().is_empty());
+    let p = im_hintergrund(move || {
+        if nur_vorhanden {
+            Ok(vorschau_video::vorhanden(&datei, &cache))
+        } else {
+            vorschau_video::erzeugen(&datei, art.as_deref(), &cache).map(Some)
+        }
+    })
+    .await?;
+    if let Some(p) = &p {
+        app.asset_protocol_scope().allow_file(p).map_err(|e| e.to_string())?;
+    }
+    Ok(p)
+}
+
 /// Technische Werte der Clips für die Spalten der Take-Tabellen (aus der Kopie, nur der Kopf; siehe `technik`).
 #[tauri::command]
 async fn take_technik(
@@ -1943,6 +1993,7 @@ pub fn run() {
             projekt_uebersicht,
             take_technik,
             clip_vorschaubilder,
+            clip_video,
             karte_wiedererkennen,
             karte_einsortieren,
             karten_nachtragen,

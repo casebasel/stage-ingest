@@ -132,10 +132,20 @@ pub fn viewer() -> Option<PathBuf> {
     VIEWER_ORTE.iter().map(PathBuf::from).find(|p| cfg!(target_os = "macos") && p.is_dir())
 }
 
-/// Öffnet einen Clip im ART Viewer.
+/// Öffnet einen Clip im ART Viewer. Die Beta 0.9 (Qt) lädt eine per Finder übergebene Datei nicht (Marlon,
+/// 14.10.2026: „öffnet sich, aber nicht mit dem richtigen Clip“); darum ein eigenes Fenster mit dem Pfad als
+/// Programm-Argument (`open -n -a … --args <Clip>`), zusätzlich zur Dokument-Übergabe.
 pub fn im_viewer(datei: &Path) -> Result<(), String> {
     let app = viewer().ok_or("ARRI Reference Tool Viewer ist nicht installiert")?;
-    let aus = std::process::Command::new("open").arg("-a").arg(&app).arg(datei).output().map_err(|e| e.to_string())?;
+    let aus = std::process::Command::new("open")
+        .arg("-n")
+        .arg("-a")
+        .arg(&app)
+        .arg(datei)
+        .arg("--args")
+        .arg(datei)
+        .output()
+        .map_err(|e| e.to_string())?;
     if aus.status.success() {
         Ok(())
     } else {

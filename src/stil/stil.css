@@ -2031,3 +2031,37 @@ input[type="checkbox"][role="switch"]:checked::before {
   align-items: center;
   gap: 8px 12px;
 }
+
+/* Player der Projektseite (Abspieler.tsx): wie das Grossbild, Video so gross wie möglich. */
+.abspieler-bild {
+  display: grid;
+  place-items: center;
+  max-width: 100%;
+  max-height: 100%;
+}
+.abspieler-bild video {
+  max-width: calc(100vw - 96px);
+  max-height: calc(100vh - 160px);
+  background: oklch(0 0 0);
+  border-radius: var(--rund);
+}
+.abspieler-bild .vorschau-platz {
+  width: 480px;
+  height: 270px;
+  color: oklch(0.8 0 0);
+}
+.abspieler-fehler {
+  max-width: 560px;
+  padding: 12px 16px;
+  border-radius: var(--rund);
+  background: oklch(0.15 0 0 / 0.8);
+  color: oklch(0.92 0 0);
+}
+.abspieler-text {
+  display: flex;
+  gap: 16px;
+  align-items: baseline;
+}
+.abspieler-text .verweis {
+  color: oklch(0.85 0.05 85);
+}

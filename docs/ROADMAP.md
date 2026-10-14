@@ -22,6 +22,19 @@ Gebaut ist der Kern (siehe KONZEPT Kapitel 14). Offen, in dieser Reihenfolge:
      Byte 416/420/432 = 25000); eindeutig erst mit einem Clip, bei dem Sensor- und Projekt-fps verschieden sind
 4. Erst danach: Stage Ingest am Dreh einsetzen, die ersten Tage parallel zum bisherigen Werkzeug.
 
+## Erster echter Dreh (14.10.2026)
+
+- ~~Weitergedrehte Karte nachtragen~~ gebaut (0.1.32): frühere geprüfte Kopie wird ergänzt (nur Neues), ALE/BIN der
+  Kamera erneuert (alte Fassung und frühere ASC MHL in `05_METADATEN/frueher/`), alles nachgeprüft; vorher wurde
+  `A007R132` doppelt kopiert (`_ALT_`), weil ALE und BIN mit jedem Clip wachsen.
+- ~~Review: Player in der App~~ gebaut: Leertaste spielt den Take (wie Quick Look), ← → blättern, Esc/Leertaste
+  schliesst. MXF/ARRIRAW über eine Rec.709-Vorschau (ART CMD `process --video-codec prores422lt`, 960 px, ohne
+  Neukodieren in MOV umgepackt, `kern/src/umpacken.rs`), nach dem Einlesen im Hintergrund vorgerechnet,
+  Zwischenspeicher höchstens 40 GB. „Original öffnen“ startet den ART Viewer mit dem Clip als Argument. Offen: an
+  Marlons Mac prüfen (Wiedergabe von Apple, ART Viewer lädt den Clip).
+- Mittelbild je Take als Standbild an den Take (`foto`, `quelle = clip`): abgestimmt mit dem Plate Assistant, baut
+  nach Migration 0029.
+
 ## Prüfung und Konkurrenzvergleich (09.10.2026)
 
 Unabhängige Code-Prüfung: nichts, was eine fehlerhafte Karte als sicher durchlässt. Behoben: Zielordner nur mit

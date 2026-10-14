@@ -4,8 +4,7 @@
 // (Systemkarte, Entscheidung „Projektmanager“ vom 08.10.2026); heute nur lesen, Projekte und Drehorte anlegen.
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { openPath } from "@tauri-apps/plugin-opener";
-import { ask, message } from "@tauri-apps/plugin-dialog";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { ChevronDown, ChevronRight, Image as Bild, MapPinPlus, Play, Plus, RefreshCw, Settings, X } from "lucide-react";
 import { NeuerDrehort, NeuesProjekt, ProjektEinstellungen } from "../ProjektEinstellungen";
 import { useKonto, type Projekt as ProjektT, type Zugang } from "../konto";
@@ -13,6 +12,7 @@ import { useLauf } from "../lauf";
 import { gemerkt, merken, useEinstellungen } from "../einstellungen";
 import { Status, type Ton } from "../teile";
 import { kurz } from "./Einlesen";
+import { Abspieler, type AbspielEintrag } from "./Abspieler";
 import { SpaltenKopf, SpaltenMenue, SpaltenZellen, useTakeSpalten, type Spalte, type TakeMitWerten } from "./TakeSpalten";
 
 type TakeStand = TakeMitWerten;
@@ -226,34 +226,8 @@ function StudioNotiz({ t }: { t: TakeStand }) {
 /** Spielt die Kopie eines Clips ab, je nach Format: ProRes-MOV/MP4 mit dem Standard-Player (QuickTime), MXF und
  *  ARRIRAW mit dem ARRI Reference Tool Viewer (QuickTime kann sie nicht). Fehlt der Viewer, bietet die App an, ihn bei
  *  ARRI zu laden. Scheitert etwas, sagt sie es (nie still). */
-async function abspielen(datei: string) {
-  const klein = datei.toLowerCase();
-  const arri = klein.endsWith(".mxf") || klein.endsWith(".ari") || klein.endsWith(".arx");
-  try {
-    if (!arri) {
-      await openPath(datei);
-      return;
-    }
-    if (await invoke<string | null>("art_viewer")) {
-      await invoke("im_art_viewer", { datei });
-      return;
-    }
-    const ja = await ask(
-      "MXF und ARRIRAW spielt QuickTime nicht ab. Der kostenlose ARRI Reference Tool Viewer kann es.\n\nJetzt bei ARRI laden (etwa 160 MB) und den Installer von ARRI starten? Es gilt die Lizenz von ARRI.",
-      { title: "Clip abspielen", kind: "info", okLabel: "Laden und installieren", cancelLabel: "Abbrechen" },
-    );
-    if (!ja) return;
-    await invoke("art_viewer_installieren");
-    await message("Der Installer von ARRI ist offen. Nach der Installation den Clip noch einmal abspielen.", {
-      title: "ARRI Reference Tool Viewer",
-      kind: "info",
-    });
-  } catch (e) {
-    await message(`Der Clip liess sich nicht öffnen.\n\n${datei}\n\n${String(e)}`, { title: "Clip abspielen", kind: "error" }).catch(
-      () => {},
-    );
-  }
-}
+/** Öffnet den Player der Projektseite auf diesem Take (gesetzt von `Projekt`). */
+let spielerOeffnen: (takeId: string) => void = () => {};
 
 // Abspielen: immer sichtbar, direkt nach „Take“.
 const ABSPIELEN: Spalte = {
@@ -265,11 +239,11 @@ const ABSPIELEN: Spalte = {
     t.datei ? (
       <button
         className="knopf-symbol knopf-abspielen"
-        title={`Abspielen: ${t.datei}`}
+        title={`Abspielen (Leertaste): ${t.datei}`}
         aria-label={`Take ${t.nummer} abspielen`}
         onClick={(ev) => {
           ev.stopPropagation();
-          abspielen(t.datei!);
+          spielerOeffnen(t.id);
         }}
       >
         <Play size={14} aria-hidden />
@@ -355,6 +329,21 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
     sicher: zeilen.filter((z) => z.take.freigegeben).length,
   };
   const plates = u?.drehs.flatMap((d) => d.plates.map((p) => ({ dreh: d, plate: p }))) ?? [];
+  // Player: alle Takes mit erreichbarer Kopie, in der Reihenfolge der Projektseite (← → blättert durch sie).
+  const abspielListe: AbspielEintrag[] = zeilen
+    .filter((z) => z.take.datei)
+    .map((z) => ({
+      id: z.take.id,
+      datei: z.take.datei!,
+      titel: `${plateTitel(z.plate)} · Take ${z.take.nummer}`,
+      clip: z.take.clip,
+      bewertung: z.take.bewertung,
+    }));
+  const [spieler, setSpieler] = useState<number | null>(null);
+  spielerOeffnen = (id) => {
+    const i = abspielListe.findIndex((x) => x.id === id);
+    if (i >= 0) setSpieler(i);
+  };
   const nurEins = (a: "anlegen" | "drehort" | "einstellen") => {
     setAnlegen(a === "anlegen" ? !anlegen : false);
     setDrehortNeu(a === "drehort" ? !drehortNeu : false);
@@ -527,6 +516,7 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
           </section>
         </div>
       )}
+      {spieler !== null && abspielListe[spieler] && <Abspieler liste={abspielListe} index={spieler} setIndex={setSpieler} />}
     </div>
   );
 }
@@ -600,9 +590,14 @@ function AlleTakes({
               <tr
                 key={z.take.id}
                 tabIndex={0}
-                title="Plate öffnen"
+                title="Plate öffnen · Leertaste spielt den Take"
                 onClick={() => plateWaehlen(z.plate.id)}
-                onKeyDown={(ev) => (ev.key === "Enter" || ev.key === " ") && plateWaehlen(z.plate.id)}
+                onKeyDown={(ev) => {
+                  if (ev.key === " " && z.take.datei) {
+                    ev.preventDefault();
+                    spielerOeffnen(z.take.id);
+                  } else if (ev.key === "Enter" || ev.key === " ") plateWaehlen(z.plate.id);
+                }}
               >
                 <td className="ohne-umbruch">
                   {z.dreh.name} <span className="leise zahl">{datumKurz(z.dreh.datum)}</span>
@@ -972,7 +967,18 @@ function PlateDetail({ dreh, p, drehWaehlen }: { dreh: DrehStand; p: PlateStand;
           </thead>
           <tbody>
             {p.takes.map((t) => (
-              <tr key={t.id}>
+              <tr
+                key={t.id}
+                tabIndex={t.datei ? 0 : undefined}
+                title={t.datei ? "Leertaste oder Doppelklick spielt den Take" : undefined}
+                onDoubleClick={() => t.datei && spielerOeffnen(t.id)}
+                onKeyDown={(ev) => {
+                  if (ev.key === " " && t.datei) {
+                    ev.preventDefault();
+                    spielerOeffnen(t.id);
+                  }
+                }}
+              >
                 <SpaltenZellen spalten={spalten} t={t} technik={sp.technik} />
               </tr>
             ))}
@@ -1063,10 +1069,10 @@ function FotoText({ f, takes }: { f: FotoStand; takes: TakeStand[] }) {
       {t.datei && (
         <button
           className="verweis foto-abspielen"
-          title={`Kopie im Standard-Player öffnen: ${t.datei}`}
+          title={`Abspielen: ${t.datei}`}
           onClick={(ev) => {
             ev.stopPropagation();
-            abspielen(t.datei!);
+            spielerOeffnen(t.id);
           }}
         >
           <Play size={12} aria-hidden /> Clip abspielen
