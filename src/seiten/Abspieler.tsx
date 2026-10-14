@@ -1,13 +1,11 @@
-/** Player in der App (Marlon, 14.10.2026: „Player in der App“, wie Quick Look und Silverstack). Leertaste öffnet
- *  den gewählten Take und schliesst wieder, ← → springen zum vorigen/nächsten Take mit Kopie, Esc schliesst.
- *  MXF/ARRIRAW spielt eine Rec.709-Vorschau aus ART CMD (src-tauri/src/vorschau_video.rs), MOV/MP4 die Datei selbst.
- *  Das Original öffnet auf Wunsch der ARRI Reference Tool Viewer. */
+/** Abspielen (Marlon, 14.10.2026). MXF/ARRIRAW öffnet der ARRI Reference Tool Viewer mit dem Clip (keine
+ *  Vorschau-Dateien: „generiert zu viel Daten“). MOV/MP4 (iPhone, Fotoapparat) spielt der Player in der App, wie
+ *  Quick Look: Leertaste öffnet und schliesst, ← → springen zum vorigen/nächsten solchen Take, Esc schliesst. */
 import { useEffect, useRef, useState } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { ask, message } from "@tauri-apps/plugin-dialog";
 import { X } from "lucide-react";
-import { useEinstellungen } from "../einstellungen";
 import { Status } from "../teile";
 
 export type AbspielEintrag = {
@@ -21,12 +19,14 @@ export type AbspielEintrag = {
 
 const BEWERTUNG: Record<string, string> = { circle: "Favorit", gut: "Gut", schlecht: "Schlecht" };
 
-type Zustand = { art: "laedt"; neu: boolean } | { art: "bereit"; url: string } | { art: "fehler"; text: string };
+type Zustand = { art: "laedt" } | { art: "bereit"; url: string } | { art: "fehler"; text: string };
+
+/** MXF/ARRIRAW: spielt nur der ART Viewer. */
+export const istArri = (datei: string) => /\.(mxf|ari|arx)$/i.test(datei);
 
 /** Das Original öffnen: MXF/ARRIRAW im ARRI Reference Tool Viewer (bei Bedarf von ARRI laden), sonst im Standard-Player. */
 export async function originalOeffnen(datei: string) {
-  const klein = datei.toLowerCase();
-  const arri = klein.endsWith(".mxf") || klein.endsWith(".ari") || klein.endsWith(".arx");
+  const arri = istArri(datei);
   try {
     if (!arri) {
       await openPath(datei);
@@ -53,10 +53,6 @@ export async function originalOeffnen(datei: string) {
   }
 }
 
-async function video(datei: string, artCmd: string, nurVorhanden: boolean): Promise<string | null> {
-  return invoke<string | null>("clip_video", { datei, artCmd: artCmd.trim() || null, nurVorhanden });
-}
-
 export function Abspieler({
   liste,
   index,
@@ -66,8 +62,7 @@ export function Abspieler({
   index: number;
   setIndex: (i: number | null) => void;
 }) {
-  const e = useEinstellungen();
-  const [z, setZ] = useState<Zustand>({ art: "laedt", neu: false });
+  const [z, setZ] = useState<Zustand>({ art: "laedt" });
   const ref = useRef<HTMLVideoElement>(null);
   const t = liste[index];
 
@@ -92,24 +87,10 @@ export function Abspieler({
 
   useEffect(() => {
     let aus = false;
-    setZ({ art: "laedt", neu: false });
-    (async () => {
-      try {
-        // Erst nachsehen, ob die Vorschau schon da ist (dann sofort); sonst rechnen lassen.
-        let p = await video(t.datei, e.artCmd, true);
-        if (!p) {
-          if (aus) return;
-          setZ({ art: "laedt", neu: true });
-          p = await video(t.datei, e.artCmd, false);
-        }
-        if (!aus && p) setZ({ art: "bereit", url: convertFileSrc(p) });
-        // Den nächsten Take schon vorbereiten, damit → sofort spielt.
-        const naechster = liste[index + 1];
-        if (naechster) video(naechster.datei, e.artCmd, false).catch(() => {});
-      } catch (err) {
-        if (!aus) setZ({ art: "fehler", text: String(err) });
-      }
-    })();
+    setZ({ art: "laedt" });
+    invoke("clip_freigeben", { datei: t.datei })
+      .then(() => !aus && setZ({ art: "bereit", url: convertFileSrc(t.datei) }))
+      .catch((err) => !aus && setZ({ art: "fehler", text: String(err) }));
     return () => {
       aus = true;
     };
@@ -125,7 +106,7 @@ export function Abspieler({
           <video ref={ref} key={z.url} src={z.url} controls autoPlay playsInline />
         ) : z.art === "laedt" ? (
           <div className="vorschau-platz" aria-busy="true">
-            {z.neu ? "Vorschau wird gerechnet (ARRI ART CMD) …" : "Lädt …"}
+            Lädt …
           </div>
         ) : (
           <div className="abspieler-fehler">

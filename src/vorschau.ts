@@ -241,7 +241,7 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
   }),
   artcmd_laden: () => "/Users/beispiel/Library/Application Support/ch.filmstudiobasel.stage-ingest/art-cmd/art-cmd_1.0.0_macos_universal/bin/art-cmd",
   karte_wiedererkennen: () => ({ art: "nichtFormatiert", beginn: "2026-10-28T10:12:00+01:00", sicher: true, bekannt: 12, neue: 3 }),
-  clip_video: () => null,
+  clip_freigeben: () => null,
   clip_vorschaubilder: () =>
     ["#3a4250", "#6b5a3e", "#2f3d33"].map(
       (farbe) =>

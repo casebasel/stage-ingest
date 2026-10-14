@@ -27,11 +27,11 @@ Gebaut ist der Kern (siehe KONZEPT Kapitel 14). Offen, in dieser Reihenfolge:
 - ~~Weitergedrehte Karte nachtragen~~ gebaut (0.1.32): frühere geprüfte Kopie wird ergänzt (nur Neues), ALE/BIN der
   Kamera erneuert (alte Fassung und frühere ASC MHL in `05_METADATEN/frueher/`), alles nachgeprüft; vorher wurde
   `A007R132` doppelt kopiert (`_ALT_`), weil ALE und BIN mit jedem Clip wachsen.
-- ~~Review: Player in der App~~ gebaut: Leertaste spielt den Take (wie Quick Look), ← → blättern, Esc/Leertaste
-  schliesst. MXF/ARRIRAW über eine Rec.709-Vorschau (ART CMD `process --video-codec prores422lt`, 960 px, ohne
-  Neukodieren in MOV umgepackt, `kern/src/umpacken.rs`), nach dem Einlesen im Hintergrund vorgerechnet,
-  Zwischenspeicher höchstens 40 GB. „Original öffnen“ startet den ART Viewer mit dem Clip als Argument. Offen: an
-  Marlons Mac prüfen (Wiedergabe von Apple, ART Viewer lädt den Clip).
+- ~~Review~~ gebaut (0.1.33, korrigiert 0.1.34): Leertaste/Play öffnet MXF/ARRIRAW im ARRI Reference Tool Viewer
+  mit dem Clip als Argument, MOV/MP4 spielt der Player in der App (← → blättern, Esc schliesst). Die Rec.709-Vorschau
+  aus ART CMD (0.1.33) ist wieder weg: „generiert zu viel Daten“ (Marlon, 14.10.2026); die App räumt sie beim Start weg.
+  Offen: an Marlons Mac prüfen, ob der ART Viewer den Clip lädt.
+- ~~Bild aus der Mitte des Clips beim Darüberfahren über den Clipnamen~~ gebaut (0.1.34).
 - Mittelbild je Take als Standbild an den Take (`foto`, `quelle = clip`): abgestimmt mit dem Plate Assistant, baut
   nach Migration 0029.
 

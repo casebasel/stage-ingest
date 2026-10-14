@@ -34,7 +34,6 @@ pub mod pruefsumme;
 pub mod soll;
 pub mod struktur;
 pub mod uebersicht;
-pub mod umpacken;
 pub mod vorpruefen;
 pub mod zielstand;
 

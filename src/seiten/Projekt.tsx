@@ -12,7 +12,7 @@ import { useLauf } from "../lauf";
 import { gemerkt, merken, useEinstellungen } from "../einstellungen";
 import { Status, type Ton } from "../teile";
 import { kurz } from "./Einlesen";
-import { Abspieler, type AbspielEintrag } from "./Abspieler";
+import { Abspieler, istArri, originalOeffnen, type AbspielEintrag } from "./Abspieler";
 import { ClipMitBild, SpaltenKopf, SpaltenMenue, SpaltenZellen, useTakeSpalten, type Spalte, type TakeMitWerten } from "./TakeSpalten";
 
 type TakeStand = TakeMitWerten;
@@ -336,9 +336,10 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
     sicher: zeilen.filter((z) => z.take.freigegeben).length,
   };
   const plates = u?.drehs.flatMap((d) => d.plates.map((p) => ({ dreh: d, plate: p }))) ?? [];
-  // Player: alle Takes mit erreichbarer Kopie, in der Reihenfolge der Projektseite (← → blättert durch sie).
+  // Player: Takes mit erreichbarer MOV/MP4-Kopie, in der Reihenfolge der Projektseite (← → blättert durch sie).
+  // MXF/ARRIRAW öffnet der ART Viewer.
   const abspielListe: AbspielEintrag[] = zeilen
-    .filter((z) => z.take.datei)
+    .filter((z) => z.take.datei && !istArri(z.take.datei))
     .map((z) => ({
       id: z.take.id,
       datei: z.take.datei!,
@@ -348,6 +349,12 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
     }));
   const [spieler, setSpieler] = useState<number | null>(null);
   spielerOeffnen = (id) => {
+    const datei = zeilen.find((z) => z.take.id === id)?.take.datei;
+    if (!datei) return;
+    if (istArri(datei)) {
+      originalOeffnen(datei);
+      return;
+    }
     const i = abspielListe.findIndex((x) => x.id === id);
     if (i >= 0) setSpieler(i);
   };
@@ -977,7 +984,7 @@ function PlateDetail({ dreh, p, drehWaehlen }: { dreh: DrehStand; p: PlateStand;
               <tr
                 key={t.id}
                 tabIndex={t.datei ? 0 : undefined}
-                title={t.datei ? "Leertaste oder Doppelklick spielt den Take" : undefined}
+                title={t.datei ? "Leertaste oder Doppelklick spielt den Take (MXF im ARRI Reference Tool)" : undefined}
                 onDoubleClick={() => t.datei && spielerOeffnen(t.id)}
                 onKeyDown={(ev) => {
                   if (ev.key === " " && t.datei) {
