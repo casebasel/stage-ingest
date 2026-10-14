@@ -29,7 +29,7 @@ const DREH_FELDER: &[&str] = &["_anlegen", "name", "datum"];
 /// Felder an `karte` und `clip` (0018, Besitz Ingest): Karte nur als Ganzes (ein zweites `_anlegen` wird
 /// zusammengeführt); ein Clip zusätzlich umhängen („Zu klären“). Projekt, Name und Reel sind nach dem Anlegen fest.
 // `speicherort` ändert sich beim Einsortieren (Systemkarte; änderbar seit 0018, Plate Assistant 09.10.2026).
-const KARTE_FELDER: &[&str] = &["_anlegen", "speicherort"];
+const KARTE_FELDER: &[&str] = &["_anlegen", "speicherort", "ordner_datum", "ablage"];
 const CLIP_FELDER: &[&str] = &["_anlegen", "take_id", "studio_take_id", "dreh_id", "zuordnung"];
 
 /// Prüft alle Änderungen einer Anfrage an `aenderungen_anwenden`, bevor sie das Netz verlassen.

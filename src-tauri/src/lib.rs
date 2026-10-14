@@ -210,7 +210,9 @@ fn karte_in_datenbank(
         erste_aufnahme,
         kopien: freigabe.unabhaengige_kopien,
         freigegeben: freigabe.sicher,
-        speicherort: haupt.map(|&i| urteile[i].ordner.display().to_string()),
+        speicherort: haupt.map(|&i| karte_db::ort(&urteile[i].ordner, Some(&kennungen[i])).0),
+        ordner_datum: haupt.and_then(|&i| karte_db::ort(&urteile[i].ordner, None).1),
+        ablage: haupt.and_then(|&i| karte_db::ort(&urteile[i].ordner, Some(&kennungen[i])).2),
         bericht_ok: !berichte.is_empty() && berichte.iter().all(Result::is_ok),
     };
     // Drehort je Clip: der Drehort seines Takes (eine Karte kann mehrere Drehorte haben); ohne Take keiner (zu klären).
@@ -334,6 +336,7 @@ fn karten_nachtragen_jetzt(
             .map(|t| t.with_timezone(&chrono::Utc))
             .unwrap_or_else(|_| chrono::Utc::now());
         let reel = inhalt.clips.iter().find_map(|c| soll::arri_reel(&c.pfad).map(|(r, k)| format!("{r}{k}")));
+        let ort = kartenordner.as_ref().map(|o| karte_db::ort(o, geraet::kennung_schnell(o).ok().as_ref()));
         let karte = karte_db::Karte {
             projekt_id: &projekt.id,
             projekt_kurzname: &projekt.kurzname,
@@ -343,7 +346,9 @@ fn karten_nachtragen_jetzt(
             erste_aufnahme: None,
             kopien: inhalt.unabhaengige_kopien,
             freigegeben: inhalt.freigegeben,
-            speicherort: kartenordner.as_ref().map(|o| o.display().to_string()),
+            speicherort: ort.as_ref().map(|o| o.0.clone()),
+            ordner_datum: ort.as_ref().and_then(|o| o.1.clone()),
+            ablage: ort.as_ref().and_then(|o| o.2.clone()),
             bericht_ok,
         };
         // Tilt/Roll aus der CSV von ART CMD, falls sie beim Einlesen geschrieben wurde.
@@ -925,9 +930,8 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
             take_von.insert(soll::ohne_endung(p).to_owned(), (s.take_id.clone(), "clipname"));
         }
         for (s, p) in &a.ueber_qr {
-            // `qr` erst nach Migration 0029 (Prüfbedingung von 0018 kennt nur info1 …): bis dahin `info1`, beides heisst
-            // „Take-ID aus der Klappe“ (Absprache Plate Assistant, 10.10.2026).
-            take_von.insert(soll::ohne_endung(p).to_owned(), (s.take_id.clone(), "info1"));
+            // `qr` ist seit Migration 0029 erlaubt (live 14.10.2026, von aussen bestätigt).
+            take_von.insert(soll::ohne_endung(p).to_owned(), (s.take_id.clone(), "qr"));
         }
         for (s, p) in &a.ueber_kennung {
             take_von.insert(soll::ohne_endung(p).to_owned(), (s.take_id.clone(), "info1"));
@@ -1268,6 +1272,7 @@ fn kaskade_ausfuehren(
     // Datenbank: Kopienzahl und Freigabe der Karte nachführen (gleiche Karten-ID wie beim Einlesen).
     if let (Some(z), Some(zu), Some(zf)) = (zugang, projekt, zusammenfassung.as_ref()) {
         let reel = zf.clips.iter().find_map(|c| soll::arri_reel(&c.name).map(|(r, k)| format!("{r}{k}")));
+        let ort = karte_db::ort(quelle, geraet::kennung_schnell(quelle).ok().as_ref());
         let karte = karte_db::Karte {
             projekt_id: &zu.id,
             projekt_kurzname: &zu.kurzname,
@@ -1279,7 +1284,9 @@ fn kaskade_ausfuehren(
             erste_aufnahme: None,
             kopien: freigabe.unabhaengige_kopien,
             freigegeben: freigabe.sicher,
-            speicherort: Some(quelle.display().to_string()),
+            speicherort: Some(ort.0.clone()),
+            ordner_datum: ort.1.clone(),
+            ablage: ort.2.clone(),
             bericht_ok: true,
         };
         if zf.karte_id.as_deref() == Some(karte_db::karte_id(&karte).as_str()) {
@@ -1359,13 +1366,14 @@ async fn karte_einsortieren(
                 .and_then(|b| serde_json::from_slice::<ingest_kern::uebersicht::KartenZusammenfassung>(&b).ok())
                 .and_then(|k| k.karte_id);
             if let Some(id) = karte_id {
-                let a = karte_db::speicherort_aenderung(
+                let a = karte_db::ort_aenderungen(
                     &id,
-                    &v.karte.display().to_string(),
+                    &v.karte,
+                    geraet::kennung_schnell(&v.karte).ok().as_ref(),
                     chrono::Utc::now(),
-                    plate::ulid_aehnlich(),
+                    plate::ulid_aehnlich,
                 );
-                let _ = p.karte_schreiben(z, vec![a]);
+                let _ = p.karte_schreiben(z, a);
             }
         }
         // Stage: Pfad-Anfang jeder verschobenen Kopie ersetzen (ein Fehler sperrt nichts).

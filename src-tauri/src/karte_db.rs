@@ -9,6 +9,8 @@
 //!
 //! Hier nur der Aufbau der Änderungen (ohne Netz, getestet); geschickt wird über `plate::Plate::karte_schreiben`.
 
+use std::path::Path;
+
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::{json, Value};
 
@@ -23,8 +25,13 @@ pub struct Karte<'a> {
     pub erste_aufnahme: Option<DateTime<Utc>>,
     pub kopien: usize,
     pub freigegeben: bool,
-    /// Pfad der Hauptkopie (NAS bevorzugt).
+    /// Pfad der Hauptkopie (NAS bevorzugt): in einer Drehstruktur relativ zum Projektordner
+    /// (`<Datum>_<Ort>/01_KAMERA/<Karte>`), sonst wie bisher absolut ([`ort`]).
     pub speicherort: Option<String>,
+    /// Datum im Namen des Drehordners (`JJJJ-MM-TT`, ab 0029).
+    pub ordner_datum: Option<String>,
+    /// `nas` oder `platte:<Kennung>` (ab 0029).
+    pub ablage: Option<String>,
     pub bericht_ok: bool,
 }
 
@@ -41,6 +48,30 @@ pub struct Clip<'a> {
     /// `qr`/`info1`/`clipname`/`timecode`/`zeitfenster`/`hand`; leer = zu klären.
     pub zuordnung: &'a str,
     pub aus_clip: Option<Value>,
+}
+
+/// Ort der Hauptkopie für die Datenbank (Pfadregel, Systemkarte 7f256b7, live mit 0029): Speicherort, Ordnerdatum
+/// und Ablage. In einer Drehstruktur `<Ablage>/<Projekt>/<JJJJ-MM-TT_Ort>/01_KAMERA/<Karte>` ist der Speicherort
+/// relativ zum Projektordner (die Karte kennt keinen Drehort), sonst absolut wie bisher.
+pub fn ort(
+    kartenordner: &Path,
+    kennung: Option<&ingest_kern::geraet::Kennung>,
+) -> (String, Option<String>, Option<String>) {
+    let ablage = kennung.map(|k| match k.art {
+        ingest_kern::geraet::Art::Netz => "nas".to_owned(),
+        _ => format!("platte:{}", k.wert),
+    });
+    let kamera = kartenordner.parent();
+    let dreh =
+        kamera.filter(|k| k.file_name().is_some_and(|n| n == ingest_kern::struktur::KAMERA)).and_then(Path::parent);
+    if let (Some(dreh), Some(karte)) = (dreh, kartenordner.file_name()) {
+        let name = dreh.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let datum =
+            name.get(..10).filter(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").is_ok()).map(str::to_owned);
+        let rel = format!("{name}/{}/{}", ingest_kern::struktur::KAMERA, karte.to_string_lossy());
+        return (rel, datum, ablage);
+    }
+    (kartenordner.display().to_string(), None, ablage)
 }
 
 /// Grossbuchstaben, Ziffern und `_`; alles andere wird `_` (Grenze 32 Zeichen wie in 0018).
@@ -115,6 +146,32 @@ pub fn speicherort_aenderung(karte_id: &str, pfad: &str, jetzt: DateTime<Utc>, i
     aenderung(id, "karte", karte_id, "speicherort", json!(pfad.chars().take(1000).collect::<String>()), jetzt)
 }
 
+/// Nach dem Einsortieren: Speicherort, Ordnerdatum und Ablage nach der Pfadregel ([`ort`]), je eine Feldänderung.
+pub fn ort_aenderungen(
+    karte_id: &str,
+    kartenordner: &Path,
+    kennung: Option<&ingest_kern::geraet::Kennung>,
+    jetzt: DateTime<Utc>,
+    mut neue_id: impl FnMut() -> String,
+) -> Vec<Value> {
+    let (speicherort, datum, ablage) = ort(kartenordner, kennung);
+    let mut aus = vec![speicherort_aenderung(karte_id, &speicherort, jetzt, neue_id())];
+    if let Some(d) = datum {
+        aus.push(aenderung(neue_id(), "karte", karte_id, "ordner_datum", json!(d), jetzt));
+    }
+    if let Some(a) = ablage {
+        aus.push(aenderung(
+            neue_id(),
+            "karte",
+            karte_id,
+            "ablage",
+            json!(a.chars().take(200).collect::<String>()),
+            jetzt,
+        ));
+    }
+    aus
+}
+
 /// Alle Änderungen einer eingelesenen Karte: zuerst die Karte, dann ihre Clips. Liefert die Karten-ID und die
 /// Clipnamen, die nicht geschrieben werden können (Name ungültig).
 pub fn aenderungen(
@@ -138,6 +195,8 @@ pub fn aenderungen(
             "kopien": k.kopien.min(100),
             "freigegeben": k.freigegeben,
             "speicherort": k.speicherort.as_ref().map(|s| s.chars().take(1000).collect::<String>()),
+            "ordner_datum": k.ordner_datum,
+            "ablage": k.ablage.as_ref().map(|s| s.chars().take(200).collect::<String>()),
             "bericht_ok": k.bericht_ok,
             "geloescht": false,
             "erstellt_am": zeit(jetzt),
@@ -214,6 +273,8 @@ mod tests {
             kopien: 2,
             freigegeben: true,
             speicherort: Some("/Volumes/NAS/HAPPY_END".into()),
+            ordner_datum: None,
+            ablage: None,
             bericht_ok: true,
         }
     }
@@ -248,6 +309,25 @@ mod tests {
         assert_eq!(clipname("_x"), None);
         assert_eq!(kamera("A007C003_261028_R11A").as_deref(), Some("A"));
         assert_eq!(kamera("C0001"), None);
+    }
+
+    #[test]
+    fn ort_nach_der_pfadregel() {
+        let netz = ingest_kern::geraet::Kennung {
+            wert: "netz://truenas/Footage".into(),
+            sicher: true,
+            art: ingest_kern::geraet::Art::Netz,
+            seriennummer: None,
+            beschreibung: String::new(),
+        };
+        let (s, d, a) =
+            ort(Path::new("/Volumes/Footage/ingest/HAPPY_END/2026-10-14_4_STOCK/01_KAMERA/A007R132"), Some(&netz));
+        assert_eq!(s, "2026-10-14_4_STOCK/01_KAMERA/A007R132", "relativ zum Projektordner, gleich auf Mac und Windows");
+        assert_eq!((d.as_deref(), a.as_deref()), (Some("2026-10-14"), Some("nas")));
+        let platte =
+            ingest_kern::geraet::Kennung { wert: "UUID-1".into(), art: ingest_kern::geraet::Art::Platte, ..netz };
+        let (s, d, a) = ort(Path::new("/Volumes/T7/A007R132"), Some(&platte));
+        assert_eq!((s.as_str(), d, a.as_deref()), ("/Volumes/T7/A007R132", None, Some("platte:UUID-1")));
     }
 
     #[test]
