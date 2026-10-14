@@ -358,6 +358,8 @@ function useLaufHalten() {
           sollStudio = [];
         }
       }
+      // Merkdatei jeder Ablage anlegen, falls sie fehlt (feste ID und Name, auf Mac und Windows gleich).
+      for (const z of e.ziele) await invoke("ablage_sicherstellen", { pfad: z }).catch(() => {});
       const r = await karteEinlesen({
         quelle: quelle.pfad,
         ziele,

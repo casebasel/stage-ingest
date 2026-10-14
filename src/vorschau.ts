@@ -160,6 +160,12 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
     karteSteckt = false;
     return null;
   },
+  // Ziel 2 (NAS) als Beispiel eines zu tief gewählten Ordners (?ablage=falsch).
+  ablage_pruefen: (a) =>
+    params.get("ablage") === "falsch" && String(a.pfad).includes("NAS")
+      ? { art: "darin", vorschlag: "/Volumes/NAS", ablage: { id: "7k3f", name: "NAS · 7K3F", erstellt: "" } }
+      : { art: "richtig", ablage: { id: "a1", name: `${String(a.pfad).split("/")[2]} · A1B2`, erstellt: "" } },
+  ablage_sicherstellen: () => ({ id: "a1", name: "x", erstellt: "" }),
   ziel_geraete: (a) =>
     (a.basis as string[]).map((pfad) =>
       pfad.includes("NAS")

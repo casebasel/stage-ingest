@@ -3,7 +3,7 @@
 import { ArriHinweis } from "../ArriWerkzeuge";
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
+import { ask, open } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 import {
   ArrowRight,
@@ -22,10 +22,12 @@ import {
   X,
 } from "lucide-react";
 import {
+  ablagePruefen,
   auswerfen,
   bytesText,
   laufwerke as laufwerkeHolen,
   zielGeraete,
+  type AblagePruefung,
   type Abweichung,
   type KartenErgebnis,
   type Laufwerk,
@@ -254,6 +256,15 @@ function Auftrag({ pflicht, zurEinrichtung, laufwerke }: { pflicht: boolean; zur
       aktuell = false;
     };
   }, [e.ziele.join("|"), eingesteckt]);
+  // Ablage je Ziel (Marlon, 14.10.2026: Mac und Windows sollen sicher in denselben Hauptordner schreiben).
+  const [ablagen, setAblagen] = useState<(AblagePruefung | null)[]>([]);
+  useEffect(() => {
+    let aus = false;
+    Promise.all(e.ziele.map((z) => ablagePruefen(z).catch(() => null))).then((a) => !aus && setAblagen(a));
+    return () => {
+      aus = true;
+    };
+  }, [e.ziele.join("|"), eingesteckt, lauf.laeuft]);
   // Nach einem Fehler: das Ziel, das die Meldung nennt, in der Tabelle als betroffen zeigen.
   const betroffen =
     lauf.phase === "fehler" && lauf.fehler ? e.ziele.findIndex((z) => lauf.fehler!.includes(ohneEnde(z))) : -1;
@@ -264,7 +275,9 @@ function Auftrag({ pflicht, zurEinrichtung, laufwerke }: { pflicht: boolean; zur
   // Beim Fortsetzen fehlt nur ein Teil; den genauen Platz prüft die Vorab-Prüfung.
   const knappHier = (i: number) =>
     stand(i)?.art !== "vorhanden" && !lauf.fortsetzen.includes(lauf.ziele[i]) && istKnapp(geraete[i]);
+  const falschHier = (i: number) => ablagen[i]?.art === "darin" || ablagen[i]?.art === "darueber";
   const gesperrtHier = (i: number) =>
+    falschHier(i) ||
     (stand(i)?.art === "abweichend" && !lauf.zurSeite.includes(lauf.ziele[i])) ||
     ((stand(i)?.art === "unterbrochen" || stand(i)?.art === "ergaenzen") &&
       !lauf.zurSeite.includes(lauf.ziele[i]) &&
@@ -276,9 +289,29 @@ function Auftrag({ pflicht, zurEinrichtung, laufwerke }: { pflicht: boolean; zur
   );
   const genug = unabhaengig >= e.mindestKopien;
 
+  const falscherOrdner = ablagen.some((a) => a?.art === "darin" || a?.art === "darueber");
+  function zielErsetzen(alt: string, neu: string) {
+    e.setZiele(e.ziele.includes(neu) ? e.ziele.filter((z) => z !== alt) : e.ziele.map((z) => (z === alt ? neu : z)));
+  }
+
   async function zielHinzufuegen() {
-    const pfad = await open({ directory: true, title: "Zielordner wählen" });
-    if (typeof pfad === "string" && !e.ziele.includes(pfad)) e.setZiele([...e.ziele, pfad]);
+    const pfad = await open({ directory: true, title: "Hauptordner der Ablage wählen (z. B. Footage/ingest)" });
+    if (typeof pfad !== "string" || e.ziele.includes(pfad)) return;
+    const a = await ablagePruefen(pfad).catch(() => null);
+    if (a && (a.art === "darin" || a.art === "darueber")) {
+      const name = a.ablage ? `„${a.ablage.name}“` : "mit Projekten";
+      const ja = await ask(
+        a.art === "darin"
+          ? `Der gewählte Ordner liegt innerhalb einer Ablage ${name}:\n\n${pfad}\n\nDie App legt Projekte und Drehordner selbst an; Ziel ist immer der Hauptordner:\n\n${a.vorschlag}\n\nDiesen nehmen?`
+          : `Im gewählten Ordner liegt eine Ablage ${name}:\n\n${a.vorschlag}\n\nZiel ist immer der Hauptordner der Ablage. Diesen nehmen?`,
+        { title: "Ziel: Hauptordner der Ablage", kind: "warning", okLabel: "Hauptordner nehmen", cancelLabel: "Gewählten Ordner behalten" },
+      );
+      if (ja) {
+        if (!e.ziele.includes(a.vorschlag)) e.setZiele([...e.ziele, a.vorschlag]);
+        return;
+      }
+    }
+    e.setZiele([...e.ziele, pfad]);
   }
 
   const [wenigFrage, setWenigFrage] = useState(false);
@@ -289,12 +322,14 @@ function Auftrag({ pflicht, zurEinrichtung, laufwerke }: { pflicht: boolean; zur
   const v = lauf.automatisch ? lauf.vorschau : null;
   const ohneTreffer = !!v && v.gesamt > 0 && v.drehorte.length === 0;
   const zuordnungOffen = lauf.automatisch && (lauf.vorschauLaedt || !v || (ohneTreffer && !trotzdem));
-  const bereit = !!q && lauf.ziele.length > 0 && !pflicht && !lauf.sperrt && !zuordnungOffen;
+  const bereit = !!q && lauf.ziele.length > 0 && !pflicht && !lauf.sperrt && !zuordnungOffen && !falscherOrdner;
   const pp = lauf.paProjekt;
   const kamera = pp
     ? [pp.fps ? `${zahl(pp.fps, 3).replace(/,?0+$/, "")} fps` : "", pp.codec ?? "", pp.aufloesungPx ?? ""].filter(Boolean).join(" · ")
     : "";
-  const gesperrtWeil = !q
+  const gesperrtWeil = falscherOrdner
+    ? "Ein Ziel ist nicht der Hauptordner seiner Ablage (siehe Ziel-Liste)."
+    : !q
     ? "Zuerst links eine Karte wählen."
     : e.ziele.length === 0
       ? "Mindestens ein Ziel hinzufügen."
@@ -390,14 +425,17 @@ function Auftrag({ pflicht, zurEinrichtung, laufwerke }: { pflicht: boolean; zur
                 const zaehlt: { ton: Ton; text: string } =
                   i === betroffen
                     ? { ton: "fehler", text: "Betroffen, siehe Meldung oben" }
-                    : knapp
-                      ? { ton: "fehler", text: "Zu wenig Platz" }
-                      : zeilen[i];
+                    : falschHier(i)
+                      ? { ton: "fehler", text: "Falscher Ordner" }
+                      : knapp
+                        ? { ton: "fehler", text: "Zu wenig Platz" }
+                        : zeilen[i];
                 return (
                   <tr key={z}>
                     <td className="spalte-nr zahl">{i + 1}</td>
                     <td className="zelle-pfad">
                       <Pfad pfad={z} />
+                      <AblageZeile a={ablagen[i]} ersetzen={(neu) => zielErsetzen(z, neu)} />
                       {lauf.ziele[i] && lauf.dreh && (
                         <span className="unterzeile">
                           <ArrowRight size={12} strokeWidth={2} aria-hidden />
@@ -1480,5 +1518,40 @@ function KartenGedaechtnis({ pfad }: { pfad: string }) {
         </Status>
       )}
     </div>
+  );
+}
+
+/** Unter jedem Ziel: welche Ablage (auf Mac und Windows derselbe Name), oder warum der Ordner der falsche ist. */
+function AblageZeile({ a, ersetzen }: { a: AblagePruefung | null | undefined; ersetzen: (neu: string) => void }) {
+  if (!a) return null;
+  if (a.art === "richtig")
+    return (
+      <span className="unterzeile">
+        <Status ton="ok">Ablage {a.ablage.name}</Status>
+      </span>
+    );
+  if (a.art === "mitProjekten")
+    return (
+      <span className="unterzeile">
+        <Status ton="ok">Ablage mit Projekten · bekommt beim Einlesen ihren festen Namen</Status>
+      </span>
+    );
+  if (a.art === "neu")
+    return (
+      <span className="unterzeile">
+        <Status ton="leise">Neue Ablage · Projekte und Drehordner legt die App hier an</Status>
+      </span>
+    );
+  const name = a.ablage ? `„${a.ablage.name}“` : "mit Projekten";
+  return (
+    <span className="unterzeile ziel-konflikt">
+      <Status ton="fehler">
+        {a.art === "darin" ? `Liegt in der Ablage ${name}: Ziel ist deren Hauptordner` : `Enthält die Ablage ${name}: Ziel ist deren Hauptordner`}{" "}
+        <span className="zahl">{a.vorschlag}</span>
+      </Status>
+      <button className="knopf knopf-klein" onClick={() => ersetzen(a.vorschlag)}>
+        Hauptordner nehmen
+      </button>
+    </span>
   );
 }

@@ -1768,6 +1768,21 @@ async fn clip_vorschaubilder(app: AppHandle, datei: PathBuf, art_cmd: Option<Pat
     .await
 }
 
+/// Gewählten Zielordner prüfen: Hauptordner einer Ablage, darin, darüber oder neu (siehe `ingest_kern::ablage`).
+#[tauri::command]
+async fn ablage_pruefen(pfad: PathBuf) -> ingest_kern::ablage::Pruefung {
+    tauri::async_runtime::spawn_blocking(move || ingest_kern::ablage::pruefen(&pfad))
+        .await
+        .unwrap_or(ingest_kern::ablage::Pruefung::Neu)
+}
+
+/// Vor dem Einlesen: Merkdatei der Ablage anlegen, falls sie fehlt.
+#[tauri::command]
+async fn ablage_sicherstellen(pfad: PathBuf) -> Result<ingest_kern::ablage::Ablage, String> {
+    im_hintergrund(move || ingest_kern::ablage::sicherstellen(&pfad, plate::ulid_aehnlich).map_err(|e| e.to_string()))
+        .await
+}
+
 /// MOV/MP4 (iPhone, Fotoapparat) im Player der App abspielen: gibt genau diese Datei für das Fenster frei
 /// (Asset-Protokoll, sonst ist nichts freigegeben). MXF/ARRIRAW öffnet der ART Viewer (Marlon, 14.10.2026: keine
 /// Vorschau-Dateien, „lieber mit dem ARRI Reference Tool öffnen“).
@@ -1964,6 +1979,8 @@ pub fn run() {
             take_technik,
             clip_vorschaubilder,
             clip_freigeben,
+            ablage_pruefen,
+            ablage_sicherstellen,
             karte_wiedererkennen,
             karte_einsortieren,
             karten_nachtragen,

@@ -193,6 +193,16 @@ export type EinlesenVorschau = {
 export const einlesenVorschau = (zugang: unknown, projekt: unknown, quelle: string) =>
   invoke<EinlesenVorschau>("einlesen_vorschau", { zugang, projekt, quelle });
 
+/** Ablage = Hauptordner der Ziele (kern/ablage.rs). */
+export type Ablage = { id: string; name: string; erstellt: string };
+export type AblagePruefung =
+  | { art: "richtig"; ablage: Ablage }
+  | { art: "mitProjekten" }
+  | { art: "neu" }
+  | { art: "darin"; vorschlag: string; ablage: Ablage | null }
+  | { art: "darueber"; vorschlag: string; ablage: Ablage | null };
+export const ablagePruefen = (pfad: string) => invoke<AblagePruefung>("ablage_pruefen", { pfad });
+
 /** Zustand eines Zielordners vor dem Einlesen (kern/zielstand.rs). */
 export type ZielStand =
   | { art: "neu" }
