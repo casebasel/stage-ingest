@@ -1,4 +1,5 @@
 // Einrichtung: alles, was man einmal pro Rechner einstellt. Am Set zeigt der Kopf nur, ob es steht.
+import { ArtViewerLaden } from "../ArriWerkzeuge";
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -118,14 +119,14 @@ export function Einrichtung({ wahl, setWahl }: { wahl: Wahl; setWahl: (w: Wahl) 
 
         <section className="block" aria-labelledby="t-art">
           <div className="block-kopf">
-            <h2 id="t-art">Bewegungsdaten</h2>
-            {e.artCmd.trim() ? <Status ton="ok">Eingetragen</Status> : <Status ton="leise">Aus</Status>}
+            <h2 id="t-art">ARRI-Werkzeuge</h2>
+            {e.artCmd.trim() ? <Status ton="ok">ART CMD eingetragen</Status> : <Status ton="leise">ART CMD aus</Status>}
           </div>
-          <Feld name="ARRI ART CMD" hilfe="Neigung, Rollen und Brennweite pro Bild in die Metadaten jeder Karte. Optional.">
+          <Feld name="ARRI ART CMD" hilfe="Tilt, Roll, Kamerawerte und Vorschaubilder aus jedem Clip. Optional.">
             <input
               className="zahl"
               aria-label="Pfad zu ARRI ART CMD"
-              placeholder="z. B. /Applications/ARRI/art-cmd"
+              placeholder={navigator.userAgent.includes("Windows") ? "z. B. C:\\ARRI\\art-cmd.exe" : "z. B. /Applications/ARRI/art-cmd"}
               value={e.artCmd}
               disabled={gesperrt}
               spellCheck={false}
@@ -142,7 +143,12 @@ export function Einrichtung({ wahl, setWahl }: { wahl: Wahl; setWahl: (w: Wahl) 
               Wählen …
             </button>
           </Feld>
-          <ArtCmdLaden gesperrt={!!gesperrt} gesetzt={(p) => e.setArtCmd(p)} />
+          <Feld name="ART CMD laden" hilfe="Gratis bei ARRI, etwa 60 MB. Am Mac und unter Windows.">
+            <ArtCmdLaden gesperrt={!!gesperrt} gesetzt={(p) => e.setArtCmd(p)} />
+          </Feld>
+          <Feld name="ARRI Reference Tool Viewer" hilfe="Spielt MXF und ARRIRAW ab (Leertaste in der Projektseite). Optional.">
+            <ArtViewerLaden gesperrt={!!gesperrt} />
+          </Feld>
         </section>
 
         <section className="block" aria-labelledby="t-darst">
@@ -360,8 +366,8 @@ function ArtCmdLaden({ gesperrt, gesetzt }: { gesperrt: boolean; gesetzt: (pfad:
   return (
     <div className="art-laden">
       <p className="leise">
-        Noch nicht installiert? Die App lädt das kostenlose ARRI Reference Tool CMD direkt bei ARRI (etwa 60 MB) und trägt es
-        hier ein. Es gilt die Lizenz von ARRI (EULA im Paket). Danach erscheinen Tilt und Roll auch für schon eingelesene Karten.
+        Die App lädt ART CMD direkt bei ARRI und trägt es oben ein. Es gilt die Lizenz von ARRI (EULA im Paket). Danach
+        erscheinen Tilt und Roll auch für schon eingelesene Karten.
       </p>
       <div className="knopfreihe">
         <button

@@ -116,20 +116,56 @@ fn entpacken(daten: Vec<u8>, ziel: &Path) -> Result<(), String> {
 }
 
 /// ARRI Reference Tool Viewer (spielt ARRIRAW, ARRICORE und ProRes in MXF; QuickTime kann das nicht). Installiert
-/// wird er mit ARRIs eigenem Installer nach `/Applications/ARRI/` (Paketinhalt geprüft 09.10.2026).
+/// wird er mit ARRIs eigenem Installer: am Mac ein `.pkg` nach `/Applications/ARRI/` (Paketinhalt geprüft 09.10.2026),
+/// unter Windows ein NSIS-Installer (`ArriReferenceTool-0.9.0-win64.exe`, verlangt Administratorrechte; geprüft
+/// 14.10.2026), Ziel unter „Programme“.
 #[cfg(target_os = "macos")]
 const VIEWER_PAKET: Option<&str> = Some(
     "https://www.arri.com/resource/blob/408742/c45b26aa7ee7fe791fadd51d34785e71/arri-reference-tool-viewer-0-9-0-macos11-clang1200-arm64-data.zip",
 );
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+const VIEWER_PAKET: Option<&str> = Some(
+    "https://www.arri.com/resource/blob/408744/217ae73499a89f3813a9b29aa3a3ae5d/arri-reference-tool-viewer-0-9-0-win-msvc194-x64-data.zip",
+);
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 const VIEWER_PAKET: Option<&str> = None;
 
 const VIEWER_ORTE: &[&str] =
     &["/Applications/ARRI/ARRI Reference Tool Viewer.app", "/Applications/ARRI Reference Tool Viewer.app"];
 
-/// Pfad des installierten ART Viewer, falls vorhanden (nur macOS).
+/// Ist das ein Programm des ART Viewer (Windows): Name mit „ARRI“ und „Reference“ bzw. `ArriReferenceTool`, kein
+/// Deinstallationsprogramm und nicht ART CMD.
+fn ist_viewer_exe(name: &str) -> bool {
+    let n = name.to_ascii_lowercase().replace([' ', '_', '-'], "");
+    n.ends_with(".exe") && n.contains("arri") && n.contains("reference") && !n.contains("uninst") && !n.contains("cmd")
+}
+
+/// Pfad des installierten ART Viewer, falls vorhanden: am Mac das Programmpaket, unter Windows die `.exe` unter
+/// „Programme“ (bis drei Ordner tief gesucht, weil der Installer den Ordnernamen bestimmt).
 pub fn viewer() -> Option<PathBuf> {
-    VIEWER_ORTE.iter().map(PathBuf::from).find(|p| cfg!(target_os = "macos") && p.is_dir())
+    if cfg!(target_os = "macos") {
+        return VIEWER_ORTE.iter().map(PathBuf::from).find(|p| p.is_dir());
+    }
+    if !cfg!(windows) {
+        return None;
+    }
+    ["ProgramW6432", "ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"]
+        .iter()
+        .filter_map(|v| std::env::var_os(v).map(PathBuf::from))
+        .flat_map(|wurzel| {
+            walkdir::WalkDir::new(wurzel)
+                .max_depth(3)
+                .into_iter()
+                .filter_entry(|e| {
+                    // Nur ARRI-Ordner betreten (sonst dauert die Suche unter „Programme“ zu lange).
+                    e.depth() == 0
+                        || !e.file_type().is_dir()
+                        || e.file_name().to_string_lossy().to_ascii_lowercase().contains("arri")
+                })
+                .flatten()
+        })
+        .find(|e| e.file_type().is_file() && ist_viewer_exe(&e.file_name().to_string_lossy()))
+        .map(|e| e.into_path())
 }
 
 /// Öffnet einen Clip im ART Viewer. Die Beta 0.9 (Qt) lädt eine per Finder übergebene Datei nicht (Marlon,
@@ -137,6 +173,13 @@ pub fn viewer() -> Option<PathBuf> {
 /// Programm-Argument (`open -n -a … --args <Clip>`), zusätzlich zur Dokument-Übergabe.
 pub fn im_viewer(datei: &Path) -> Result<(), String> {
     let app = viewer().ok_or("ARRI Reference Tool Viewer ist nicht installiert")?;
+    if cfg!(windows) {
+        return std::process::Command::new(&app)
+            .arg(datei)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("ART Viewer startet nicht: {e}"));
+    }
     let aus = std::process::Command::new("open")
         .arg("-n")
         .arg("-a")
@@ -155,8 +198,8 @@ pub fn im_viewer(datei: &Path) -> Result<(), String> {
 
 /// Lädt den ART Viewer bei ARRI und startet ARRIs Installer (der Benutzer bestätigt dort Lizenz und Passwort).
 pub fn viewer_installieren(cache: &Path) -> Result<(), String> {
-    let url =
-        VIEWER_PAKET.ok_or("Den ART Viewer lädt die App nur auf dem Mac; sonst arri.com → ARRI Reference Tool.")?;
+    let url = VIEWER_PAKET
+        .ok_or("Den ART Viewer lädt die App am Mac und unter Windows; sonst arri.com → ARRI Reference Tool.")?;
     let antwort = ureq::get(url).timeout(std::time::Duration::from_secs(900)).call().map_err(|e| {
         format!("ART Viewer nicht von ARRI ladbar ({e}). Von Hand: arri.com → ARRI Reference Tool → Viewer.")
     })?;
@@ -177,12 +220,22 @@ pub fn viewer_installieren(cache: &Path) -> Result<(), String> {
         let pfad = ordner.join(&name);
         let mut datei = std::fs::File::create(&pfad).map_err(|e| e.to_string())?;
         std::io::copy(&mut eintrag, &mut datei).map_err(|e| e.to_string())?;
-        if name.to_string_lossy().ends_with(".pkg") {
+        let n = name.to_string_lossy().to_ascii_lowercase();
+        if n.ends_with(".pkg") || (n.ends_with(".exe") && n.contains("arri")) {
             pkg = Some(pfad);
         }
     }
-    let pkg = pkg.ok_or("Im Paket von ARRI fehlt der Installer (.pkg)")?;
-    std::process::Command::new("open").arg(&pkg).status().map_err(|e| format!("Installer startet nicht: {e}"))?;
+    let pkg = pkg.ok_or("Im Paket von ARRI fehlt der Installer")?;
+    if cfg!(windows) {
+        // Über die Shell starten: der Installer verlangt Administratorrechte, Windows fragt dann selbst nach.
+        std::process::Command::new("cmd")
+            .args(["/C", "start", ""])
+            .arg(&pkg)
+            .status()
+            .map_err(|e| format!("Installer startet nicht: {e}"))?;
+    } else {
+        std::process::Command::new("open").arg(&pkg).status().map_err(|e| format!("Installer startet nicht: {e}"))?;
+    }
     Ok(())
 }
 
@@ -190,6 +243,15 @@ pub fn viewer_installieren(cache: &Path) -> Result<(), String> {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn viewer_programm_unter_windows_erkennen() {
+        assert!(ist_viewer_exe("ARRI Reference Tool Viewer.exe"));
+        assert!(ist_viewer_exe("ArriReferenceTool.exe"));
+        assert!(!ist_viewer_exe("Uninstall ARRI Reference Tool.exe"));
+        assert!(!ist_viewer_exe("art-cmd.exe"));
+        assert!(!ist_viewer_exe("ArriReferenceTool-0.9.0-win64.zip"));
+    }
 
     #[test]
     fn verknuepfungen_bleiben_verknuepfungen() {

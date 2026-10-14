@@ -2100,3 +2100,15 @@ input[type="checkbox"][role="switch"]:checked::before {
   color: var(--text-3);
   font-size: 11px;
 }
+
+/* Hinweis „ARRI-Werkzeuge fehlen“ (Ein-Hinweis-Regel: eine Zeile, Zeichen in Gold, keine Fläche). */
+.arri-hinweis {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  align-items: baseline;
+  margin: 0 0 12px;
+}
+.arri-hinweis > :first-child {
+  flex: 1 1 48ch;
+}

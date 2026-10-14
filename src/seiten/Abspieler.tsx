@@ -37,7 +37,7 @@ export async function originalOeffnen(datei: string) {
       return;
     }
     const ja = await ask(
-      "MXF und ARRIRAW spielt QuickTime nicht ab. Der kostenlose ARRI Reference Tool Viewer kann es.\n\nJetzt bei ARRI laden (etwa 160 MB) und den Installer von ARRI starten? Es gilt die Lizenz von ARRI.",
+      "MXF und ARRIRAW spielt nur der kostenlose ARRI Reference Tool Viewer ab.\n\nJetzt bei ARRI laden (etwa 160 MB) und den Installer von ARRI starten? Es gilt die Lizenz von ARRI.",
       { title: "Clip abspielen", kind: "info", okLabel: "Laden und installieren", cancelLabel: "Abbrechen" },
     );
     if (!ja) return;

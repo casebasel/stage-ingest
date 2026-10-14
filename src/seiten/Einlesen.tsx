@@ -1,5 +1,6 @@
 // Einlesen: links die Quellen (eingesteckte Karten werden erkannt und angeboten), in der Mitte der Auftrag
 // (Karte → Ziele → Dreh → Einlesen), während des Laufs der Fortschritt pro Ziel, danach das Urteil über die ganze Breite.
+import { ArriHinweis } from "../ArriWerkzeuge";
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -530,6 +531,7 @@ function Auftrag({ pflicht, zurEinrichtung, laufwerke }: { pflicht: boolean; zur
         )}
       </section>
 
+      {!lauf.laeuft && <ArriHinweis zurEinrichtung={zurEinrichtung} />}
       {q && !lauf.laeuft && <KartenGedaechtnis pfad={q.pfad} />}
       <section className="block" aria-labelledby="t-dreh">
         <div className="block-kopf">
