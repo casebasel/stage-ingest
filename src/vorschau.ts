@@ -281,7 +281,7 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
             ],
             takes: [1, 2, 3].map((n) => ({
               id: `t${n}`, nummer: n, art: "take", bewertung: n === 2 ? "circle" : "", clip: `A001C00${n}_261028_R131`, karte: "A001R131", freigegeben: true,
-              datei: `/Volumes/NAS/A001R131/A001C00${n}_261028_R131.mov`, csv: `/Volumes/NAS/05_METADATEN/A001C00${n}_261028_R131.csv`,
+              datei: `/Volumes/NAS/A001R131/A001C00${n}_261028_R131.mov`, dateien: [`/Volumes/NAS/Footage/HAPPY_END/2026-10-28_RHEINUFER/01_KAMERA/A001R131/A001C00${n}_261028_R131.mov`, `/Volumes/SAMSUNG T7/Footage/HAPPY_END/2026-10-28_RHEINUFER/01_KAMERA/A001R131/A001C00${n}_261028_R131.mov`], csv: `/Volumes/NAS/05_METADATEN/A001C00${n}_261028_R131.csv`,
               werte: { "take.start_tc": `14:0${n}:10:00`, "take.start_zeit": `2026-10-28T12:0${n}:10Z`, "plate.kamera_hoehe_cm": 142, "plate.abstand_cm": 800, "plate.stativ": true, "plate.richtung.azimutGrad": 212.4, "plate.gps.lat": 47.5596, "plate.gps.lon": 7.5886, "plate.kamera.objektiv": "Signature Prime 35", "plate.notiz": "Gegenlicht" },
             })) },
           { id: "p2", nummer: 2, slate: "42B", name: "Brücke", art: "location", szene: "42",

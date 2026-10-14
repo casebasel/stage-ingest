@@ -2112,3 +2112,48 @@ input[type="checkbox"][role="switch"]:checked::before {
 .arri-hinweis > :first-child {
   flex: 1 1 48ch;
 }
+
+/* Rechtsklick auf eine Take-Zeile: Pfade der Kopien (PfadMenue.tsx). */
+.pfad-menue-hinter {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+}
+.pfad-menue {
+  position: fixed;
+  display: grid;
+  padding: 4px;
+  border: 1px solid var(--linie-stark);
+  border-radius: var(--rund);
+  background: var(--panel-2);
+  box-shadow: 0 10px 28px oklch(0 0 0 / 0.4);
+}
+.pfad-menue-titel {
+  padding: 6px 8px 4px;
+  color: var(--text-3);
+  font-size: 11px;
+}
+.pfad-menue-leer {
+  padding: 6px 8px 8px;
+}
+.pfad-menue-eintrag {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: calc(var(--rund) - 2px);
+  background: none;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.pfad-menue-eintrag:hover,
+.pfad-menue-eintrag:focus-visible {
+  background: var(--hover);
+}
+.pfad-menue-eintrag .zahl {
+  flex: 1;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}

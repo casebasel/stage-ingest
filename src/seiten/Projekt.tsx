@@ -12,6 +12,7 @@ import { useLauf } from "../lauf";
 import { gemerkt, merken, useEinstellungen } from "../einstellungen";
 import { Status, type Ton } from "../teile";
 import { kurz } from "./Einlesen";
+import { PfadMenue, type PfadMenueStand } from "./PfadMenue";
 import { Abspieler, istArri, originalOeffnen, type AbspielEintrag } from "./Abspieler";
 import { ClipMitBild, vorschauLaden, SpaltenKopf, SpaltenMenue, SpaltenZellen, useTakeSpalten, type Spalte, type TakeMitWerten } from "./TakeSpalten";
 
@@ -235,6 +236,8 @@ function StudioNotiz({ t }: { t: TakeStand }) {
  *  ARRI zu laden. Scheitert etwas, sagt sie es (nie still). */
 /** Öffnet den Player der Projektseite auf diesem Take (gesetzt von `Projekt`). */
 let spielerOeffnen: (takeId: string) => void = () => {};
+/** Rechtsklick auf eine Take-Zeile: Pfade der Kopien (gesetzt von `Projekt`). */
+let pfadMenueOeffnen: (ev: React.MouseEvent, t: TakeStand, titel: string) => void = () => {};
 
 // Abspielen: immer sichtbar, direkt nach „Take“.
 const ABSPIELEN: Spalte = {
@@ -348,6 +351,11 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
       bewertung: z.take.bewertung,
     }));
   const [spieler, setSpieler] = useState<number | null>(null);
+  const [pfadMenue, setPfadMenue] = useState<PfadMenueStand | null>(null);
+  pfadMenueOeffnen = (ev, t, titel) => {
+    ev.preventDefault();
+    setPfadMenue({ x: ev.clientX, y: ev.clientY, titel, dateien: t.dateien ?? (t.datei ? [t.datei] : []) });
+  };
   spielerOeffnen = (id) => {
     const datei = zeilen.find((z) => z.take.id === id)?.take.datei;
     if (!datei) return;
@@ -531,6 +539,7 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
         </div>
       )}
       {spieler !== null && abspielListe[spieler] && <Abspieler liste={abspielListe} index={spieler} setIndex={setSpieler} />}
+      {pfadMenue && <PfadMenue m={pfadMenue} zu={() => setPfadMenue(null)} />}
     </div>
   );
 }
@@ -604,8 +613,9 @@ function AlleTakes({
               <tr
                 key={z.take.id}
                 tabIndex={0}
-                title="Plate öffnen · Leertaste spielt den Take"
+                title="Plate öffnen · Leertaste spielt den Take · Rechtsklick: Pfad kopieren"
                 onClick={() => plateWaehlen(z.plate.id)}
+                onContextMenu={(ev) => pfadMenueOeffnen(ev, z.take, `${plateTitel(z.plate)} · Take ${z.take.nummer}`)}
                 onKeyDown={(ev) => {
                   if (ev.key === " " && z.take.datei) {
                     ev.preventDefault();
@@ -984,8 +994,9 @@ function PlateDetail({ dreh, p, drehWaehlen }: { dreh: DrehStand; p: PlateStand;
               <tr
                 key={t.id}
                 tabIndex={t.datei ? 0 : undefined}
-                title={t.datei ? "Leertaste oder Doppelklick spielt den Take (MXF im ARRI Reference Tool)" : undefined}
+                title={t.datei ? "Leertaste oder Doppelklick spielt den Take (MXF im ARRI Reference Tool) · Rechtsklick: Pfad kopieren" : undefined}
                 onDoubleClick={() => t.datei && spielerOeffnen(t.id)}
+                onContextMenu={(ev) => pfadMenueOeffnen(ev, t, `${plateTitel(p)} · Take ${t.nummer}`)}
                 onKeyDown={(ev) => {
                   if (ev.key === " " && t.datei) {
                     ev.preventDefault();

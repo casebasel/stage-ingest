@@ -18,6 +18,8 @@ export type TakeMitWerten = {
   /** Studio-Take der Stage: Bewertung und Notiz im Ingest änderbar. */
   studio?: boolean;
   datei?: string | null;
+  /** Alle erreichbaren Kopien (Rechtsklick: Pfad kopieren). */
+  dateien?: string[];
   csv?: string | null;
   werte?: Record<string, unknown>;
 };

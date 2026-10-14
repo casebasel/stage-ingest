@@ -135,6 +135,8 @@ pub struct TakeStand {
     pub studio: bool,
     /// Clipdatei auf einer gefundenen Kopie und die CSV von ART CMD dazu (für `take_technik`).
     pub datei: Option<PathBuf>,
+    /// Alle erreichbaren Kopien der Clipdatei (NAS, Platten), für „Pfad kopieren“ per Rechtsklick (Marlon, 14.10.2026).
+    pub dateien: Vec<PathBuf>,
     pub csv: Option<PathBuf>,
     /// Alle Felder aus dem Plate Assistant für die Spalten: `take.<feld>`, `plate.<feld>`, verschachtelt mit Punkt
     /// (`plate.kamera.iso`). Ohne IDs, Löschmarke und Listen.
@@ -297,6 +299,15 @@ pub fn zusammenfuehren(
     // Mehrere Kopien derselben Karte: eine, deren Clipdatei erreichbar ist, gewinnt.
     let mut nach_take: HashMap<String, Eingelesen> = HashMap::new();
     let mut nach_clip: HashMap<String, Eingelesen> = HashMap::new();
+    // Alle erreichbaren Kopien je Take bzw. Clipname (jede Platte einmal).
+    let mut pfade_take: HashMap<String, Vec<PathBuf>> = HashMap::new();
+    let mut pfade_clip: HashMap<String, Vec<PathBuf>> = HashMap::new();
+    let dazu = |m: &mut HashMap<String, Vec<PathBuf>>, k: &str, p: &PathBuf| {
+        let v = m.entry(k.to_owned()).or_default();
+        if !v.contains(p) {
+            v.push(p.clone());
+        }
+    };
     for k in &karten {
         // `<Dreh>/04_BERICHTE/<Karte>_ingest.json` → Clips in `<Dreh>/01_KAMERA/<Karte>/`, ART CMD in `05_METADATEN`.
         let dreh = k.datei.parent().and_then(|b| b.parent());
@@ -319,6 +330,12 @@ pub fn zusammenfuehren(
                         .join(format!("{}.csv", ingest_kern::soll::ohne_endung(&c.pfad)))
                 })
                 .filter(|p| datei.is_some() && p.is_file());
+            if let Some(p) = &datei {
+                if let Some(t) = &c.take_id {
+                    dazu(&mut pfade_take, t, p);
+                }
+                dazu(&mut pfade_clip, &c.name.to_uppercase(), p);
+            }
             let stand = Eingelesen { karte: k.inhalt.karte.clone(), freigegeben: k.inhalt.freigegeben, datei, csv };
             let besser = |alt: Option<&Eingelesen>| alt.is_none_or(|a| a.datei.is_none() && stand.datei.is_some());
             if let Some(t) = &c.take_id {
@@ -362,6 +379,11 @@ pub fn zusammenfuehren(
                 let mut werte = std::collections::BTreeMap::new();
                 flach("take", t, &mut werte);
                 flach("plate", p, &mut werte);
+                let dateien = pfade_take
+                    .get(&id)
+                    .or_else(|| (!clip.is_empty()).then(|| pfade_clip.get(&clip)).flatten())
+                    .cloned()
+                    .unwrap_or_default();
                 takes.push(TakeStand {
                     nummer: t["nummer"].as_i64().unwrap_or(0),
                     art: t["art"].as_str().unwrap_or("take").to_owned(),
@@ -371,6 +393,7 @@ pub fn zusammenfuehren(
                     freigegeben: stand.is_some_and(|s| s.freigegeben),
                     studio: t["studio"] == true,
                     datei: stand.and_then(|s| s.datei.clone()),
+                    dateien,
                     csv: stand.and_then(|s| s.csv.clone()),
                     werte,
                     id,
@@ -567,6 +590,43 @@ mod tests {
         assert_eq!((p[0]["art"].as_str(), p[0]["studio_name"].as_str()), (Some("studio"), Some("STUDIO-01")));
         assert_eq!(p[0]["take"][0]["studio"], true);
         assert_eq!(drehs[1]["name"], "Studio (Stage)", "ohne bekannten Drehort ein eigener Eintrag");
+    }
+
+    #[test]
+    fn alle_kopien_eines_clips_fuer_pfad_kopieren() {
+        // Dieselbe Karte auf NAS und Platte: der Take kennt beide Pfade (Rechtsklick „Pfad kopieren“).
+        let t = tempfile::tempdir().unwrap();
+        let drehs = json!([{ "id": "D1", "name": "Rheinufer", "datum": "2026-10-28", "geloescht": false, "plate": [
+            { "id": "P1", "nummer": 1, "geloescht": false, "take": [
+                { "id": "T1", "nummer": 1, "clip_name": "A001C003_261028_R1AB", "geloescht": false } ] } ] }]);
+        let inhalt: KartenZusammenfassung = serde_json::from_value(json!({
+            "format": 1, "karte": "A001R1AB", "beginn": "", "version": "t", "freigegeben": true,
+            "unabhaengigeKopien": 2, "grund": "",
+            "clips": [{ "name": "A001C003_261028_R1AB", "pfad": "A001C003_261028_R1AB.mov", "startTc": null,
+                        "endTc": null, "takeId": "T1", "zuordnung": "clipname" }]
+        }))
+        .unwrap();
+        let karten: Vec<GefundeneKarte> = ["NAS", "T7"]
+            .iter()
+            .map(|platte| {
+                let dreh = t.path().join(platte).join("2026-10-28_RHEINUFER");
+                let clips = dreh.join("01_KAMERA/A001R1AB");
+                std::fs::create_dir_all(&clips).unwrap();
+                std::fs::write(clips.join("A001C003_261028_R1AB.mov"), b"x").unwrap();
+                GefundeneKarte {
+                    dreh_ordner: "2026-10-28_RHEINUFER".into(),
+                    datei: dreh.join("04_BERICHTE/A001R1AB_ingest.json"),
+                    inhalt: inhalt.clone(),
+                }
+            })
+            .collect();
+        let p: Projekt =
+            serde_json::from_value(json!({"id": "projekt-x", "name": "X", "kurzname": "X", "aktiv": true})).unwrap();
+        let u = zusammenfuehren(p, &drehs, &json!([]), karten, vec![]);
+        let take = &u.drehs[0].plates[0].takes[0];
+        assert_eq!(take.dateien.len(), 2, "{:?}", take.dateien);
+        assert!(take.dateien.iter().any(|d| d.starts_with(t.path().join("NAS"))));
+        assert!(take.dateien.iter().any(|d| d.starts_with(t.path().join("T7"))));
     }
 
     #[test]
