@@ -241,11 +241,20 @@ fn karte_in_datenbank(
             .unwrap_or_default()
     };
     let namen: Vec<String> = clips.iter().map(|c| soll::ohne_endung(&c.pfad).to_owned()).collect();
+    // Schon bekannte Karte (zweites Einlesen): Hand-Zuordnungen bleiben, ihre Felder werden nicht mitgeschickt.
+    let von_hand: std::collections::HashSet<String> = app
+        .state::<Arc<plate::Plate>>()
+        .clips_von_hand(z, &karte_db::karte_id(&karte))
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
     let eintraege: Vec<karte_db::Clip> = clips
         .iter()
         .zip(&namen)
         .map(|(c, name)| {
             let (take, art) = take_von.get(name).map(|(t, a)| (Some(t.as_str()), *a)).unwrap_or((None, ""));
+            let hand = karte_db::clipname(name).is_some_and(|n| von_hand.contains(&n));
+            let (take, art) = if hand { (None, "") } else { (take, art) };
             let take = take.filter(|t| !t.is_empty());
             let (take, studio_take) = match take {
                 Some(t) if studio.contains(t) => (None, Some(t)),
@@ -670,12 +679,34 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
         .filter(|z| auftrag.fortsetzen.contains(z) && !auftrag.zur_seite.contains(z))
         .cloned()
         .collect();
+    // Weitergedrehte Karte ergänzen (Marlon, 14.10.2026): Begleitdateien, die die Kamera neu geschrieben hat, samt
+    // früherer ASC-MHL-Historie nach 05_METADATEN/frueher (nichts gelöscht); die alten Clips werden gegen diese Historie
+    // geprüft, die Kopie bekommt eine neue.
+    let mut fruehere_historie = Vec::new();
+    let mut erneuert = Vec::new();
+    for z in &fortsetzen {
+        if let ingest_kern::zielstand::Stand::Ergaenzen { ersetzen, .. } =
+            ingest_kern::zielstand::bestimmen(&auftrag.quelle, z)
+        {
+            if let Some(ablage) = ingest_kern::zielstand::begleitdateien_beiseite(z, &ersetzen, chrono::Local::now())
+                .map_err(|e| format!("{}: alte Begleitdateien nicht beiseite gelegt: {e}", z.display()))?
+            {
+                erneuert.push(format!(
+                    "Begleitdateien der Kamera erneuert ({}); alte Fassung und frühere ASC MHL aufbewahrt in {}",
+                    ersetzen.iter().map(|p| p.rsplit('/').next().unwrap_or(p)).collect::<Vec<_>>().join(", "),
+                    ablage.display()
+                ));
+                fruehere_historie.push((z.clone(), ablage));
+            }
+        }
+    }
     // Kern: kopieren, zurücklesen, zweites Lesen, frühere Kopien, ASC MHL, Freigabe (ingest_kern::ablauf, getestet).
     let ablauf = ingest_kern::ablauf::Ablauf {
         quelle: auftrag.quelle.clone(),
         schreiben: schreiben.clone(),
         vorhandene: vorhandene.clone(),
         fortsetzen,
+        fruehere_historie,
         kennungen: &kennungen,
         mit_md5: auftrag.mit_md5,
         zweimal_lesen: auftrag.zweimal_lesen,
@@ -698,6 +729,7 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
     for z in &zur_seite_gelegt {
         freigabe.hinweise.push(format!("Unvollständiger Ordner zur Seite gelegt (nichts gelöscht): {z}"));
     }
+    freigabe.hinweise.extend(erneuert);
     if auftrag.weniger_kopien_bestaetigt {
         freigabe.hinweise.push(format!(
             "Bewusst mit weniger Zielen als den verlangten {} Kopien gestartet (bestätigt am {}).",
@@ -934,7 +966,7 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
     // Zusammenfassung der Karte neben den Bericht, auf jedes gute Ziel (für die Projektübersicht).
     {
         use ingest_kern::uebersicht::{self, ClipEintrag, KartenZusammenfassung};
-        let z = KartenZusammenfassung {
+        let mut z = KartenZusammenfassung {
             format: uebersicht::FORMAT,
             karte: geraet::kartenname(&auftrag.quelle),
             beginn: kopie.beginn.to_rfc3339(),
@@ -966,6 +998,14 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
                 })
                 .collect(),
         };
+        // Ergänzte Karte: Hand-Zuordnungen und Datenbank-ID der früheren Zusammenfassung bleiben.
+        if let Some(alt) = urteile
+            .iter()
+            .filter(|u| u.gut())
+            .find_map(|u| uebersicht::lesen(&struktur::berichtordner(&u.ordner), &z.karte))
+        {
+            uebersicht::frueheres_uebernehmen(&mut z, &alt);
+        }
         for u in urteile.iter().filter(|u| u.gut()) {
             if let Err(e) = uebersicht::schreiben(&struktur::berichtordner(&u.ordner), &z) {
                 nachtraege.push(format!("Zusammenfassung nicht geschrieben ({}): {e}", u.ordner.display()));

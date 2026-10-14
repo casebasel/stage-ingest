@@ -235,9 +235,12 @@ function useLaufHalten() {
   const [zurSeite, setZurSeite] = useState<string[]>([]);
   const [fortsetzen, setFortsetzen] = useState<string[]>([]);
   const [standZaehler, setStandZaehler] = useState(0);
+  // Ziele, bei denen der Benutzer selbst entschieden hat (dort nichts mehr automatisch vormerken).
+  const vonHand = useRef<Set<string>>(new Set());
   useEffect(() => {
     setZurSeite([]);
     setFortsetzen([]);
+    vonHand.current = new Set();
   }, [quelle?.pfad]);
   useEffect(() => {
     if (!quelle || ziele.length === 0 || laeuft) {
@@ -246,7 +249,13 @@ function useLaufHalten() {
     }
     let aktuell = true;
     zieleStand(quelle.pfad, ziele)
-      .then((st) => aktuell && setZielStaende(st))
+      .then((st) => {
+        if (!aktuell) return;
+        setZielStaende(st);
+        // Weitergedrehte Karte (Marlon, 14.10.2026): eine frühere, geprüfte Kopie wird ohne Rückfrage ergänzt.
+        const auto = ziele.filter((z, i) => st[i]?.art === "ergaenzen" && !vonHand.current.has(z));
+        if (auto.length) setFortsetzen((f) => [...new Set([...f, ...auto])]);
+      })
       .catch(() => aktuell && setZielStaende([]));
     return () => {
       aktuell = false;
@@ -254,10 +263,12 @@ function useLaufHalten() {
   }, [quelle?.pfad, ziele.join("|"), laeuft, standZaehler]);
   // Zur Seite legen und Fortsetzen schliessen sich aus: wer das eine wählt, nimmt das andere zurück.
   function zurSeiteUmschalten(ziel: string) {
+    vonHand.current.add(ziel);
     setFortsetzen((f) => f.filter((x) => x !== ziel));
     setZurSeite((z) => (z.includes(ziel) ? z.filter((x) => x !== ziel) : [...z, ziel]));
   }
   function fortsetzenUmschalten(ziel: string) {
+    vonHand.current.add(ziel);
     setZurSeite((z) => z.filter((x) => x !== ziel));
     setFortsetzen((f) => (f.includes(ziel) ? f.filter((x) => x !== ziel) : [...f, ziel]));
   }

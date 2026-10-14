@@ -110,6 +110,10 @@ pub fn vorpruefen_mit(auftrag: &Auftrag, bytes: u64, zur_seite: &[std::path::Pat
                 ziel.display()
             )));
         } else if auftrag.fortsetzen.iter().any(|z| z == ziel)
+            && matches!(crate::zielstand::bestimmen(&quelle, ziel), crate::zielstand::Stand::Ergaenzen { .. })
+        {
+            // Normalfall nach dem Weiterdrehen (Marlon, 14.10.2026): kein Befund, die Ziel-Liste zeigt „Wird ergänzt“.
+        } else if auftrag.fortsetzen.iter().any(|z| z == ziel)
             && matches!(crate::zielstand::bestimmen(&quelle, ziel), crate::zielstand::Stand::Unterbrochen { .. })
         {
             befunde.push(warnung(format!(

@@ -25,6 +25,10 @@ pub struct Ablauf<'a> {
     pub schreiben: Vec<PathBuf>,
     pub vorhandene: Vec<PathBuf>,
     pub fortsetzen: Vec<PathBuf>,
+    /// Ergänzte Kopien, deren ASC-MHL-Historie samt alten Begleitdateien beiseite gelegt wurde
+    /// ([`crate::zielstand::begleitdateien_beiseite`]): Ziel → Ordner, der die frühere `ascmhl` enthält. Die alten Clips
+    /// werden dagegen geprüft, die Kopie bekommt eine neue Historie.
+    pub fruehere_historie: Vec<(PathBuf, PathBuf)>,
     pub kennungen: &'a [Kennung],
     pub mit_md5: bool,
     pub zweimal_lesen: bool,
@@ -52,6 +56,16 @@ pub struct Gesichert {
 }
 
 pub fn sichern(a: &Ablauf, abbruch: &AtomicBool, mut melden: impl FnMut(Meldung)) -> Result<Gesichert, String> {
+    // Fortgesetzte Ziele mit ASC-MHL-Historie (im Ziel oder beiseite gelegt) sind ergänzte frühere Kopien; vor dem
+    // Schreiben der neuen Generation bestimmt. Wert: Ordner mit der früheren Historie.
+    let ergaenzt: std::collections::HashMap<PathBuf, PathBuf> = a
+        .fortsetzen
+        .iter()
+        .filter_map(|z| match a.fruehere_historie.iter().find(|(ziel, _)| ziel == z) {
+            Some((_, h)) => Some((z.clone(), h.clone())),
+            None => z.join(crate::mhl::ORDNER).is_dir().then(|| (z.clone(), z.clone())),
+        })
+        .collect();
     let k = Auftrag {
         quelle: a.quelle.clone(),
         ziele: a.schreiben.clone(),
@@ -94,9 +108,18 @@ pub fn sichern(a: &Ablauf, abbruch: &AtomicBool, mut melden: impl FnMut(Meldung)
     }
 
     // Frühere Kopien: Die Karte muss auch zur früheren Prüfsumme in deren ASC MHL passen. Sonst ist es eine andere
-    // Karte oder die Daten haben sich verändert; dann zählt die Kopie nicht.
-    for (u, z) in urteile.iter_mut().zip(&kopie.ziele).filter(|(u, z)| z.vorhanden && u.gut()) {
-        match crate::mhl::abweichungen_zur_historie(&z.ordner, &kopie) {
+    // Karte oder die Daten haben sich verändert; dann zählt die Kopie nicht. Gilt auch für ergänzte Kopien
+    // (fortgesetzt, mit Historie), dort ohne die Begleitdateien, die die Kamera seither neu geschrieben hat.
+    for (u, z) in urteile
+        .iter_mut()
+        .zip(&kopie.ziele)
+        .filter(|(u, z)| (z.vorhanden || ergaenzt.contains_key(&z.ordner)) && u.gut())
+    {
+        let historie = ergaenzt.get(&z.ordner).unwrap_or(&z.ordner);
+        let ohne_begleit = !z.vorhanden;
+        match crate::mhl::abweichungen_zur_historie(historie, &kopie)
+            .map(|x| x.into_iter().filter(|p| !(ohne_begleit && crate::zielstand::begleitdatei(p))).collect::<Vec<_>>())
+        {
             Ok(x) if x.is_empty() => {}
             Ok(x) => {
                 u.kopierfehler = Some(format!(
@@ -139,6 +162,14 @@ pub fn sichern(a: &Ablauf, abbruch: &AtomicBool, mut melden: impl FnMut(Meldung)
     let historie_abweichungen = crate::mhl::historie_abgleichen(&kopie).map(|x| x.len()).unwrap_or(1);
     let umfang = Umfang { dateien: kopie.dateien.len(), ganze_karte: a.ganze_karte, historie_abweichungen };
     let mut freigabe = beurteilen(&urteile, a.kennungen, a.mindest_kopien, umfang);
+    for (u, z) in urteile.iter().zip(&kopie.ziele).filter(|(_, z)| !z.vorhanden && ergaenzt.contains_key(&z.ordner)) {
+        if u.gut() {
+            freigabe.hinweise.push(format!(
+                "Frühere Kopie ergänzt: nur Neues geschrieben, danach alles gegen die Karte nachgeprüft: {}",
+                z.ordner.display()
+            ));
+        }
+    }
     for (u, z) in urteile.iter().zip(&kopie.ziele).filter(|(_, z)| z.vorhanden) {
         freigabe.hinweise.push(if u.gut() {
             format!("Frühere Kopie nicht neu geschrieben, vollständig nachgeprüft und gezählt: {}", z.ordner.display())

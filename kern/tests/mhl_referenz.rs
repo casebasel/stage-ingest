@@ -143,3 +143,50 @@ fn karte_die_von_ihrer_eigenen_historie_abweicht_wird_erkannt() {
     let abw = mhl::historie_abgleichen(&kopie).unwrap();
     assert_eq!(abw.len(), 2, "{abw:?}");
 }
+
+#[test]
+fn ergaenzte_kopie_mit_ersetzter_begleitdatei_besteht_verify() {
+    // Nachtragen (14.10.2026): neuer Clip, ALE von der Kamera neu geschrieben, alte Fassung beiseite gelegt.
+    let Some(r) = referenz() else { return };
+    let t = tempfile::tempdir().unwrap();
+    let karte_ordner = t.path().join("A001R132");
+    karte(&karte_ordner);
+    let ziel = t.path().join("ziel/A001R132");
+    let a = Auftrag { quelle: karte_ordner.clone(), ziele: vec![ziel.clone()], mit_md5: true, ..Default::default() };
+    let kopie = kopieren(&a, &AtomicBool::new(false), |_| {}).unwrap();
+    mhl::schreiben(&ziel, &kopie, &angaben()).unwrap();
+
+    fs::write(karte_ordner.join("Clips/A001C002_261007_R132.mov"), vec![9u8; 1_000_000]).unwrap();
+    fs::write(karte_ordner.join("A001R132.ale"), b"Heading\nzwei Clips\n").unwrap();
+    let ersetzt = vec!["A001R132.ale".to_string()];
+    let ablage =
+        ingest_kern::zielstand::begleitdateien_beiseite(&ziel, &ersetzt, chrono::Local::now()).unwrap().unwrap();
+    let a = Auftrag { fortsetzen: vec![ziel.clone()], ..a };
+    let kopie = kopieren(&a, &AtomicBool::new(false), |_| {}).unwrap();
+    mhl::schreiben(&ziel, &kopie, &angaben()).unwrap();
+    verify(&r, &ziel);
+    // Die frühere Historie liegt als Archiv neben den alten Fassungen (ohne die Clips, darum nicht für sich prüfbar).
+    assert!(ablage.join("ascmhl/ascmhl_chain.xml").is_file());
+}
+
+#[test]
+fn ergaenzte_kopie_ohne_ersetzte_begleitdatei_fuehrt_die_historie_weiter() {
+    let Some(r) = referenz() else { return };
+    let t = tempfile::tempdir().unwrap();
+    let karte_ordner = t.path().join("A001R132");
+    karte(&karte_ordner);
+    let ziel = t.path().join("ziel/A001R132");
+    let a = Auftrag { quelle: karte_ordner.clone(), ziele: vec![ziel.clone()], mit_md5: true, ..Default::default() };
+    let kopie = kopieren(&a, &AtomicBool::new(false), |_| {}).unwrap();
+    mhl::schreiben(&ziel, &kopie, &angaben()).unwrap();
+    fs::write(karte_ordner.join("Clips/A001C002_261007_R132.mov"), vec![9u8; 1_000_000]).unwrap();
+    let a = Auftrag { fortsetzen: vec![ziel.clone()], ..a };
+    let kopie = kopieren(&a, &AtomicBool::new(false), |_| {}).unwrap();
+    mhl::schreiben(&ziel, &kopie, &Angaben { zeit: Utc::now() + chrono::Duration::seconds(2), ..angaben() }).unwrap();
+    assert!(fs::read_dir(ziel.join("ascmhl")).unwrap().any(|e| e
+        .unwrap()
+        .file_name()
+        .to_string_lossy()
+        .starts_with("0002_")));
+    verify(&r, &ziel);
+}

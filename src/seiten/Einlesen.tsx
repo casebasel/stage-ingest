@@ -265,7 +265,11 @@ function Auftrag({ pflicht, zurEinrichtung, laufwerke }: { pflicht: boolean; zur
     stand(i)?.art !== "vorhanden" && !lauf.fortsetzen.includes(lauf.ziele[i]) && istKnapp(geraete[i]);
   const gesperrtHier = (i: number) =>
     (stand(i)?.art === "abweichend" && !lauf.zurSeite.includes(lauf.ziele[i])) ||
-    (stand(i)?.art === "unterbrochen" && !lauf.zurSeite.includes(lauf.ziele[i]) && !lauf.fortsetzen.includes(lauf.ziele[i]));
+    ((stand(i)?.art === "unterbrochen" || stand(i)?.art === "ergaenzen") &&
+      !lauf.zurSeite.includes(lauf.ziele[i]) &&
+      !lauf.fortsetzen.includes(lauf.ziele[i]));
+  // Mindestens ein Ziel wird ergänzt: Der Knopf sagt, was passiert.
+  const nachtragen = e.ziele.some((_, i) => stand(i)?.art === "ergaenzen" && lauf.fortsetzen.includes(lauf.ziele[i]));
   const { zeilen, unabhaengig } = zaehlung(
     e.ziele.map((_, i) => (i === betroffen || knappHier(i) || gesperrtHier(i) ? null : geraete[i])),
   );
@@ -438,6 +442,40 @@ function Auftrag({ pflicht, zurEinrichtung, laufwerke }: { pflicht: boolean; zur
                           )}
                         </span>
                       )}
+                      {st?.art === "ergaenzen" && zielPfad && (
+                        <span className={lauf.fortsetzen.includes(zielPfad) ? "unterzeile" : "unterzeile ziel-konflikt"}>
+                          {lauf.fortsetzen.includes(zielPfad) ? (
+                            <>
+                              <Status ton="ok">
+                                Schon gesichert: {st.vorhanden} {st.vorhanden === 1 ? "Datei bleibt" : "Dateien bleiben"},{" "}
+                                {st.neu} {st.neu === 1 ? "neue kommt" : "neue kommen"} dazu
+                                {st.ersetzen.length > 0 &&
+                                  ` · ${st.ersetzen.length === 1 ? "eine Begleitdatei" : `${st.ersetzen.length} Begleitdateien`} der Kamera erneuert (alte Fassung bleibt)`}{" "}
+                                · danach wird alles nachgeprüft
+                              </Status>
+                              <button className="verweis" onClick={() => lauf.zurSeiteUmschalten(zielPfad)}>
+                                Stattdessen neu kopieren
+                              </button>
+                            </>
+                          ) : lauf.zurSeite.includes(zielPfad) ? (
+                            <>
+                              <Status ton="warn">Wird zur Seite gelegt (umbenannt in …_ALT_Datum_Zeit, nichts gelöscht) und neu kopiert</Status>
+                              <button className="verweis" onClick={() => lauf.fortsetzenUmschalten(zielPfad)}>
+                                Rückgängig
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <Status ton="warn">
+                                Schon gesichert, {st.neu} {st.neu === 1 ? "neue Datei fehlt" : "neue Dateien fehlen"}
+                              </Status>
+                              <button className="knopf knopf-klein" onClick={() => lauf.fortsetzenUmschalten(zielPfad)}>
+                                Neue nachtragen
+                              </button>
+                            </>
+                          )}
+                        </span>
+                      )}
                       {st?.art === "abweichend" && zielPfad && (
                         <span className="unterzeile ziel-konflikt">
                           {lauf.zurSeite.includes(zielPfad) ? (
@@ -570,7 +608,13 @@ function Auftrag({ pflicht, zurEinrichtung, laufwerke }: { pflicht: boolean; zur
             onClick={() => (genug ? lauf.einlesen(false) : setWenigFrage(true))}
           >
             <HardDrive size={18} strokeWidth={1.75} aria-hidden />
-            {lauf.phase === "fehler" ? "Nochmals einlesen" : genug ? "Einlesen" : `Einlesen (nur ${unabhaengig} von ${e.mindestKopien} Kopien)`}
+            {lauf.phase === "fehler"
+              ? "Nochmals einlesen"
+              : genug
+                ? nachtragen
+                  ? "Neue Clips nachtragen"
+                  : "Einlesen"
+                : `${nachtragen ? "Nachtragen" : "Einlesen"} (nur ${unabhaengig} von ${e.mindestKopien} Kopien)`}
           </button>
         )}
       </div>
@@ -1426,11 +1470,11 @@ function KartenGedaechtnis({ pfad }: { pfad: string }) {
         </Status>
       ) : (
         <Status ton="warn">
-          Karte wurde nach dem Einlesen am {wann} nicht formatiert: {w.bekannt} Clips von damals sind noch drauf,{" "}
+          Seit dem Einlesen am {wann} weitergedreht: {w.bekannt} Clips sind schon gesichert,{" "}
           <b>
-            {w.neue} {w.neue === 1 ? "Clip ist neu" : "Clips sind neu"} und noch nirgends gesichert
+            {w.neue} {w.neue === 1 ? "Clip ist neu" : "Clips sind neu"}
           </b>
-          . Jetzt einlesen.
+          . Beim Nachtragen kommen nur die neuen dazu, danach wird alles nachgeprüft.
         </Status>
       )}
     </div>

@@ -45,6 +45,12 @@ pub fn aus_kopie(
             ziel.display()
         ))
         }
+        crate::zielstand::Stand::Ergaenzen { .. } => {
+            return Err(format!(
+                "{} enthält eine frühere Kopie, der neue Dateien fehlen. Bitte ein anderes Ziel wählen.",
+                ziel.display()
+            ))
+        }
         crate::zielstand::Stand::Abweichend { grund } => {
             return Err(format!("{} existiert schon ({grund}). Bitte ein anderes Ziel wählen.", ziel.display()))
         }

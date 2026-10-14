@@ -198,6 +198,8 @@ export type ZielStand =
   | { art: "neu" }
   | { art: "vorhanden"; dateien: number }
   | { art: "unterbrochen"; vorhanden: number; gesamt: number }
+  /** Frühere, geprüfte Kopie; die Karte wurde weiterbespielt (nicht formatiert). `ersetzen`: Begleitdateien der Kamera. */
+  | { art: "ergaenzen"; vorhanden: number; neu: number; ersetzen: string[] }
   | { art: "abweichend"; grund: string };
 export const zieleStand = (quelle: string, ziele: string[]) => invoke<ZielStand[]>("ziele_stand", { quelle, ziele });
 

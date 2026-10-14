@@ -5,6 +5,11 @@
 //! - **Vorhanden**: enthält genau die Dateien der Karte (gleiche Namen und Grössen) und eine ASC-MHL-Historie, also
 //!   eine frühere, geprüfte Kopie. Sie wird nicht neu geschrieben, sondern vollständig gegen die Karte zurückgelesen
 //!   und zählt dann als Kopie („Kopie ergänzen“: vorhandene prüfen, fehlende dazu schreiben).
+//! - **Ergänzen**: eine frühere, geprüfte Kopie (mit ASC MHL) derselben Karte, die seither weitergedreht wurde und
+//!   nicht formatiert ist (Marlon, 14.10.2026): alle Clips im Ordner sind unverändert auf der Karte, dazu kommen neue
+//!   Clips. Begleitdateien, die die Kamera bei jedem Clip neu schreibt (`<Reel>_AVID.ale`, `<Reel>_BIN.bin`), dürfen
+//!   sich geändert haben: Die alte Fassung kommt nach `05_METADATEN/frueher/` ([`begleitdateien_beiseite`]), die neue
+//!   in die Kopie. Danach wird wie immer alles gegen die Karte zurückgelesen.
 //! - **Abweichend**: unvollständig, andere Dateien oder ohne MHL (z. B. abgebrochen). Wird nur auf ausdrücklichen
 //!   Wunsch zur Seite gelegt (umbenannt in `<Name>_ALT_<Datum>_<Zeit>`) und dann neu kopiert. Gelöscht wird nichts.
 
@@ -29,9 +34,38 @@ pub enum Stand {
         vorhanden: usize,
         gesamt: usize,
     },
+    /// Frühere, geprüfte Kopie dieser Karte, die Karte hat seither neue Clips. `ersetzen`: Begleitdateien (relativ),
+    /// die die Kamera seither neu geschrieben hat.
+    Ergaenzen {
+        vorhanden: usize,
+        neu: usize,
+        ersetzen: Vec<String>,
+    },
     Abweichend {
         grund: String,
     },
+}
+
+/// Begleitdateien der Kamera (Listen, Index, Metadaten), die sich mit jedem Clip ändern dürfen; nie Bild oder Ton.
+const BEGLEIT_ENDUNGEN: &[&str] = &[
+    "ale", "bin", "xml", "txt", "csv", "json", "plist", "idx", "bim", "smi", "ppn", "cpi", "mpl", "bdm", "ind", "lst",
+];
+/// Begleitdateien bis zu dieser Grösse werden bei gleicher Grösse Byte für Byte verglichen.
+const BEGLEIT_HOECHSTENS: u64 = 64 * 1024 * 1024;
+
+/// Ist der Pfad eine Begleitdatei der Kamera (darf beim Ergänzen ersetzt werden)?
+pub fn begleitdatei(pfad: &str) -> bool {
+    let name = pfad.rsplit('/').next().unwrap_or(pfad);
+    let endung = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+    !crate::ale::ist_clip(pfad) && BEGLEIT_ENDUNGEN.contains(&endung.as_str())
+}
+
+/// Gleich grosse Datei mit anderem Inhalt? (Nur für kleine Begleitdateien; Lesefehler zählen als anders.)
+fn inhalt_anders(a: &Path, b: &Path) -> bool {
+    match (std::fs::read(a), std::fs::read(b)) {
+        (Ok(x), Ok(y)) => x != y,
+        _ => true,
+    }
 }
 
 /// Dateien, die das Betriebssystem in Ordner legt und die nichts über die Kopie aussagen.
@@ -79,6 +113,28 @@ pub fn bestimmen(quelle: &Path, ziel: &Path) -> Stand {
     let fehlen = karte.iter().filter(|(p, _)| !da.contains_key(*p)).count();
     let anders = karte.iter().filter(|(p, g)| da.get(*p).is_some_and(|d| d != *g)).count();
     let fremd = da.keys().filter(|p| !karte.contains_key(*p)).count();
+    // Frühere, geprüfte Kopie und die Karte wurde weiterbespielt: nur Begleitdateien dürfen anders sein.
+    if fremd == 0 && ziel.join(crate::mhl::ORDNER).is_dir() {
+        let anders_begleit: Vec<String> = karte
+            .iter()
+            .filter(|(p, g)| {
+                da.get(*p).is_some_and(|d| {
+                    begleitdatei(p)
+                        && (d != *g || (**g <= BEGLEIT_HOECHSTENS && inhalt_anders(&quelle.join(p), &ziel.join(p))))
+                })
+            })
+            .map(|(p, _)| p.clone())
+            .collect();
+        let anders_sonst =
+            karte.iter().filter(|(p, g)| da.get(*p).is_some_and(|d| d != *g) && !begleitdatei(p)).count();
+        if anders_sonst == 0 && fehlen > 0 {
+            return Stand::Ergaenzen {
+                vorhanden: karte.len() - fehlen - anders_begleit.len(),
+                neu: fehlen,
+                ersetzen: anders_begleit,
+            };
+        }
+    }
     // Nur Fehlendes (oder nur das MHL fehlt), nichts Fremdes, nichts mit anderer Grösse: unterbrochener Lauf.
     if anders == 0 && fremd == 0 && (fehlen > 0 || !ziel.join(crate::mhl::ORDNER).is_dir()) {
         return Stand::Unterbrochen { vorhanden: karte.len() - fehlen, gesamt: karte.len() };
@@ -100,6 +156,75 @@ pub fn bestimmen(quelle: &Path, ziel: &Path) -> Stand {
         return Stand::Abweichend { grund: "ohne ASC MHL: nie fertig geprüft".into() };
     }
     Stand::Vorhanden { dateien: karte.len() }
+}
+
+/// Legt beim Ergänzen die alten Fassungen von Begleitdateien beiseite: Verschieben (nie Löschen) nach
+/// `05_METADATEN/frueher/<Kartenordner>_<JJJJ-MM-TT_HHMM>/<relativer Pfad>` neben der Kopie. Danach fehlen sie im Ziel
+/// und werden wie neue Dateien von der Karte geschrieben.
+///
+/// Die ASC-MHL-Historie (`ascmhl/`) wandert mit: ASC MHL erlaubt unter demselben Pfad keinen anderen Inhalt (die
+/// Referenz meldet „hash mismatch“). Die ergänzte Kopie bekommt deshalb eine neue Historie; die alte bleibt neben den
+/// alten Fassungen vollständig und gültig, und die alten Clips werden gegen sie geprüft
+/// ([`crate::ablauf::Ablauf::fruehere_historie`]). Gibt den Ordner mit den alten Fassungen und der Historie zurück.
+pub fn begleitdateien_beiseite(
+    ziel: &Path,
+    ersetzen: &[String],
+    zeit: chrono::DateTime<chrono::Local>,
+) -> std::io::Result<Option<PathBuf>> {
+    if ersetzen.is_empty() {
+        return Ok(None);
+    }
+    let name = ziel.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "karte".into());
+    let basis = crate::struktur::metadatenordner(ziel).join("frueher");
+    let stamm = format!("{name}_{}", zeit.format("%Y-%m-%d_%H%M"));
+    let mut ablage = basis.join(&stamm);
+    let mut n = 2;
+    while ablage.exists() {
+        ablage = basis.join(format!("{stamm}_{n}"));
+        n += 1;
+    }
+    for rel in ersetzen {
+        let von = ziel.join(rel);
+        let nach = ablage.join(rel);
+        if let Some(e) = nach.parent() {
+            std::fs::create_dir_all(e)?;
+        }
+        // Gleiche Platte (neben der Kopie): Umbenennen. Sonst kopieren, sichern, dann erst entfernen.
+        if std::fs::rename(&von, &nach).is_err() {
+            std::fs::copy(&von, &nach)?;
+            std::fs::File::open(&nach)?.sync_all()?;
+            std::fs::remove_file(&von)?;
+        }
+        if let Some(e) = nach.parent() {
+            crate::ohne_cache::ordner_sichern(e)?;
+        }
+        if let Some(e) = von.parent() {
+            crate::ohne_cache::ordner_sichern(e)?;
+        }
+    }
+    let historie = ziel.join(crate::mhl::ORDNER);
+    if historie.is_dir() {
+        let nach = ablage.join(crate::mhl::ORDNER);
+        if std::fs::rename(&historie, &nach).is_err() {
+            for e in walkdir::WalkDir::new(&historie).min_depth(1) {
+                let e = e.map_err(std::io::Error::other)?;
+                let z = nach.join(e.path().strip_prefix(&historie).map_err(std::io::Error::other)?);
+                if e.file_type().is_dir() {
+                    std::fs::create_dir_all(&z)?;
+                } else {
+                    if let Some(p) = z.parent() {
+                        std::fs::create_dir_all(p)?;
+                    }
+                    std::fs::copy(e.path(), &z)?;
+                    std::fs::File::open(&z)?.sync_all()?;
+                }
+            }
+            std::fs::remove_dir_all(&historie)?;
+        }
+        crate::ohne_cache::ordner_sichern(&ablage)?;
+        crate::ohne_cache::ordner_sichern(ziel)?;
+    }
+    Ok(Some(ablage))
 }
 
 /// Legt einen Zielordner zur Seite: Umbenennen im selben Ordner in `<Name>_ALT_<JJJJ-MM-TT_HHMM>` (bei Bedarf mit
@@ -240,15 +365,59 @@ mod tests {
         assert_eq!(bestimmen(&k, &z), Stand::Vorhanden { dateien: 2 });
 
         fs::remove_file(z.join("A004R132/A004C001.mxf")).unwrap();
-        // Mit MHL, aber eine Datei fehlt: auch das lässt sich fortsetzen (alles wird danach zurückgelesen).
-        assert_eq!(bestimmen(&k, &z), Stand::Unterbrochen { vorhanden: 1, gesamt: 2 });
+        // Mit MHL, aber eine Datei fehlt: die Karte hat etwas, das die frühere Kopie nicht hat → ergänzen.
+        let ergaenzen = Stand::Ergaenzen { vorhanden: 1, neu: 1, ersetzen: vec![] };
+        assert_eq!(bestimmen(&k, &z), ergaenzen);
         fs::write(z.join("A004R132/A004C001.mxf.ingest-teil"), b"01").unwrap();
-        assert_eq!(bestimmen(&k, &z), Stand::Unterbrochen { vorhanden: 1, gesamt: 2 }, "halbe Datei zählt nicht");
+        assert_eq!(bestimmen(&k, &z), ergaenzen, "halbe Datei zählt nicht");
         fs::write(z.join("A004R132/fremd.mov"), b"x").unwrap();
         assert!(matches!(bestimmen(&k, &z), Stand::Abweichend { grund } if grund.contains("nicht von dieser Karte")));
         fs::remove_file(z.join("A004R132/fremd.mov")).unwrap();
         fs::write(z.join("A004R132/A004C001.mxf"), b"012").unwrap();
         assert!(matches!(bestimmen(&k, &z), Stand::Abweichend { grund } if grund.contains("anderer Grösse")));
+    }
+
+    #[test]
+    fn weitergedrehte_karte_wird_ergaenzt() {
+        // Wie A007R132 am 14.10.2026: eingelesen, weitergedreht, nicht formatiert. Die Kamera hat ALE und BIN neu
+        // geschrieben (länger bzw. gleich lang mit anderem Inhalt) und einen Clip dazu.
+        let t = tempfile::tempdir().unwrap();
+        let k = karte(t.path());
+        fs::write(k.join("A004R132/A004R132_BIN.bin"), b"bin1").unwrap();
+        let z = t.path().join("ziel/A004R132");
+        kopie(&k, &z);
+        fs::create_dir_all(z.join("ascmhl")).unwrap();
+        fs::write(z.join("ascmhl/0001_A004R132.mhl"), b"<hashlist/>").unwrap();
+        assert_eq!(bestimmen(&k, &z), Stand::Vorhanden { dateien: 3 });
+
+        fs::write(k.join("A004R132/A004C002.mxf"), b"neu").unwrap();
+        fs::write(k.join("A004R132/A004R132_AVID.ale"), b"ale mit zwei clips").unwrap();
+        fs::write(k.join("A004R132/A004R132_BIN.bin"), b"bin2").unwrap();
+        let Stand::Ergaenzen { vorhanden, neu, mut ersetzen } = bestimmen(&k, &z) else {
+            panic!("{:?}", bestimmen(&k, &z))
+        };
+        ersetzen.sort();
+        assert_eq!((vorhanden, neu), (1, 1));
+        assert_eq!(ersetzen, ["A004R132/A004R132_AVID.ale", "A004R132/A004R132_BIN.bin"]);
+
+        // Ein Clip mit anderer Grösse ist nie eine Begleitdatei: dann passt die Kopie nicht.
+        fs::write(k.join("A004R132/A004C001.mxf"), b"anders").unwrap();
+        assert!(matches!(bestimmen(&k, &z), Stand::Abweichend { .. }));
+        fs::write(k.join("A004R132/A004C001.mxf"), b"0123456789").unwrap();
+
+        // Ohne frühere Prüfsummen (kein ASC MHL) gibt es kein Ergänzen.
+        fs::rename(z.join("ascmhl"), t.path().join("weg")).unwrap();
+        assert!(matches!(bestimmen(&k, &z), Stand::Abweichend { .. }));
+        fs::rename(t.path().join("weg"), z.join("ascmhl")).unwrap();
+
+        // Alte Fassungen wandern nach 05_METADATEN/frueher, nichts wird gelöscht.
+        let ablage = begleitdateien_beiseite(&z, &ersetzen, chrono::Local::now()).unwrap().unwrap();
+        assert!(!z.join("A004R132/A004R132_AVID.ale").exists());
+        assert_eq!(fs::read(ablage.join("A004R132/A004R132_AVID.ale")).unwrap(), b"ale");
+        assert_eq!(fs::read(ablage.join("A004R132/A004R132_BIN.bin")).unwrap(), b"bin1");
+        assert!(ablage.join("ascmhl/0001_A004R132.mhl").is_file(), "frühere Historie mit beiseite");
+        assert!(!z.join("ascmhl").exists());
+        assert_eq!(bestimmen(&k, &z), Stand::Unterbrochen { vorhanden: 1, gesamt: 4 }, "danach: fortsetzen");
     }
 
     #[test]

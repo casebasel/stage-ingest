@@ -93,6 +93,28 @@ pub fn zuordnen(
     Ok(z.karte_id)
 }
 
+/// Liest die bestehende Zusammenfassung einer Karte (`None`, wenn es keine gibt oder sie unlesbar ist).
+pub fn lesen(berichtordner: &Path, karte: &str) -> Option<KartenZusammenfassung> {
+    let pfad = berichtordner.join(format!("{}{ENDUNG}", crate::struktur::ordnername(karte)));
+    serde_json::from_slice(&std::fs::read(pfad).ok()?).ok()
+}
+
+/// Zweites Einlesen derselben Karte (ergänzt): Was von Hand zugeordnet wurde, bleibt; ebenso die ID in der Datenbank,
+/// wenn sie diesmal nicht geschrieben wurde.
+pub fn frueheres_uebernehmen(neu: &mut KartenZusammenfassung, alt: &KartenZusammenfassung) {
+    for a in alt.clips.iter().filter(|a| a.zuordnung == "hand") {
+        if let Some(n) = neu.clips.iter_mut().find(|n| n.name.eq_ignore_ascii_case(&a.name)) {
+            n.take_id = a.take_id.clone();
+            n.dreh_id = a.dreh_id.clone();
+            n.zuordnung = a.zuordnung.clone();
+            n.studio = a.studio;
+        }
+    }
+    if neu.karte_id.is_none() {
+        neu.karte_id = alt.karte_id.clone();
+    }
+}
+
 /// Schreibt die Zusammenfassung neben den Bericht.
 pub fn schreiben(berichtordner: &Path, z: &KartenZusammenfassung) -> std::io::Result<PathBuf> {
     std::fs::create_dir_all(berichtordner)?;
@@ -168,7 +190,6 @@ mod tests {
                 zuordnung: "zeitfenster".into(),
                 abweichungen: vec![],
                 studio: false,
-
                 dreh_id: None,
             }],
         };
@@ -182,6 +203,45 @@ mod tests {
         assert_eq!(k.len(), 1);
         assert!(suchen(t.path(), "ANDERES").0.is_empty());
         assert_eq!(im_dreh(&t.path().join("HAPPY_END/2026-10-28_Rheinufer")), [z]);
+    }
+
+    #[test]
+    fn ergaenzte_karte_behaelt_hand_zuordnung() {
+        let clip = |name: &str, take: Option<&str>, zuordnung: &str| ClipEintrag {
+            name: name.into(),
+            pfad: format!("{name}.mxf"),
+            start_tc: None,
+            end_tc: None,
+            take_id: take.map(Into::into),
+            zuordnung: zuordnung.into(),
+            abweichungen: vec![],
+            studio: false,
+            dreh_id: None,
+        };
+        let karte = |clips| KartenZusammenfassung {
+            format: FORMAT,
+            karte: "A007R132".into(),
+            beginn: String::new(),
+            version: String::new(),
+            freigegeben: true,
+            unabhaengige_kopien: 2,
+            grund: String::new(),
+            projekt: Default::default(),
+            karte_id: None,
+            einsortiert: None,
+            clips,
+        };
+        let mut alt = karte(vec![clip("A007C001", Some("T7"), "hand"), clip("A007C002", Some("T2"), "zeitfenster")]);
+        alt.karte_id = Some("karte-happy_end-a007r132".into());
+        let mut neu = karte(vec![
+            clip("A007C001", Some("T1"), "zeitfenster"),
+            clip("A007C002", Some("T3"), "info1"),
+            clip("A007C003", None, ""),
+        ]);
+        frueheres_uebernehmen(&mut neu, &alt);
+        assert_eq!((neu.clips[0].take_id.as_deref(), neu.clips[0].zuordnung.as_str()), (Some("T7"), "hand"));
+        assert_eq!(neu.clips[1].take_id.as_deref(), Some("T3"), "automatische Zuordnung darf sich ändern");
+        assert_eq!(neu.karte_id.as_deref(), Some("karte-happy_end-a007r132"));
     }
 
     #[test]

@@ -416,6 +416,13 @@ impl Plate {
         Ok(e)
     }
 
+    /// Namen der Clips dieser Karte, die von Hand zugeordnet sind (`zuordnung = hand`): Ein zweites Einlesen derselben
+    /// Karte darf ihre Zuordnung nicht überschreiben (Hinweis Plate Assistant, 14.10.2026).
+    pub fn clips_von_hand(&self, z: &Zugang, karte_id: &str) -> Result<Vec<String>, String> {
+        let v = self.lesen(z, &format!("clip?karte_id=eq.{}&zuordnung=eq.hand&select=name", url_teil(karte_id)))?;
+        Ok(v.as_array().into_iter().flatten().filter_map(|c| c["name"].as_str().map(str::to_owned)).collect())
+    }
+
     /// HDRI-Jobs zu diesen Aufnahmen (Tabelle `hdri_job`, ab 0019): Zustand und Ergebnis (mit Pfad der Vorschau).
     /// Gesucht über die HDRI-ID, nicht über das Projekt: der Dienst kennt das Projekt nicht immer.
     pub fn hdri_jobs(&self, z: &Zugang, hdri_ids: &[String]) -> Result<Value, String> {
