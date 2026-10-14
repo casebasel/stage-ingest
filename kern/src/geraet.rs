@@ -82,7 +82,20 @@ fn netz(server: &str, quelle: &str) -> Kennung {
         sicher: !lokal,
         art: Art::Netz,
         seriennummer: None,
-        beschreibung: format!("Netzlaufwerk {quelle}"),
+        beschreibung: netz_text(&server, quelle),
+    }
+}
+
+/// Beschreibung eines Netzlaufwerks, auf Mac und Windows gleich: Server und Freigabe, ohne Benutzer und ohne
+/// Unterordner („Netzlaufwerk truenas · Footage“). Vorher zeigte der Mac `//marlon@truenas/Footage`, Windows den ganzen
+/// Pfad `\\TRUENAS\Footage\ingest` (Marlon, 15.10.2026: „das verwirrt“).
+fn netz_text(server: &str, quelle: &str) -> String {
+    let ohne = quelle.trim_start_matches(['/', '\\']);
+    let ohne = ohne.rsplit_once('@').map_or(ohne, |(_, r)| r);
+    let freigabe = ohne.split(['/', '\\']).nth(1).filter(|f| !f.is_empty());
+    match freigabe {
+        Some(f) => format!("Netzlaufwerk {server} · {f}"),
+        None => format!("Netzlaufwerk {server}"),
     }
 }
 
@@ -452,6 +465,8 @@ mod tests {
     #[test]
     fn netz_kennung_ohne_benutzer_und_freigabe() {
         assert_eq!(netz("//marlon@NAS.local/Footage", "x").wert, "netz:nas.local");
+        assert_eq!(netz_text("truenas", "//marlon@truenas/Footage"), "Netzlaufwerk truenas · Footage");
+        assert_eq!(netz_text("truenas", r"\\TRUENAS\Footage\ingest"), "Netzlaufwerk truenas · Footage");
         assert_eq!(netz(r"\\NAS.local\Footage", "x").wert, "netz:nas.local");
         assert_eq!(netz(r"NAS.local\Andere", "x").wert, "netz:nas.local");
     }

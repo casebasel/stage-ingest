@@ -229,12 +229,12 @@ function zaehlung(geraete: (ZielGeraet | undefined | null)[]) {
     const vorher = erste.get(schluessel);
     if (vorher !== undefined)
       return g.kennung.sicher
-        ? { ton: "warn", text: `Gleiche Platte wie Ziel ${vorher + 1}` }
-        : { ton: "warn", text: "Platte unbekannt: zählt mit anderen unbekannten als eine" };
+        ? { ton: "warn", text: `Gleiches Laufwerk wie Ziel ${vorher + 1}` }
+        : { ton: "warn", text: "Laufwerk unbekannt: zählt mit anderen unbekannten als eine" };
     erste.set(schluessel, i);
     return g.kennung.sicher
       ? { ton: "ok", text: "Eigene Kopie" }
-      : { ton: "warn", text: "Platte unbekannt: zählt höchstens einmal" };
+      : { ton: "warn", text: "Laufwerk unbekannt: zählt höchstens einmal" };
   });
   return { zeilen, unabhaengig: erste.size };
 }
@@ -408,7 +408,7 @@ function Auftrag({ pflicht, zurEinrichtung, laufwerke }: { pflicht: boolean; zur
               <tr>
                 <th className="spalte-nr">#</th>
                 <th>Zielordner</th>
-                <th>Platte</th>
+                <th>Laufwerk</th>
                 <th className="rechts">Frei</th>
                 <th>Zählt</th>
                 <th className="spalte-aktion">
@@ -1217,7 +1217,7 @@ function ZieleTabelle({ ergebnis }: { ergebnis: KartenErgebnis }) {
         <tr>
           <th className="spalte-nr">#</th>
           <th>Ziel</th>
-          <th>Platte</th>
+          <th>Laufwerk</th>
           <th>Prüfung</th>
           <th>Bericht</th>
         </tr>
