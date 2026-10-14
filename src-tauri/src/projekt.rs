@@ -415,10 +415,19 @@ pub fn zusammenfuehren(
             plates.push(PlateStand {
                 id: pid.clone(),
                 nummer: p["nummer"].as_i64().unwrap_or(0),
-                // Studio-Einstellung der Stage: ihr fester Name `STUDIO-NN`.
+                // Slate wie in der Kamera (BEGRIFFE „Szene / Slate“): Studio `STUDIO-NN`, mit Haupt-Szene `42A`, sonst
+                // `<Kurzname des Drehorts>-<NN>` (wie im Plate Assistant, Marlon 14.10.2026).
                 slate: Some(text(&p["studio_name"]))
                     .filter(|n| !n.is_empty())
-                    .unwrap_or_else(|| format!("{}{}", text(&p["szene"]), text(&p["buchstabe"]))),
+                    .or_else(|| {
+                        Some(format!("{}{}", text(&p["szene"]), text(&p["buchstabe"]))).filter(|s| !s.is_empty())
+                    })
+                    .or_else(|| {
+                        let k = text(&d["kurzname"]);
+                        let n = p["nummer"].as_i64().unwrap_or(0);
+                        (!k.is_empty() && n > 0).then(|| format!("{k}-{n:02}"))
+                    })
+                    .unwrap_or_default(),
                 name: text(&p["name"]),
                 art: Some(text(&p["art"])).filter(|a| !a.is_empty()).unwrap_or_else(|| "plate".into()),
                 szene: text(&p["szene"]),

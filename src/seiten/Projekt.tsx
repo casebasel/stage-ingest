@@ -77,7 +77,7 @@ type Einsortierbar = {
 type Verschoben = { karte: string; nachpruefung: { geprueft: number; abweichungen: unknown[] }; hinweise: string[] };
 type EinsortiertStand = { zusammenfassung: string; ergebnis: { Ok: Verschoben } | { Err: string } };
 
-const ART: Record<string, string> = { graukugel: "Graukugel", chromkugel: "Chromkugel", cleanplate: "Cleanplate", take: "Take" };
+const ART: Record<string, string> = { graukugel: "Graukugel", chromkugel: "Chromkugel", cleanplate: "Clean Plate", take: "Take" };
 const BEWERTUNG: Record<string, string> = { circle: "Favorit", gut: "Gut", schlecht: "Schlecht" };
 const FOTO: Record<string, string> = { referenz: "Referenz", set: "Set", position: "Position", vorschau: "Vorschau" };
 
@@ -266,7 +266,17 @@ const ABSPIELEN: Spalte = {
 };
 
 const datumKurz = (d: string) => (d ? d.slice(5).split("-").reverse().join(".") : "ohne Datum");
-const plateTitel = (p: PlateStand) => p.slate || (p.nummer ? `P${String(p.nummer).padStart(3, "0")}` : "Plate");
+// Beschriftung wie im Plate Assistant (Marlon, 14.10.2026: „einheitlicher“): Titel „Plate 5 · Im Studio“, daneben
+// der Slate in Mono, wie er in die Kamera geschrieben wird (`4_STOCK-05`, `42A`, `STUDIO-03`).
+// Regeln des Plate Assistant (PlateArt.swift): „On Loc“ im Titel (Langform nur in Überschriften), Studio-Einstellungen
+// heissen wie ihr Slate (`STUDIO-03 · <Titel>`).
+const ART_TITEL: Record<string, string> = { plate: "Plate", location: "On Loc" };
+const plateTitel = (p: PlateStand) =>
+  p.art === "studio"
+    ? `${p.slate || "Studio"}${p.name ? ` · ${p.name}` : ""}`
+    : `${ART_TITEL[p.art] ?? "Plate"}${p.nummer ? ` ${p.nummer}` : ""}${p.name ? ` · ${p.name}` : ""}`;
+/** Slate neben dem Titel, ausser bei Studio (dort ist er schon der Titel). */
+const slateDaneben = (p: PlateStand) => (p.art === "studio" ? "" : p.slate);
 
 export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
   const konto = useKonto();
@@ -627,7 +637,7 @@ function AlleTakes({
                   {z.dreh.name} <span className="leise zahl">{datumKurz(z.dreh.datum)}</span>
                 </td>
                 <td className="ohne-umbruch">
-                  <span className="zahl">{plateTitel(z.plate)}</span> {z.plate.name}
+                  {plateTitel(z.plate)} {slateDaneben(z.plate) && <span className="zahl leise">{slateDaneben(z.plate)}</span>}
                 </td>
                 <td className="rechts zahl">{z.take.nummer}</td>
                 <SpaltenZellen spalten={[ABSPIELEN, ...spalten]} t={z.take} technik={sp.technik} />
@@ -893,8 +903,8 @@ function DrehDetail({ d, plateWaehlen }: { d: DrehStand; plateWaehlen: (id: stri
         <table className="tabelle tabelle-waehlbar">
           <thead>
             <tr>
-              <th>Plate</th>
-              <th>Name</th>
+              <th>Einstellung</th>
+              <th>Slate</th>
               <th className="rechts">Fotos</th>
               <th>HDRI</th>
               <th className="rechts">Takes</th>
@@ -912,8 +922,8 @@ function DrehDetail({ d, plateWaehlen }: { d: DrehStand; plateWaehlen: (id: stri
                   onClick={() => plateWaehlen(p.id)}
                   onKeyDown={(ev) => (ev.key === "Enter" || ev.key === " ") && plateWaehlen(p.id)}
                 >
-                  <td className="zahl">{plateTitel(p)}</td>
-                  <td>{p.name}</td>
+                  <td>{plateTitel(p)}</td>
+                  <td className="zahl">{p.slate}</td>
                   <td className="rechts zahl">{p.fotos.length}</td>
                   <td>{p.hdri.length ? <Status {...hdriTon(p.hdri[0])} /> : <span className="leise">–</span>}</td>
                   <td className="rechts zahl">{p.takes.length}</td>
@@ -953,7 +963,7 @@ function PlateDetail({ dreh, p, drehWaehlen }: { dreh: DrehStand; p: PlateStand;
     <>
       <div className="detail-kopf">
         <h2>
-          <span className="zahl">{plateTitel(p)}</span> {p.name}
+          {plateTitel(p)} {slateDaneben(p) && <span className="zahl leise">{slateDaneben(p)}</span>}
         </h2>
         <button className="verweis" onClick={drehWaehlen}>
           {dreh.name} · {datumKurz(dreh.datum)}
@@ -1272,7 +1282,7 @@ function ZuKlaeren({
                   {dreh?.plates.flatMap((p) =>
                     p.takes.map((t) => (
                       <option key={t.id} value={t.id}>
-                        {p.slate || p.name} · Take {t.nummer}
+                        {plateTitel(p)} · Take {t.nummer}
                         {t.clip ? ` (hat schon ${t.clip})` : ""}
                       </option>
                     )),
@@ -1409,22 +1419,19 @@ function Gliederung({
                 <ul className="baum-kinder">
                   {g.eintraege.map(({ p, d }) => {
                     const fehlt = p.takes.some((t) => !t.karte);
-                    const a = artVon(p, d);
                     return (
                       <li key={p.id}>
                         <button
-                          className="baum-knoten"
+                          className="baum-knoten baum-einstellung"
                           aria-current={auswahl.art === "plate" && auswahl.id === p.id ? "true" : undefined}
                           onClick={() => setAuswahl({ art: "plate", id: p.id })}
                         >
+                          {/* 35-mm-Filmrand mit dem Slate, wie die Karten im Plate Assistant (Marlon, 14.10.2026). */}
+                          <span className="filmrand" aria-hidden="true">
+                            <span>{p.slate}</span>
+                          </span>
                           <span className="baum-name-zeile">
-                            <span className="baum-name">
-                              <span className="zahl">{plateTitel(p)}</span> {p.name}
-                            </span>
-                            {/* Kennzeichen nur, wo es etwas sagt: Studio ist in der Drehort-Ansicht schon der Drehort. */}
-                            {art !== "art" && (a === "On Location" || (a === "Studio" && art !== "drehort")) && (
-                              <span className="baum-art">{a === "On Location" ? "On Loc" : a}</span>
-                            )}
+                            <span className="baum-name">{plateTitel(p)}</span>
                           </span>
                           <span className="baum-info zahl">
                             {art !== "drehort" && `${d.name} ${datumKurz(d.datum)} · `}
