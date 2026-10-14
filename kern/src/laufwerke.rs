@@ -41,7 +41,7 @@ pub fn auflisten() -> Vec<Laufwerk> {
             let netz = ist_netz(&pfad);
             let (gesamt, frei) = platz(&pfad).map_or((None, None), |(g, f)| (Some(g), Some(f)));
             Laufwerk {
-                name: crate::geraet::kartenname(&pfad),
+                name: crate::geraet::anzeigename(&pfad),
                 karte: if netz { None } else { karte_gemerkt(&pfad, gesamt) },
                 pfad,
                 gesamt,
@@ -290,8 +290,27 @@ fn ist_netz(pfad: &Path) -> bool {
     unsafe { GetDriveTypeW(p.as_ptr()) == 4 }
 }
 
+/// Gesamt- und freier Platz (für den aktuellen Benutzer). Am Mac über `statfs` (64-Bit-Zähler): `statvfs` hat dort
+/// 32-Bit-Blockzähler und bleibt bei grossen Netzlaufwerken bei etwa 2,2 TB stehen (Marlon, 14.10.2026: NAS mit
+/// 24 TB frei zeigte am Mac 2,21 TB, unter Windows richtig).
+#[cfg(target_os = "macos")]
+pub fn platz(pfad: &Path) -> Option<(u64, u64)> {
+    let s = statfs_mac(pfad)?;
+    Some((s.f_blocks * s.f_bsize as u64, s.f_bavail * s.f_bsize as u64))
+}
+
+/// `statfs` am Mac (64-Bit-Zähler, `f_bsize` = Blockgrösse der Zähler).
+#[cfg(target_os = "macos")]
+pub fn statfs_mac(pfad: &Path) -> Option<libc::statfs> {
+    use std::os::unix::ffi::OsStrExt;
+    let c = std::ffi::CString::new(pfad.as_os_str().as_bytes()).ok()?;
+    let mut s: libc::statfs = unsafe { std::mem::zeroed() };
+    // SAFETY: gültiger C-String und Zielstruktur.
+    (unsafe { libc::statfs(c.as_ptr(), &mut s) } == 0).then_some(s)
+}
+
 /// Gesamt- und freier Platz (für den aktuellen Benutzer).
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "macos")))]
 pub fn platz(pfad: &Path) -> Option<(u64, u64)> {
     use std::os::unix::ffi::OsStrExt;
     let c = std::ffi::CString::new(pfad.as_os_str().as_bytes()).ok()?;

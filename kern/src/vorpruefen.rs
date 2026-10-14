@@ -185,8 +185,20 @@ fn gb(n: u64) -> String {
     format!("{:.1} GB", n as f64 / 1e9).replace('.', ",")
 }
 
+/// Freier Platz für den aktuellen Benutzer. Am Mac über `statfs` (siehe [`crate::laufwerke::platz`]).
+#[cfg(target_os = "macos")]
+fn frei(pfad: &Path) -> Option<u64> {
+    crate::laufwerke::platz(pfad).map(|(_, f)| f)
+}
+
+/// Blockgrösse des Dateisystems am Mac (`statfs`).
+#[cfg(target_os = "macos")]
+fn blockgroesse(pfad: &Path) -> Option<u64> {
+    crate::laufwerke::statfs_mac(pfad).map(|s| s.f_bsize as u64).filter(|b| *b > 0)
+}
+
 /// Freier Platz für den aktuellen Benutzer.
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "macos")))]
 fn frei(pfad: &Path) -> Option<u64> {
     use std::os::unix::ffi::OsStrExt;
     let c = std::ffi::CString::new(pfad.as_os_str().as_bytes()).ok()?;
@@ -196,7 +208,7 @@ fn frei(pfad: &Path) -> Option<u64> {
 }
 
 /// Blockgrösse des Dateisystems (kleinste Einheit, die eine Datei belegt).
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "macos")))]
 fn blockgroesse(pfad: &Path) -> Option<u64> {
     use std::os::unix::ffi::OsStrExt;
     let c = std::ffi::CString::new(pfad.as_os_str().as_bytes()).ok()?;

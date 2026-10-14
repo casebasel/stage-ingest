@@ -117,6 +117,25 @@ pub fn kartenname(pfad: &Path) -> String {
     "Karte".into()
 }
 
+/// Name eines Laufwerks für die Liste links: Volume-Name; unter Windows ohne Namen bei einem Netzlaufwerk die
+/// Freigabe mit Laufwerksbuchstabe (`\\TRUENAS\Footage (F:)`), sonst `Laufwerk F:`. Früher stand dort „Karte“
+/// (Marlon, 14.10.2026).
+pub fn anzeigename(pfad: &Path) -> String {
+    #[cfg(windows)]
+    {
+        if let Some(n) = plattform::volume_name(pfad) {
+            return n;
+        }
+        let buchstabe = pfad.to_string_lossy().trim_end_matches('\\').to_owned();
+        match plattform::netz_ziel(pfad) {
+            Some(unc) => format!("{unc} ({buchstabe})"),
+            None => format!("Laufwerk {buchstabe}"),
+        }
+    }
+    #[cfg(not(windows))]
+    kartenname(pfad)
+}
+
 /// Kennung des Volumes, auf dem `pfad` liegt (zum Vergleich mit der Karte).
 pub fn volume_kennung(pfad: &Path) -> std::io::Result<String> {
     Ok(volume(pfad, "")?.wert)
@@ -311,6 +330,18 @@ mod plattform {
     }
 
     /// Volume-Name (Bezeichnung) einer Laufwerkswurzel, z. B. „A001R132“.
+    /// Ziel eines verbundenen Netzlaufwerks (`F:` → `\\TRUENAS\Footage\ingest`).
+    pub fn netz_ziel(pfad: &Path) -> Option<String> {
+        let laufwerk = pfad.to_string_lossy().trim_end_matches('\\').to_owned();
+        let w = breit(std::ffi::OsStr::new(&laufwerk));
+        let mut ziel = [0u16; 512];
+        let mut laenge = ziel.len() as u32;
+        // SAFETY: Puffer und Längenangabe passen zusammen.
+        (unsafe { WNetGetConnectionW(w.as_ptr(), ziel.as_mut_ptr(), &mut laenge) } == 0)
+            .then(|| aus_breit(&ziel))
+            .filter(|u| !u.is_empty())
+    }
+
     pub fn volume_name(pfad: &Path) -> Option<String> {
         use windows_sys::Win32::Storage::FileSystem::GetVolumeInformationW;
         let wurzel = volume_wurzel(&std::fs::canonicalize(pfad).ok()?)?;
