@@ -13,7 +13,7 @@ import { gemerkt, merken, useEinstellungen } from "../einstellungen";
 import { Status, type Ton } from "../teile";
 import { kurz } from "./Einlesen";
 import { Abspieler, istArri, originalOeffnen, type AbspielEintrag } from "./Abspieler";
-import { ClipMitBild, SpaltenKopf, SpaltenMenue, SpaltenZellen, useTakeSpalten, type Spalte, type TakeMitWerten } from "./TakeSpalten";
+import { ClipMitBild, vorschauLaden, SpaltenKopf, SpaltenMenue, SpaltenZellen, useTakeSpalten, type Spalte, type TakeMitWerten } from "./TakeSpalten";
 
 type TakeStand = TakeMitWerten;
 type FotoStand = { id: string; art: string; pfad: string; takeId?: string | null };
@@ -955,7 +955,7 @@ function PlateDetail({ dreh, p, drehWaehlen }: { dreh: DrehStand; p: PlateStand;
           {p.fotos.map((f, i) => (
             <li key={f.id}>
               <button className="foto-knopf" onClick={() => setGross(i)} aria-label={`Foto ${i + 1} gross anzeigen`}>
-                <Vorschau bucket="fotos" pfad={f.pfad} breite={320} alt={FOTO[f.art] ?? f.art} />
+                <FotoOderMitte f={f} takes={p.takes} breite={320} />
               </button>
               <FotoText f={f} takes={p.takes} />
             </li>
@@ -1042,6 +1042,28 @@ function HdriListe({ hdri }: { hdri: HdriStand[] }) {
 // Vorschaubilder einmal pro Sitzung laden (die App speichert sie zusätzlich auf der Platte).
 const vorschauen = new Map<string, Promise<string>>();
 
+/** Standbild eines Takes (`art = vorschau`, vom iPhone per CAP nach dem Stopp geholt, oft nichtssagend): Ist die
+ *  Kopie des Clips erreichbar, zeigt die App stattdessen das Bild aus der Mitte des Clips (Marlon, 14.10.2026); bis es
+ *  da ist und falls es fehlt, das Standbild. Andere Fotos unverändert. */
+function FotoOderMitte({ f, takes, breite }: { f: FotoStand; takes: TakeStand[]; breite: number }) {
+  const artCmd = useEinstellungen().artCmd.trim();
+  const t = f.art === "vorschau" && f.takeId ? takes.find((x) => x.id === f.takeId) : undefined;
+  const [mitte, setMitte] = useState<string | null>(null);
+  useEffect(() => {
+    let aus = false;
+    setMitte(null);
+    if (t?.datei)
+      vorschauLaden(t.datei, artCmd)
+        .then((b) => !aus && setMitte(b.length >= 3 ? b[1] : (b[0] ?? null)))
+        .catch(() => {});
+    return () => {
+      aus = true;
+    };
+  }, [t?.datei, artCmd]);
+  if (mitte) return <img src={mitte} alt={`Take ${t?.nummer}: Bild aus der Mitte des Clips`} loading="lazy" />;
+  return <Vorschau bucket="fotos" pfad={f.pfad} breite={breite} alt={FOTO[f.art] ?? (f.art || "Bild")} />;
+}
+
 function Vorschau({ bucket, pfad, breite, alt }: { bucket: string; pfad: string; breite: number; alt: string }) {
   const konto = useKonto();
   const [url, setUrl] = useState<string | null>(null);
@@ -1125,7 +1147,11 @@ function Grossbild({
         <X size={18} />
       </button>
       <div className="grossbild-bild" onClick={(ev) => ev.stopPropagation()}>
-        <Vorschau bucket={bucket} pfad={f.pfad} breite={2048} alt={FOTO[f.art] ?? (f.art || "Bild")} />
+        {bucket === "fotos" ? (
+          <FotoOderMitte f={f} takes={takes} breite={2048} />
+        ) : (
+          <Vorschau bucket={bucket} pfad={f.pfad} breite={2048} alt={FOTO[f.art] ?? (f.art || "Bild")} />
+        )}
       </div>
       <div className="grossbild-text" onClick={(ev) => ev.stopPropagation()}>
         <FotoText f={f} takes={takes} />

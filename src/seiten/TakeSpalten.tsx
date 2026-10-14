@@ -433,7 +433,7 @@ export function SpaltenZellen({ spalten, t, technik }: { spalten: Spalte[]; t: T
 // Vorschaubilder nacheinander rechnen (ART CMD braucht pro Bild einige Sekunden; nie alle Clips gleichzeitig).
 const vorschauGemerkt = new Map<string, Promise<string[]>>();
 let vorschauKette: Promise<unknown> = Promise.resolve();
-function vorschauLaden(datei: string, artCmd: string): Promise<string[]> {
+export function vorschauLaden(datei: string, artCmd: string): Promise<string[]> {
   const schluessel = `${datei}|${artCmd}`;
   let p = vorschauGemerkt.get(schluessel);
   if (!p) {
