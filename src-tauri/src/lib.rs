@@ -1,5 +1,6 @@
 //! Tauri-Hülle um den Kern: Befehle für die Oberfläche, Fortschritt als Ereignisse.
 
+mod arri_abspielen;
 mod artcmd_laden;
 mod export;
 mod karte_db;
@@ -1928,6 +1929,12 @@ async fn im_art_viewer(datei: PathBuf) -> Result<(), String> {
     im_hintergrund(move || artcmd_laden::im_viewer(&datei)).await
 }
 
+/// Öffnet einen ARRIRAW-Clip zum Abspielen in der App (siehe `arri_abspielen`).
+#[tauri::command]
+async fn arriraw_oeffnen(app: AppHandle, datei: PathBuf) -> Result<arri_abspielen::Geoeffnet, String> {
+    im_hintergrund(move || arri_abspielen::oeffnen(&app.state::<arri_abspielen::Offen>(), datei)).await
+}
+
 /// Lädt den ART Viewer bei ARRI und startet dessen Installer.
 #[tauri::command]
 async fn art_viewer_installieren(app: AppHandle) -> Result<(), String> {
@@ -2144,6 +2151,13 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(Laufend::default())
+        .manage(arri_abspielen::Offen::default())
+        .register_asynchronous_uri_scheme_protocol("arriraw", |ctx, anfrage, antwort| {
+            let app = ctx.app_handle().clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                antwort.respond(arri_abspielen::bild(&app.state::<arri_abspielen::Offen>(), &anfrage));
+            });
+        })
         .manage(Arc::new(plate::Plate::default()))
         .setup(|app| {
             // Vorschau-Videos von 0.1.33 wegräumen (Marlon, 14.10.2026: „generiert zu viel Daten“).
@@ -2204,6 +2218,7 @@ pub fn run() {
             artcmd_laden,
             art_viewer,
             im_art_viewer,
+            arriraw_oeffnen,
             art_viewer_installieren,
             abbrechen,
             laeuft,

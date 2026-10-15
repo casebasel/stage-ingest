@@ -13,6 +13,7 @@
 pub mod ablage;
 pub mod ablauf;
 pub mod ale;
+pub mod arriraw;
 pub mod artcmd;
 pub mod clip;
 pub mod einsortieren;

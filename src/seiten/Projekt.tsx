@@ -14,7 +14,7 @@ import { Status, type Ton } from "../teile";
 import { kurz } from "./Einlesen";
 import { PfadMenue, type PfadMenueStand } from "./PfadMenue";
 import { ExportDialog } from "./Export";
-import { Abspieler, istArri, originalOeffnen, type AbspielEintrag } from "./Abspieler";
+import { Abspieler, type AbspielEintrag } from "./Abspieler";
 import { ClipMitBild, vorschauLaden, SpaltenKopf, SpaltenMenue, SpaltenZellen, useTakeSpalten, type Spalte, type TakeMitWerten } from "./TakeSpalten";
 
 type TakeStand = TakeMitWerten;
@@ -358,7 +358,7 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
   // Player: Takes mit erreichbarer MOV/MP4-Kopie, in der Reihenfolge der Projektseite (← → blättert durch sie).
   // MXF/ARRIRAW öffnet der ART Viewer.
   const abspielListe: AbspielEintrag[] = zeilen
-    .filter((z) => z.take.datei && !istArri(z.take.datei))
+    .filter((z) => z.take.datei)
     .map((z) => ({
       id: z.take.id,
       datei: z.take.datei!,
@@ -367,6 +367,7 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
       bewertung: z.take.bewertung,
     }));
   const [spieler, setSpieler] = useState<number | null>(null);
+  const [einzeln, setEinzeln] = useState<AbspielEintrag | null>(null);
   const [pfadMenue, setPfadMenue] = useState<PfadMenueStand | null>(null);
   const [exportClip, setExportClip] = useState<{ datei: string; titel: string } | null>(null);
   pfadMenueOeffnen = (ev, t, titel) => {
@@ -376,10 +377,6 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
   spielerOeffnen = (id) => {
     const datei = zeilen.find((z) => z.take.id === id)?.take.datei;
     if (!datei) return;
-    if (istArri(datei)) {
-      originalOeffnen(datei);
-      return;
-    }
     const i = abspielListe.findIndex((x) => x.id === id);
     if (i >= 0) setSpieler(i);
   };
@@ -532,6 +529,7 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
                 u={u}
                 neuerDrehort={() => nurEins("drehort")}
                 gespeichert={() => projekt && laden(projekt)}
+                abspielen={(datei, clip) => setEinzeln({ id: datei, datei, titel: "Zu klären", clip })}
               />
             )}
             {auswahl.art === "karten" && (
@@ -556,6 +554,7 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
         </div>
       )}
       {spieler !== null && abspielListe[spieler] && <Abspieler liste={abspielListe} index={spieler} setIndex={setSpieler} />}
+      {einzeln && <Abspieler liste={[einzeln]} index={0} setIndex={(i) => i === null && setEinzeln(null)} />}
       {pfadMenue && (
         <PfadMenue
           m={pfadMenue}
@@ -1229,11 +1228,13 @@ function ZuKlaeren({
   zugang,
   neuerDrehort,
   gespeichert,
+  abspielen,
 }: {
   u: Uebersicht;
   zugang: Zugang | null;
   neuerDrehort: () => void;
   gespeichert: () => void;
+  abspielen: (datei: string, clip: string) => void;
 }) {
   const [wahl, setWahl] = useState<Record<string, { dreh: string; take: string }>>({});
   const [stand, setStand] = useState<Record<string, { ton: Ton; text: string }>>({});
@@ -1342,7 +1343,7 @@ function ZuKlaeren({
               <tr
                 key={schluessel}
                 title={c.clipdateien?.length ? "Doppelklick spielt den Clip · Rechtsklick: Pfad kopieren" : undefined}
-                onDoubleClick={() => c.clipdateien?.[0] && originalOeffnen(c.clipdateien[0])}
+                onDoubleClick={() => c.clipdateien?.[0] && abspielen(c.clipdateien[0], c.clip)}
                 onContextMenu={(ev) =>
                   pfadMenueOeffnen(
                     ev,

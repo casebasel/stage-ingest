@@ -75,6 +75,10 @@ Idee von Marlon (07.10.2026), mit der Stage abgestimmt. Der Ingest weiss schon v
 
 Pro Clip werden mit ARRI ART CMD die Werte **pro Bild** herausgezogen (positional/orientation: tilt, roll; `lensEntrancePupilOffset` u. a.) und als eigene Datei in `05_METADATEN` abgelegt. Mittelwert und Bereich gehen als `aus_clip` an den Plate Assistant. Felder und Vorzeichen wie in der Systemkarte (`SCHNITTSTELLEN.md`) und im Werkzeug der Stage. Dazu pro Karte das **ALE** (von der Karte oder selbst erzeugt) in die Struktur und an den Stage-Server.
 
+## 7a. Abspielen
+
+Doppelklick auf einen Clip (Take-Tabellen, „Zu klären“) spielt ihn in der App, Leertaste/Esc schliesst, ← → nächster Take, K Pause, `,` `.` Bild für Bild. **ARRIRAW in MXF** (ALEXA Mini) entwickelt die App selbst (`kern/src/arriraw.rs`, Protokoll `arriraw` in `src-tauri/src/arri_abspielen.rs`): Bild für Bild direkt aus dem Original, halbe Auflösung, Rec.709 wie ARRI 709, keine Zusatzdateien (Marlon, 15.10.2026: Vorschau-Videos „generieren zu viel Daten“; der ART Viewer lädt keinen Clip von aussen, ARRI dokumentiert nur Ziehen und Ablegen; einen freien ARRIRAW-Player gibt es nicht, ffmpeg kann es nicht). Gemessen an 40 Clips der Mini und gegen ART CMD abgeglichen (mittlere Abweichung unter 3 von 255): 12 Bit, stückweise verdichtet (oberhalb 1024 je 512 Werte doppelte Schrittweite), 44 Byte Vorspann je Bild, Bayer B G / G R, Weissabgleich und EI aus dem ARRI-Kopf. Volle 25 B/s brauchen etwa 175 MB/s vom Speicher; kommt das Netz nicht mit, überspringt der Player Bilder und sagt es. Anderer Aufbau (ALEXA 35/HDE, ARRICORE, ProRes in MXF) → Hinweis und „Im ART Viewer öffnen“. MOV/MP4 spielt das Video-Element.
+
 ## 8. HDRI
 
 - Ein HDRI hängt an einer **Plate** oder an einem **Drehort**. Ein Take nimmt das HDRI seiner Plate, sonst das zeitlich nächste seines Drehorts.
