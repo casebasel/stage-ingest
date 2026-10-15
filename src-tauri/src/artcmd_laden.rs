@@ -57,7 +57,7 @@ pub fn laden(datenordner: &Path) -> Result<PathBuf, String> {
     std::fs::rename(&neu, &ziel).map_err(|e| e.to_string())?;
     let pfad = ziel.join(rel);
     // Läuft es? (`--version` gibt „artcmd: 1.0.0 …“ aus.)
-    let aus = std::process::Command::new(&pfad)
+    let aus = ingest_kern::ohne_fenster(&mut std::process::Command::new(&pfad))
         .arg("--version")
         .output()
         .map_err(|e| format!("ART CMD geladen, startet aber nicht: {e}"))?;
@@ -228,7 +228,7 @@ pub fn viewer_installieren(cache: &Path) -> Result<(), String> {
     let pkg = pkg.ok_or("Im Paket von ARRI fehlt der Installer")?;
     if cfg!(windows) {
         // Über die Shell starten: der Installer verlangt Administratorrechte, Windows fragt dann selbst nach.
-        std::process::Command::new("cmd")
+        ingest_kern::ohne_fenster(&mut std::process::Command::new("cmd"))
             .args(["/C", "start", ""])
             .arg(&pkg)
             .status()

@@ -841,14 +841,23 @@ function Fortschritt() {
   const sekunden = Math.max(1, (Date.now() - stand.beginn) / 1000);
   const tempo = stand.gelesen / sekunden;
   const rest = tempo > 0 ? (stand.bytes - stand.gelesen) / tempo : NaN;
+  // Nach dem Zurücklesen meldet der Kern auch Bewegungsdaten, QR, Vorschaubilder, Datenbank und Plates als „nachlesen“:
+  // eigener Schritt „Auswerten“ mit dem aktuellen Clip (Marlon, 15.10.2026: „es geht von hier nicht mehr weiter“).
+  const abschluss = phase === "nachlesen" && /^(ART CMD|Plates|Vorschaubilder|QR-Klappe|Karte und Clips)/.test(stand.pruefPfad);
   const schritte = [
     { id: "kopieren", text: "Kopieren" },
     { id: "pruefen", text: "Zurücklesen" },
-    ...(lauf.ergebnis === null && phase === "nachlesen" ? [{ id: "nachlesen", text: "Karte nochmals lesen" }] : []),
+    ...(lauf.ergebnis === null && phase === "nachlesen" && !abschluss ? [{ id: "nachlesen", text: "Karte nochmals lesen" }] : []),
+    ...(abschluss ? [{ id: "auswerten", text: "Auswerten" }] : []),
   ];
-  const jetzt = schritte.findIndex((s) => s.id === phase);
-  // Nach dem Zurücklesen meldet der Kern auch Bewegungsdaten und Plates als „nachlesen“.
-  const abschluss = phase === "nachlesen" && /^(ART CMD|Plates|Vorschaubilder)/.test(stand.pruefPfad);
+  const jetzt = schritte.findIndex((s) => s.id === (abschluss ? "auswerten" : phase));
+  const auswertung = abschluss
+    ? stand.pruefPfad
+        .replace(/^ART CMD: /, "Bewegungsdaten und Kamerawerte (ARRI ART CMD): ")
+        .replace(/^Vorschaubilder: /, "Vorschaubilder: ")
+        .replace(/^QR-Klappe: /, "QR-Code der Klappe: ")
+        .replace(/^Karte und Clips in die Datenbank/, "Karte und Clips in die gemeinsame Datenbank")
+    : "";
   const ausgefallen = (ordner: string) => stand.ausfaelle.find((a) => ordner.startsWith(ohneEnde(a.ordner)) || a.ordner.startsWith(ordner));
 
   return (
@@ -867,8 +876,14 @@ function Fortschritt() {
                   : "Liest die Karte ein zweites Mal"}
           </h1>
           <p className="leise">
-            {lauf.quelle?.name} · {stand.dateien} Dateien · {bytesText(stand.bytes)} · Karte nicht entfernen
+            {lauf.quelle?.name} · {stand.dateien} Dateien · {bytesText(stand.bytes)} ·{" "}
+            {abschluss ? "Kopie fertig und geprüft, Freigabe am Schluss" : "Karte nicht entfernen"}
           </p>
+          {abschluss && (
+            <p className="lauf-auswertung">
+              <Status ton="laeuft">{auswertung.replace(/[^/: ]+\//g, "")}</Status>
+            </p>
+          )}
         </div>
         <ol className="schritte" aria-label="Ablauf">
           {schritte.map((s, i) => (

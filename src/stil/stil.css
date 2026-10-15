@@ -2277,3 +2277,7 @@ input[type="checkbox"][role="switch"]:checked::before {
   gap: 6px 10px;
   align-items: baseline;
 }
+.lauf-auswertung {
+  margin: 6px 0 0;
+  font-size: 13px;
+}

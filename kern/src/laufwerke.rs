@@ -190,7 +190,9 @@ pub fn auswerfen(pfad: &Path) -> Result<(), String> {
             "(New-Object -ComObject Shell.Application).Namespace(17).ParseName('{}').InvokeVerb('Eject')",
             laufwerk.replace('\'', "''")
         );
-        Command::new("powershell").args(["-NoProfile", "-NonInteractive", "-Command", &befehl]).output()
+        crate::ohne_fenster(&mut Command::new("powershell"))
+            .args(["-NoProfile", "-NonInteractive", "-Command", &befehl])
+            .output()
     };
     #[cfg(all(unix, not(target_os = "macos")))]
     let aus = Command::new("gio")

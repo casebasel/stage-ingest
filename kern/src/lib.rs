@@ -48,3 +48,14 @@ pub const BLOCK: usize = 8 * 1024 * 1024;
 /// Endung, unter der eine Datei geschrieben wird, bis sie vollständig und auf die Platte
 /// gebracht ist. Erst dann wird sie auf ihren richtigen Namen umbenannt.
 pub const TEIL_ENDUNG: &str = "ingest-teil";
+
+/// Startet ein Programm unter Windows ohne Konsolenfenster (`CREATE_NO_WINDOW`); sonst blitzt bei jedem Aufruf von
+/// ART CMD oder PowerShell ein schwarzes Fenster auf (Marlon, 15.10.2026: „es poppt immer ein Eingabefeld auf“).
+pub fn ohne_fenster(c: &mut std::process::Command) -> &mut std::process::Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        c.creation_flags(0x0800_0000);
+    }
+    c
+}

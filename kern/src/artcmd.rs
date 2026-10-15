@@ -158,7 +158,7 @@ fn kurz(x: f64) -> String {
 
 /// Ruft ART CMD für einen Clip auf und schreibt die CSV nach `ausgabe`.
 pub fn exportieren(art_cmd: &Path, clip: &Path, ausgabe: &Path) -> Result<(), String> {
-    let aus = Command::new(art_cmd)
+    let aus = crate::ohne_fenster(&mut Command::new(art_cmd))
         .args(["export", "--input"])
         .arg(clip)
         .arg("--output")

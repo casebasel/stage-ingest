@@ -93,7 +93,10 @@ fn frei(ordner: &Path, stamm: &str, endung: &str) -> PathBuf {
 }
 
 fn art_cmd(art: &Path, args: &[std::ffi::OsString]) -> Result<(), String> {
-    let aus = Command::new(art).args(args).output().map_err(|e| format!("ART CMD nicht startbar: {e}"))?;
+    let aus = ingest_kern::ohne_fenster(&mut Command::new(art))
+        .args(args)
+        .output()
+        .map_err(|e| format!("ART CMD nicht startbar: {e}"))?;
     if aus.status.success() {
         Ok(())
     } else {

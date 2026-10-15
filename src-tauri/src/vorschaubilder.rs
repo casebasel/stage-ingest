@@ -46,7 +46,7 @@ pub(crate) fn art_cmd_bild(
 ) -> Result<image::DynamicImage, String> {
     let _ = std::fs::remove_dir_all(tmp);
     std::fs::create_dir_all(tmp).map_err(|e| e.to_string())?;
-    let aus = Command::new(art)
+    let aus = ingest_kern::ohne_fenster(&mut Command::new(art))
         .args(["process", "--input"])
         .arg(datei)
         .args(["--start", &bild.to_string(), "--duration", "1"])
