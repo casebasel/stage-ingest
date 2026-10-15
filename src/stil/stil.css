@@ -2215,3 +2215,65 @@ input[type="checkbox"][role="switch"]:checked::before {
 :root[data-theme="light"] .filmrand {
   background: oklch(0 0 0 / 0.04);
 }
+.pfad-menue-trenner {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--linie);
+}
+
+/* Export-Dialog (Export.tsx). */
+.dialog-hinter {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  background: oklch(0 0 0 / 0.55);
+}
+.dialog {
+  width: min(720px, calc(100vw - 32px));
+  border: 1px solid var(--linie-stark);
+  border-radius: var(--rund);
+  background: var(--panel);
+  box-shadow: 0 16px 40px oklch(0 0 0 / 0.45);
+}
+.dialog-kopf {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--linie);
+}
+.dialog-kopf h2 {
+  margin: 0;
+  font-size: 14px;
+}
+.export-felder {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr);
+  gap: 12px 14px;
+  align-items: center;
+  padding: 16px;
+}
+.export-name {
+  color: var(--text-3);
+  font-size: 12px;
+}
+.export-ziel {
+  display: grid;
+  gap: 4px;
+}
+.export-fuss {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-top: 1px solid var(--linie);
+}
+.export-fertig {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: baseline;
+}

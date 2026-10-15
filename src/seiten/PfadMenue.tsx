@@ -1,7 +1,7 @@
 /** Rechtsklick auf eine Take-Zeile: alle Orte des Clips (NAS, Platten); Klick auf einen Pfad kopiert ihn
  *  (Marlon, 14.10.2026). Esc oder Klick daneben schliesst. */
 import { useEffect, useState } from "react";
-import { Copy } from "lucide-react";
+import { Copy, Film } from "lucide-react";
 import { Status } from "../teile";
 
 export type PfadMenueStand = { x: number; y: number; titel: string; dateien: string[] };
@@ -20,7 +20,7 @@ async function kopieren(text: string) {
   }
 }
 
-export function PfadMenue({ m, zu }: { m: PfadMenueStand; zu: () => void }) {
+export function PfadMenue({ m, zu, exportieren }: { m: PfadMenueStand; zu: () => void; exportieren?: () => void }) {
   const [kopiert, setKopiert] = useState<string | null>(null);
   useEffect(() => {
     const taste = (ev: KeyboardEvent) => ev.key === "Escape" && zu();
@@ -61,6 +61,22 @@ export function PfadMenue({ m, zu }: { m: PfadMenueStand; zu: () => void }) {
               {kopiert === d && <Status ton="ok">Kopiert</Status>}
             </button>
           ))
+        )}
+        {exportieren && m.dateien.length > 0 && (
+          <>
+            <div className="pfad-menue-trenner" />
+            <button
+              role="menuitem"
+              className="pfad-menue-eintrag"
+              onClick={() => {
+                zu();
+                exportieren();
+              }}
+            >
+              <Film size={13} aria-hidden />
+              <span>Exportieren … (ProRes, MP4, EXR)</span>
+            </button>
+          </>
         )}
       </div>
     </div>

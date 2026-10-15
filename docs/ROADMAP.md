@@ -35,6 +35,14 @@ Gebaut ist der Kern (siehe KONZEPT Kapitel 14). Offen, in dieser Reihenfolge:
 - Mittelbild je Take als Standbild an den Take (`foto`, `quelle = clip`): abgestimmt mit dem Plate Assistant, baut
   nach Migration 0029.
 
+## Export (Marlon, 15.10.2026)
+
+- ~~Clip exportieren~~ gebaut (0.1.39): Rechtsklick auf eine Take-Zeile → „Exportieren …“. ProRes MOV (422 LT bis
+  4444 XQ; ART CMD → MXF, ohne Neukodieren in MOV), MP4 H.264/H.265 (über ProRes HQ und `avconvert`, nur Mac), EXR
+  (linear ACES AP0, PIZ). Farbe Rec.709 mit Look, Rec.709 oder Log (Vorgabe der Kamera); Breite Original/3840/1920/1280.
+  Ziel `<Drehordner>/06_EXPORT/<Art>/` oder frei; nie überschreiben. Offen: MP4 unter Windows (ffmpeg), Ton (ART CMD
+  `export … .wav`), mehrere Clips auf einmal, Abspielfassung der Stage (`plate_version`).
+
 ## Prüfung und Konkurrenzvergleich (09.10.2026)
 
 Unabhängige Code-Prüfung: nichts, was eine fehlerhafte Karte als sicher durchlässt. Behoben: Zielordner nur mit

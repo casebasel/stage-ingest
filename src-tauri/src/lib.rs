@@ -1,6 +1,7 @@
 //! Tauri-Hülle um den Kern: Befehle für die Oberfläche, Fortschritt als Ereignisse.
 
 mod artcmd_laden;
+mod export;
 mod karte_db;
 mod mittelbild;
 mod plate;
@@ -1827,6 +1828,31 @@ async fn clip_vorschaubilder(app: AppHandle, datei: PathBuf, art_cmd: Option<Pat
     .await
 }
 
+/// Einen Clip exportieren (ProRes MOV, MP4, EXR; siehe `export`). Immer nur ein Export zugleich.
+#[tauri::command]
+async fn clip_exportieren(
+    app: AppHandle,
+    auftrag: export::Auftrag,
+    art_cmd: Option<PathBuf>,
+) -> Result<export::Ergebnis, String> {
+    let art = art_cmd
+        .filter(|p| !p.as_os_str().is_empty())
+        .ok_or("Export braucht ARRI ART CMD (Einrichtung → ARRI-Werkzeuge, gratis bei ARRI).")?;
+    let cache = app.path().app_cache_dir().map_err(|e| e.to_string())?;
+    static EINER: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    im_hintergrund(move || {
+        let _sperre = EINER.lock().unwrap_or_else(|e| e.into_inner());
+        export::ausfuehren(&auftrag, &art, &cache)
+    })
+    .await
+}
+
+/// Vorgeschlagener Zielordner eines Exports (für die Anzeige im Dialog).
+#[tauri::command]
+fn export_zielordner(auftrag: export::Auftrag) -> PathBuf {
+    export::zielordner(&auftrag)
+}
+
 /// Gewählten Zielordner prüfen: Hauptordner einer Ablage, darin, darüber oder neu (siehe `ingest_kern::ablage`).
 #[tauri::command]
 async fn ablage_pruefen(pfad: PathBuf) -> ingest_kern::ablage::Pruefung {
@@ -2039,6 +2065,8 @@ pub fn run() {
             clip_vorschaubilder,
             clip_freigeben,
             ablage_pruefen,
+            clip_exportieren,
+            export_zielordner,
             ablage_sicherstellen,
             karte_wiedererkennen,
             karte_einsortieren,

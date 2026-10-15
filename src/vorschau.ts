@@ -249,6 +249,11 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
   artcmd_laden: () => "/Users/beispiel/Library/Application Support/ch.filmstudiobasel.stage-ingest/art-cmd/art-cmd_1.0.0_macos_universal/bin/art-cmd",
   karte_wiedererkennen: () => ({ art: "nichtFormatiert", beginn: "2026-10-28T10:12:00+01:00", sicher: true, bekannt: 12, neue: 3 }),
   clip_freigeben: () => null,
+  export_zielordner: () => "/Volumes/NAS/Footage/HAPPY_END/2026-10-28_RHEINUFER/06_EXPORT/ProRes_HQ_709Look",
+  clip_exportieren: async () => {
+    await warte(2500);
+    return { pfad: "/Volumes/NAS/Footage/HAPPY_END/2026-10-28_RHEINUFER/06_EXPORT/ProRes_HQ_709Look/A001C002_261028_R131_709Look_HQ.mov", hinweis: null };
+  },
   clip_vorschaubilder: () =>
     ["#3a4250", "#6b5a3e", "#2f3d33"].map(
       (farbe) =>

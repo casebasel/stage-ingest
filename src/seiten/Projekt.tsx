@@ -13,6 +13,7 @@ import { gemerkt, merken, useEinstellungen } from "../einstellungen";
 import { Status, type Ton } from "../teile";
 import { kurz } from "./Einlesen";
 import { PfadMenue, type PfadMenueStand } from "./PfadMenue";
+import { ExportDialog } from "./Export";
 import { Abspieler, istArri, originalOeffnen, type AbspielEintrag } from "./Abspieler";
 import { ClipMitBild, vorschauLaden, SpaltenKopf, SpaltenMenue, SpaltenZellen, useTakeSpalten, type Spalte, type TakeMitWerten } from "./TakeSpalten";
 
@@ -362,6 +363,7 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
     }));
   const [spieler, setSpieler] = useState<number | null>(null);
   const [pfadMenue, setPfadMenue] = useState<PfadMenueStand | null>(null);
+  const [exportClip, setExportClip] = useState<{ datei: string; titel: string } | null>(null);
   pfadMenueOeffnen = (ev, t, titel) => {
     ev.preventDefault();
     setPfadMenue({ x: ev.clientX, y: ev.clientY, titel, dateien: t.dateien ?? (t.datei ? [t.datei] : []) });
@@ -549,7 +551,14 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
         </div>
       )}
       {spieler !== null && abspielListe[spieler] && <Abspieler liste={abspielListe} index={spieler} setIndex={setSpieler} />}
-      {pfadMenue && <PfadMenue m={pfadMenue} zu={() => setPfadMenue(null)} />}
+      {pfadMenue && (
+        <PfadMenue
+          m={pfadMenue}
+          zu={() => setPfadMenue(null)}
+          exportieren={() => setExportClip({ datei: pfadMenue.dateien[0], titel: pfadMenue.titel })}
+        />
+      )}
+      {exportClip && <ExportDialog datei={exportClip.datei} titel={exportClip.titel} zu={() => setExportClip(null)} />}
     </div>
   );
 }
