@@ -98,16 +98,11 @@ pub fn take_aenderung(
     if let Some(tc) = angaben.and_then(|c| c.end_tc.clone()) {
         wert.insert("end_tc".into(), json!(tc));
     }
-    // Wie CAP nach dem Stopp: die „Bestätigung“ des Takes durch den Clip.
-    let mut clip = Map::new();
-    clip.insert("name".into(), json!(name));
-    if let Some(tc) = &start_tc {
-        clip.insert("startTc".into(), json!(tc));
+    // Wie CAP nach dem Stopp: die „Bestätigung“ des Takes durch den Clip. Nur mit allen Pflichtangaben `name`, `startTc`
+    // und `bilder` (Plate Assistant, 15.10.2026); sonst ohne `clip`.
+    if let (Some(tc), Some(b)) = (&start_tc, angaben.and_then(|c| c.bilder)) {
+        wert.insert("clip".into(), json!({ "name": name, "startTc": tc, "bilder": b }));
     }
-    if let Some(b) = angaben.and_then(|c| c.bilder) {
-        clip.insert("bilder".into(), json!(b));
-    }
-    wert.insert("clip".into(), Value::Object(clip));
     let k = kamera(werte);
     if !k.is_null() {
         wert.insert("kamera".into(), k);
@@ -163,6 +158,9 @@ mod tests {
         assert_eq!(t["start_zeit"], "2026-10-15T13:13:25.160Z", "Tageszeit-TC in Ortszeit (Sommerzeit) → UTC");
         assert_eq!(t["end_zeit"], "2026-10-15T13:13:35.160Z");
         assert_eq!(t["clip"]["name"], "A009C010_120101_R132");
+        assert_eq!((t["clip"]["startTc"].as_str(), t["clip"]["bilder"].as_u64()), (Some("15:13:25:04"), Some(250)));
+        let ohne_tc = take_aenderung(&a, "01TAKE", 11, None, &w, None, jetzt, "Y".into());
+        assert!(ohne_tc["wert"].get("clip").is_none(), "take.clip nie ohne name, startTc und bilder");
         assert_eq!(t["kamera"]["iso"], 800.0);
         assert_eq!(t["kamera"]["tint"], -2.5);
         assert_eq!(t["kamera"]["shutter"], "180.0");
