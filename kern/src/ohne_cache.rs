@@ -61,16 +61,17 @@ pub(crate) fn ordner_sichern(ordner: &Path) -> io::Result<()> {
     };
     match ergebnis {
         // Manche Dateisysteme (SMB, exFAT-Treiber) kennen kein Sichern von Ordnern; der Inhalt ist dann schon gesichert.
-        Err(e)
-            if matches!(
-                e.kind(),
-                io::ErrorKind::InvalidInput | io::ErrorKind::Unsupported | io::ErrorKind::PermissionDenied
-            ) =>
-        {
-            Ok(())
-        }
+        // Windows über SMB meldet dafür ERROR_INVALID_FUNCTION (1, „Unzulässige Funktion“; Marlon, 15.10.2026: Einlesen
+        // auf \\TRUENAS\Footage scheiterte daran), ERROR_NOT_SUPPORTED (50) oder ERROR_INVALID_PARAMETER (87).
+        Err(e) if ordner_sichern_unbekannt(&e) => Ok(()),
         r => r,
     }
+}
+
+/// Kennt das Dateisystem kein Sichern von Ordnern?
+fn ordner_sichern_unbekannt(e: &io::Error) -> bool {
+    matches!(e.kind(), io::ErrorKind::InvalidInput | io::ErrorKind::Unsupported | io::ErrorKind::PermissionDenied)
+        || (cfg!(windows) && matches!(e.raw_os_error(), Some(1 | 50 | 87)))
 }
 
 /// Schreibt eine Datei vollständig und bringt Inhalt und Ordnereintrag auf die Platte.
@@ -157,4 +158,18 @@ fn lesen(pfad: &Path, mut je_block: impl FnMut(&[u8])) -> io::Result<u64> {
         laenge += n as u64;
     }
     Ok(laenge)
+}
+
+#[cfg(test)]
+mod ordner_tests {
+    use super::*;
+
+    #[test]
+    fn unbekanntes_sichern_von_ordnern_ist_kein_fehler() {
+        assert!(ordner_sichern_unbekannt(&io::Error::from(io::ErrorKind::Unsupported)));
+        if cfg!(windows) {
+            assert!(ordner_sichern_unbekannt(&io::Error::from_raw_os_error(1)), "SMB unter Windows");
+        }
+        assert!(!ordner_sichern_unbekannt(&io::Error::from(io::ErrorKind::NotFound)));
+    }
 }
