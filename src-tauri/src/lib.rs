@@ -9,6 +9,7 @@ mod plates;
 mod projekt;
 mod qr;
 mod stage;
+mod take_aus_clip;
 mod technik;
 mod vorschaubilder;
 mod zuordnung;
@@ -1667,38 +1668,91 @@ async fn clip_zuordnen(
 ) -> Result<(), String> {
     let p = Arc::clone(&plate);
     im_hintergrund(move || {
-        let mut karte_id = None;
-        let mut fehler: Vec<String> = Vec::new();
-        for d in &dateien {
-            match ingest_kern::uebersicht::zuordnen(d, &clip, take_id.as_deref(), dreh_id.as_deref()) {
-                Ok(id) => karte_id = karte_id.or(id),
-                Err(e) => fehler.push(format!("{}: {e}", d.display())),
-            }
+        zuordnen_ueberall(&p, zugang.as_ref(), &dateien, &clip, take_id.as_deref(), dreh_id.as_deref())
+    })
+    .await
+}
+
+/// Clip in allen Zusammenfassungen und (falls die Karte dort steht) in der Datenbank umhängen.
+fn zuordnen_ueberall(
+    p: &plate::Plate,
+    zugang: Option<&plate::Zugang>,
+    dateien: &[PathBuf],
+    clip: &str,
+    take_id: Option<&str>,
+    dreh_id: Option<&str>,
+) -> Result<(), String> {
+    let mut karte_id = None;
+    let mut fehler: Vec<String> = Vec::new();
+    for d in dateien {
+        match ingest_kern::uebersicht::zuordnen(d, clip, take_id, dreh_id) {
+            Ok(id) => karte_id = karte_id.or(id),
+            Err(e) => fehler.push(format!("{}: {e}", d.display())),
         }
-        // Steht die Karte in der gemeinsamen Datenbank, dort ebenfalls umhängen (Plate Assistant und Stage lesen das).
-        if let (Some(z), Some(kid)) = (&zugang, &karte_id) {
-            let jetzt = chrono::Utc::now();
-            match karte_db::zuordnung_aenderungen(
-                kid,
-                &clip,
-                take_id.as_deref(),
-                dreh_id.as_deref(),
-                jetzt,
-                plate::ulid_aehnlich,
-            ) {
-                Some(a) => match p.karte_schreiben(z, a) {
-                    Ok(abgelehnt) if abgelehnt.is_empty() => {}
-                    Ok(abgelehnt) => fehler.push(format!("Datenbank: {}", abgelehnt.join("; "))),
-                    Err(e) => fehler.push(format!("Datenbank: {e}")),
-                },
-                None => fehler.push(format!("Datenbank: Clipname {clip} nicht verwendbar")),
-            }
+    }
+    // Steht die Karte in der gemeinsamen Datenbank, dort ebenfalls umhängen (Plate Assistant und Stage lesen das).
+    if let (Some(z), Some(kid)) = (zugang, &karte_id) {
+        match karte_db::zuordnung_aenderungen(kid, clip, take_id, dreh_id, chrono::Utc::now(), plate::ulid_aehnlich) {
+            Some(a) => match p.karte_schreiben(z, a) {
+                Ok(abgelehnt) if abgelehnt.is_empty() => {}
+                Ok(abgelehnt) => fehler.push(format!("Datenbank: {}", abgelehnt.join("; "))),
+                Err(e) => fehler.push(format!("Datenbank: {e}")),
+            },
+            None => fehler.push(format!("Datenbank: Clipname {clip} nicht verwendbar")),
         }
-        if fehler.is_empty() {
-            Ok(())
-        } else {
-            Err(format!("Nicht überall gespeichert: {}", fehler.join("; ")))
-        }
+    }
+    if fehler.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("Nicht überall gespeichert: {}", fehler.join("; ")))
+    }
+}
+
+/// „Zu klären“: aus dem Clip einen neuen Take an der gewählten Plate anlegen und den Clip ihm zuordnen (siehe
+/// `take_aus_clip`). Gibt die ID des neuen Takes zurück.
+#[tauri::command]
+async fn take_aus_clip(
+    plate: State<'_, Arc<plate::Plate>>,
+    zugang: plate::Zugang,
+    anfrage: take_aus_clip::Anfrage,
+) -> Result<String, String> {
+    let p = Arc::clone(&plate);
+    im_hintergrund(move || {
+        let a = anfrage;
+        // CSV von ART CMD: `<Dreh>/05_METADATEN/<Clip>.csv` (Kartenordner = Ordner unter 01_KAMERA).
+        let kartenordner = a
+            .clipdatei
+            .ancestors()
+            .find(|o| o.parent().and_then(|e| e.file_name()).is_some_and(|n| n == struktur::KAMERA))
+            .map(Path::to_path_buf);
+        let stamm = soll::ohne_endung(&a.clip).to_owned();
+        let csv = kartenordner
+            .as_ref()
+            .map(|k| struktur::metadatenordner(k).join(format!("{stamm}.csv")))
+            .filter(|c| c.is_file());
+        let werte = technik::lesen(&technik::Anfrage { datei: a.clipdatei.clone(), csv: csv.clone() });
+        let aus_clip = csv
+            .and_then(|c| std::fs::read_to_string(c).ok())
+            .and_then(|t| artcmd::auswerten(&t).ok())
+            .and_then(|b| b.aus_clip())
+            .and_then(|x| serde_json::to_value(x).ok());
+        let angaben = ingest_kern::clip::lesen(&a.clipdatei).ok();
+        // Frisch direkt vor dem Schreiben (Plate Assistant: keine Eindeutigkeit der Nummer auf dem Server).
+        let nummer = p.naechste_take_nummer(&zugang, &a.plate_id)?;
+        let take_id = plate::ulid_aehnlich();
+        let aenderung = take_aus_clip::take_aenderung(
+            &a,
+            &take_id,
+            nummer,
+            angaben.as_ref(),
+            &werte,
+            aus_clip,
+            chrono::Utc::now(),
+            plate::ulid_aehnlich(),
+        );
+        p.take_anlegen(&zugang, aenderung)?;
+        zuordnen_ueberall(&p, Some(&zugang), &a.dateien, &a.clip, Some(&take_id), Some(&a.dreh_id))?;
+        Ok(take_id)
     })
     .await
 }
@@ -2059,6 +2113,7 @@ pub fn run() {
             plate_drehort_kurznamen,
             plate_abmelden,
             clip_zuordnen,
+            take_aus_clip,
             stage_projekt,
             projekt_uebersicht,
             take_technik,

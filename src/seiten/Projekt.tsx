@@ -56,6 +56,9 @@ type OffenerClip = {
   dateien: string[];
   /** Erreichbare Kopien der Clipdatei (Vorschaubild, Abspielen, Pfad kopieren). */
   clipdateien?: string[];
+  /** Vorschlag für einen neuen Take: Plate des Nachbar-Clips auf derselben Rolle. */
+  vorschlagPlate?: string | null;
+  vorschlagDreh?: string | null;
 };
 type Uebersicht = {
   projekt: ProjektT;
@@ -1237,17 +1240,53 @@ function ZuKlaeren({
   if (u.zuKlaeren.length === 0)
     return <p className="leer-zeile">Nichts zu klären: Jeder eingelesene Clip ist einem Take oder einem Drehort zugeordnet.</p>;
 
-  async function zuordnen(c: OffenerClip, schluessel: string) {
-    const w = wahl[schluessel];
-    if (!w?.dreh) return;
-    setStand({ ...stand, [schluessel]: { ton: "laeuft", text: "Speichert …" } });
+  // Vorschlag als Vorauswahl: neuer Take an der Plate des Nachbar-Clips (Marlon, 15.10.2026).
+  const wahlVon = (c: OffenerClip, schluessel: string) =>
+    wahl[schluessel] ??
+    (c.vorschlagPlate && c.vorschlagDreh && zugang && c.clipdateien?.length
+      ? { dreh: c.vorschlagDreh, take: `neu:${c.vorschlagPlate}` }
+      : { dreh: "", take: "" });
+
+  async function zuordnen(c: OffenerClip, schluessel: string, mitNeuladen = true): Promise<boolean> {
+    const w = wahlVon(c, schluessel);
+    if (!w.dreh) return false;
+    setStand((s) => ({ ...s, [schluessel]: { ton: "laeuft", text: w.take.startsWith("neu:") ? "Legt Take an …" : "Speichert …" } }));
     try {
-      await invoke("clip_zuordnen", { zugang, dateien: c.dateien, clip: c.clip, takeId: w.take || null, drehId: w.dreh });
-      setStand({ ...stand, [schluessel]: { ton: "ok", text: "Zugeordnet" } });
-      gespeichert();
+      if (w.take.startsWith("neu:")) {
+        const dreh = u.drehs.find((d) => d.id === w.dreh);
+        await invoke("take_aus_clip", {
+          zugang,
+          anfrage: {
+            plateId: w.take.slice(4),
+            drehId: w.dreh,
+            drehtag: dreh?.datum || null,
+            clip: c.clip,
+            clipdatei: c.clipdateien![0],
+            dateien: c.dateien,
+          },
+        });
+        setStand((s) => ({ ...s, [schluessel]: { ton: "ok", text: "Take angelegt und zugeordnet" } }));
+      } else {
+        await invoke("clip_zuordnen", { zugang, dateien: c.dateien, clip: c.clip, takeId: w.take || null, drehId: w.dreh });
+        setStand((s) => ({ ...s, [schluessel]: { ton: "ok", text: "Zugeordnet" } }));
+      }
+      if (mitNeuladen) gespeichert();
+      return true;
     } catch (e) {
-      setStand({ ...stand, [schluessel]: { ton: "fehler", text: String(e) } });
+      setStand((s) => ({ ...s, [schluessel]: { ton: "fehler", text: String(e) } }));
+      return false;
     }
+  }
+
+  const mitVorschlag = u.zuKlaeren.filter((c) => wahlVon(c, `${c.karte}|${c.clip}`).take.startsWith("neu:"));
+  async function alleVorschlaege() {
+    const ja = await ask(
+      `${mitVorschlag.length} neue Takes anlegen, je an der vorgeschlagenen Einstellung (Nummer = nächste freie, Werte vom Clip)?\n\nNur anlegen, wenn an diesen Einstellungen gerade nicht gedreht wird: ein iPhone, das noch nicht abgeglichen hat, vergäbe sonst dieselbe Nummer.`,
+      { title: "Takes aus Clips anlegen", kind: "info", okLabel: "Anlegen", cancelLabel: "Abbrechen" },
+    );
+    if (!ja) return;
+    for (const c of mitVorschlag) await zuordnen(c, `${c.karte}|${c.clip}`, false);
+    gespeichert();
   }
 
   return (
@@ -1257,15 +1296,17 @@ function ZuKlaeren({
         <span className="leise">
           {u.zuKlaeren.length} {u.zuKlaeren.length === 1 ? "Clip" : "Clips"} ohne Take · das Bild aus der Mitte zeigt, wohin er gehört
         </span>
+        {mitVorschlag.length > 0 && (
+          <button className="knopf knopf-klein" style={{ marginLeft: "auto" }} onClick={alleVorschlaege}>
+            Alle Vorschläge anlegen ({mitVorschlag.length})
+          </button>
+        )}
       </div>
-      <table className="tabelle">
+      <table className="tabelle zu-klaeren">
         <thead>
           <tr>
             <th>Bild</th>
             <th>Clip</th>
-            <th>Karte</th>
-            <th>Start</th>
-            <th>Liegt in</th>
             <th>Drehort</th>
             <th>Take</th>
             <th className="spalte-aktion">
@@ -1276,7 +1317,7 @@ function ZuKlaeren({
         <tbody>
           {u.zuKlaeren.map((c) => {
             const schluessel = `${c.karte}|${c.clip}`;
-            const w = wahl[schluessel] ?? { dreh: "", take: "" };
+            const w = wahlVon(c, schluessel);
             const dreh = u.drehs.find((d) => d.id === w.dreh);
             const st = stand[schluessel];
             return (
@@ -1297,15 +1338,15 @@ function ZuKlaeren({
                 </td>
                 <td className="zahl">
                   <Status ton="warn">{c.clipdateien?.[0] ? <ClipMitBild clip={c.clip} datei={c.clipdateien[0]} /> : c.clip}</Status>
+                  <span className="unterzeile zahl leise">
+                    {c.karte} · {c.startTc ?? "ohne TC"} · {c.drehOrdner}
+                  </span>
                   {st && (
                     <span className="unterzeile">
                       <Status ton={st.ton}>{st.text}</Status>
                     </span>
                   )}
                 </td>
-                <td className="zahl">{c.karte}</td>
-                <td className="zahl">{c.startTc ?? "–"}</td>
-                <td className="zahl leise">{c.drehOrdner}</td>
                 <td>
                   <select
                     aria-label={`Drehort für ${c.clip}`}
@@ -1333,6 +1374,16 @@ function ZuKlaeren({
                     onChange={(e) => setWahl({ ...wahl, [schluessel]: { ...w, take: e.target.value } })}
                   >
                     <option value="">Ohne Take (nur Drehort)</option>
+                    {zugang && c.clipdateien?.length && dreh?.plates.length ? (
+                      <optgroup label="Neuer Take aus diesem Clip">
+                        {dreh.plates.map((p) => (
+                          <option key={`neu:${p.id}`} value={`neu:${p.id}`}>
+                            + Neu: {plateTitel(p)}
+                            {p.id === c.vorschlagPlate ? " ★" : ""}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ) : null}
                     {dreh?.plates.flatMap((p) =>
                       p.takes.map((t) => (
                         <option key={t.id} value={t.id}>
@@ -1345,7 +1396,7 @@ function ZuKlaeren({
                 </td>
                 <td className="spalte-aktion">
                   <button className="knopf knopf-klein" disabled={!w.dreh || st?.ton === "laeuft"} onClick={() => zuordnen(c, schluessel)}>
-                    Zuordnen
+                    {w.take.startsWith("neu:") ? "Take anlegen" : "Zuordnen"}
                   </button>
                 </td>
               </tr>

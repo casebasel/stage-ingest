@@ -2296,3 +2296,9 @@ input[type="checkbox"][role="switch"]:checked::before {
   border-radius: var(--rund-klein);
   background: oklch(0 0 0);
 }
+.zu-klaeren select {
+  max-width: 210px;
+}
+.zu-klaeren td {
+  vertical-align: top;
+}

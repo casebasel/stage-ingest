@@ -64,6 +64,18 @@ pub struct OffenerClip {
     /// Erreichbare Kopien der Clipdatei (Vorschaubild, Abspielen, Pfad kopieren; Marlon, 15.10.2026: „Bildvorschau,
     /// um zu wissen, zu welchem Drehort sie gehören“).
     pub clipdateien: Vec<PathBuf>,
+    /// Vorschlag für einen neuen Take: die Plate (und ihr Drehort) des Takes, dessen Clip auf derselben Kamera-Rolle
+    /// direkt davor liegt (sonst direkt danach).
+    pub vorschlag_plate: Option<String>,
+    pub vorschlag_dreh: Option<String>,
+}
+
+/// `A009C010_…` → (`A009`, 10): Kamera und Rolle, Clipnummer.
+fn rolle_und_nummer(name: &str) -> Option<(String, u32)> {
+    let erster = name.split('_').next()?;
+    let (rolle, rest) = (erster.get(..4)?, erster.get(4..)?);
+    let n = rest.strip_prefix(['C', 'c'])?.parse().ok()?;
+    Some((rolle.to_uppercase(), n))
 }
 
 #[derive(Debug, Serialize)]
@@ -525,7 +537,25 @@ pub fn zusammenfuehren(
                 freigegeben: k.inhalt.freigegeben,
                 dateien: vec![k.datei.clone()],
                 clipdateien: clipdatei.into_iter().collect(),
+                vorschlag_plate: None,
+                vorschlag_dreh: None,
             }),
+        }
+    }
+    // Vorschlag je offenem Clip: Nachbar auf derselben Rolle mit Take → dessen Plate.
+    let take_plate = crate::zuordnung::take_zu_plate(drehs_json);
+    let mit_take: Vec<((String, u32), &str)> = karten
+        .iter()
+        .flat_map(|k| k.inhalt.clips.iter())
+        .filter_map(|c| Some((rolle_und_nummer(&c.name)?, c.take_id.as_deref()?)))
+        .collect();
+    for o in &mut zu_klaeren {
+        let Some((rolle, n)) = rolle_und_nummer(&o.clip) else { continue };
+        let davor = mit_take.iter().filter(|((r, m), _)| *r == rolle && *m < n).max_by_key(|((_, m), _)| *m);
+        let danach = mit_take.iter().filter(|((r, m), _)| *r == rolle && *m > n).min_by_key(|((_, m), _)| *m);
+        if let Some((plate, dreh)) = davor.or(danach).and_then(|(_, t)| take_plate.get(*t)) {
+            o.vorschlag_plate = Some(plate.clone());
+            o.vorschlag_dreh = Some(dreh.clone());
         }
     }
     let einsortieren = einsortierbar(&karten, &drehs, &take_zu_dreh, &clip_zu_dreh);
@@ -685,6 +715,12 @@ mod tests {
         assert_eq!(take.dateien.len(), 2, "{:?}", take.dateien);
         assert!(take.dateien.iter().any(|d| d.starts_with(t.path().join("NAS"))));
         assert!(take.dateien.iter().any(|d| d.starts_with(t.path().join("T7"))));
+    }
+
+    #[test]
+    fn rolle_und_clipnummer() {
+        assert_eq!(rolle_und_nummer("A009C010_120101_R132"), Some(("A009".into(), 10)));
+        assert_eq!(rolle_und_nummer("IMG_0001"), None);
     }
 
     #[test]

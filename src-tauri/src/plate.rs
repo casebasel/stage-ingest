@@ -17,7 +17,24 @@ use serde_json::{json, Value};
 /// Tabellen, die der Ingest ändern darf (Systemkarte 05dc71c, BESITZ.md). Der Server beschränkt ein persönliches
 /// Konto nicht mehr; diese Liste ist die Sperre. Nie: dreh, plate, take, foto.
 pub const DARF_AENDERN: &[&str] =
-    &["projekt", "ingest_meldung", "hdri_job", "dreh", "karte", "clip", "studio_take", "foto"];
+    &["projekt", "ingest_meldung", "hdri_job", "dreh", "karte", "clip", "studio_take", "foto", "take"];
+/// `take` (gehört dem Plate Assistant): der Ingest legt nur Takes aus Clips an (abgestimmt 15.10.2026), mit diesen
+/// Feldern; ändert nie einen bestehenden Take.
+const TAKE_ANLEGEN: &[&str] = &[
+    "plate_id",
+    "nummer",
+    "art",
+    "start_zeit",
+    "end_zeit",
+    "start_tc",
+    "end_tc",
+    "clip",
+    "clip_name",
+    "kamera",
+    "aus_clip",
+    "geloescht",
+    "erstellt_am",
+];
 /// `foto` (gehört dem Plate Assistant): der Ingest legt nur das Mittelbild eines Takes an (`quelle = clip`, 0029), ändert
 /// nie ein bestehendes Foto.
 const FOTO_FELDER: &[&str] = &["_anlegen"];
@@ -47,6 +64,13 @@ pub fn aenderungen_pruefen(body: &Value) -> Result<(), String> {
         let feld = a["feld"].as_str().unwrap_or("");
         if t == "dreh" && !DREH_FELDER.contains(&feld) {
             return Err(format!("Stage Ingest ändert am Drehort „{feld}“ nicht (gehört dem Plate Assistant)"));
+        }
+        if t == "take" {
+            let unbekannt =
+                a["wert"].as_object().into_iter().flatten().find(|(k, _)| !TAKE_ANLEGEN.contains(&k.as_str()));
+            if feld != "_anlegen" || a["wert"]["plate_id"].as_str().is_none_or(str::is_empty) || unbekannt.is_some() {
+                return Err("Stage Ingest legt an „take“ nur neue Takes aus Clips an (erlaubte Felder)".into());
+            }
         }
         if t == "foto" && (!FOTO_FELDER.contains(&feld) || a["wert"]["quelle"] != "clip") {
             return Err("Stage Ingest legt an „foto“ nur Mittelbilder an (quelle = clip)".into());
@@ -329,6 +353,27 @@ impl Plate {
             })
             .unwrap_or(Value::Null);
         serde_json::json!({ "karten": karten, "clips": clips })
+    }
+
+    /// Nächste Take-Nummer einer Plate: MAX(nummer) über alle Takes, auch gelöschte, plus 1 (wie die App; frisch
+    /// direkt vor dem Schreiben lesen).
+    pub fn naechste_take_nummer(&self, z: &Zugang, plate_id: &str) -> Result<i64, String> {
+        let v = self.lesen(z, &format!("take?plate_id=eq.{}&select=nummer", url_teil(plate_id)))?;
+        Ok(v.as_array().into_iter().flatten().filter_map(|t| t["nummer"].as_i64()).max().unwrap_or(0) + 1)
+    }
+
+    /// Legt einen Take an (eine Änderung `take` `_anlegen`); gibt eine Ablehnung des Servers wörtlich zurück.
+    pub fn take_anlegen(&self, z: &Zugang, aenderung: Value) -> Result<(), String> {
+        let body = json!({ "p_geraet": geraet_name(), "p_aenderungen": [aenderung] });
+        let v = self.anwenden(z, &body)?;
+        match v[0]["ergebnis"].as_str() {
+            Some("uebernommen" | "aelter" | "doppelt") => Ok(()),
+            e => Err(format!(
+                "Take nicht angelegt: {} {}",
+                e.unwrap_or("unbekannt"),
+                v[0]["grund"].as_str().unwrap_or_default()
+            )),
+        }
     }
 
     /// Hat der Take schon ein Mittelbild (`foto`, `art = vorschau`, `quelle = clip`)? Dann legt der Ingest kein zweites an.

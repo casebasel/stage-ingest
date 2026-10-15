@@ -249,6 +249,10 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
   artcmd_laden: () => "/Users/beispiel/Library/Application Support/ch.filmstudiobasel.stage-ingest/art-cmd/art-cmd_1.0.0_macos_universal/bin/art-cmd",
   karte_wiedererkennen: () => ({ art: "nichtFormatiert", beginn: "2026-10-28T10:12:00+01:00", sicher: true, bekannt: 12, neue: 3 }),
   clip_freigeben: () => null,
+  take_aus_clip: async () => {
+    await warte(800);
+    return "01NEU";
+  },
   export_zielordner: () => "/Volumes/NAS/Footage/HAPPY_END/2026-10-28_RHEINUFER/06_EXPORT/ProRes_HQ_709Look",
   clip_exportieren: async () => {
     await warte(2500);
@@ -273,8 +277,8 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
     hinweis: null,
     unlesbar: [],
     zuKlaeren: [
-      { clip: "A001C014_261028_R132", karte: "A001R132", startTc: "14:22:05:10", drehOrdner: "2026-10-28_RHEINUFER", freigegeben: false, dateien: ["/a", "/b"], clipdateien: ["/Volumes/NAS/x.mxf"] },
-      { clip: "A001C015_261028_R132", karte: "A001R132", startTc: "14:31:40:02", drehOrdner: "2026-10-28_RHEINUFER", freigegeben: false, dateien: ["/a", "/b"], clipdateien: ["/Volumes/NAS/x.mxf"] },
+      { clip: "A001C014_261028_R132", karte: "A001R132", startTc: "14:22:05:10", drehOrdner: "2026-10-28_RHEINUFER", freigegeben: false, dateien: ["/a", "/b"], clipdateien: ["/Volumes/NAS/x.mxf"], vorschlagPlate: "p1", vorschlagDreh: "d1" },
+      { clip: "A001C015_261028_R132", karte: "A001R132", startTc: "14:31:40:02", drehOrdner: "2026-10-28_RHEINUFER", freigegeben: false, dateien: ["/a", "/b"], clipdateien: ["/Volumes/NAS/x.mxf"], vorschlagPlate: "p1", vorschlagDreh: "d1" },
     ],
     karten: [
       { drehOrdner: "2026-10-28_Rheinufer", datei: "a", inhalt: { karte: "A001R131", beginn: "", freigegeben: true, unabhaengigeKopien: 2, clips: Array(22) } },
