@@ -174,15 +174,7 @@ pub fn begleitdateien_beiseite(
     if ersetzen.is_empty() {
         return Ok(None);
     }
-    let name = ziel.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "karte".into());
-    let basis = crate::struktur::metadatenordner(ziel).join("frueher");
-    let stamm = format!("{name}_{}", zeit.format("%Y-%m-%d_%H%M"));
-    let mut ablage = basis.join(&stamm);
-    let mut n = 2;
-    while ablage.exists() {
-        ablage = basis.join(format!("{stamm}_{n}"));
-        n += 1;
-    }
+    let ablage = frueher_ordner(ziel, zeit, "");
     for rel in ersetzen {
         let von = ziel.join(rel);
         let nach = ablage.join(rel);
@@ -202,29 +194,50 @@ pub fn begleitdateien_beiseite(
             crate::ohne_cache::ordner_sichern(e)?;
         }
     }
-    let historie = ziel.join(crate::mhl::ORDNER);
-    if historie.is_dir() {
-        let nach = ablage.join(crate::mhl::ORDNER);
-        if std::fs::rename(&historie, &nach).is_err() {
-            for e in walkdir::WalkDir::new(&historie).min_depth(1) {
-                let e = e.map_err(std::io::Error::other)?;
-                let z = nach.join(e.path().strip_prefix(&historie).map_err(std::io::Error::other)?);
-                if e.file_type().is_dir() {
-                    std::fs::create_dir_all(&z)?;
-                } else {
-                    if let Some(p) = z.parent() {
-                        std::fs::create_dir_all(p)?;
-                    }
-                    std::fs::copy(e.path(), &z)?;
-                    std::fs::File::open(&z)?.sync_all()?;
-                }
-            }
-            std::fs::remove_dir_all(&historie)?;
-        }
-        crate::ohne_cache::ordner_sichern(&ablage)?;
-        crate::ohne_cache::ordner_sichern(ziel)?;
-    }
+    historie_beiseite(ziel, &ablage)?;
     Ok(Some(ablage))
+}
+
+/// Verschiebt `<ziel>/ascmhl/` nach `<ablage>/ascmhl/` (Umbenennen, sonst kopieren, sichern, dann entfernen).
+pub(crate) fn historie_beiseite(ziel: &Path, ablage: &Path) -> std::io::Result<()> {
+    let historie = ziel.join(crate::mhl::ORDNER);
+    if !historie.is_dir() {
+        return Ok(());
+    }
+    std::fs::create_dir_all(ablage)?;
+    let nach = ablage.join(crate::mhl::ORDNER);
+    if std::fs::rename(&historie, &nach).is_err() {
+        for e in walkdir::WalkDir::new(&historie).min_depth(1) {
+            let e = e.map_err(std::io::Error::other)?;
+            let z = nach.join(e.path().strip_prefix(&historie).map_err(std::io::Error::other)?);
+            if e.file_type().is_dir() {
+                std::fs::create_dir_all(&z)?;
+            } else {
+                if let Some(p) = z.parent() {
+                    std::fs::create_dir_all(p)?;
+                }
+                std::fs::copy(e.path(), &z)?;
+                std::fs::File::open(&z)?.sync_all()?;
+            }
+        }
+        std::fs::remove_dir_all(&historie)?;
+    }
+    crate::ohne_cache::ordner_sichern(ablage)?;
+    crate::ohne_cache::ordner_sichern(ziel)
+}
+
+/// Freier Ordner `<05_METADATEN>/frueher/<Karte>_<JJJJ-MM-TT_HHMM><zusatz>` (bei Bedarf mit Zähler), noch nicht angelegt.
+pub(crate) fn frueher_ordner(ziel: &Path, zeit: chrono::DateTime<chrono::Local>, zusatz: &str) -> PathBuf {
+    let name = ziel.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "karte".into());
+    let basis = crate::struktur::metadatenordner(ziel).join("frueher");
+    let stamm = format!("{name}_{}{zusatz}", zeit.format("%Y-%m-%d_%H%M"));
+    let mut ablage = basis.join(&stamm);
+    let mut n = 2;
+    while ablage.exists() {
+        ablage = basis.join(format!("{stamm}_{n}"));
+        n += 1;
+    }
+    ablage
 }
 
 /// Legt einen Zielordner zur Seite: Umbenennen im selben Ordner in `<Name>_ALT_<JJJJ-MM-TT_HHMM>` (bei Bedarf mit
@@ -444,6 +457,7 @@ mod tests {
             projekt: Default::default(),
             karte_id: None,
             einsortiert: None,
+            geloescht: vec![],
         };
         crate::uebersicht::schreiben(&dreh.join("04_BERICHTE"), &z).unwrap();
         assert!(wegwerfen_erlaubt(&alt).is_err(), "nicht freigegeben");

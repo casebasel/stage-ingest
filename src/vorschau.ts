@@ -193,6 +193,7 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
   studio_soll: () => [],
   plate_projekt_aendern: () => null,
   clip_zuordnen: () => null,
+  clip_loeschen: () => ({ kopien: 1, dateien: 2, bytes: 1, protokolle: [] }),
   plate_drehort_kurznamen: () => ["RHEINUFER", "BRUECKE"],
   plate_drehort_anlegen: (a) => `dreh-happy_end-${String(a.kurzname).toLowerCase()}`,
   plate_projekt_anlegen: (a) => `projekt-${String(a.kurzname).toLowerCase()}`,

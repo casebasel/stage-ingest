@@ -34,6 +34,9 @@ pub struct KartenZusammenfassung {
     /// Aus `<Datum>_OHNE_DREHORT` in einen Drehort einsortiert (wann, woher, geprüft).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub einsortiert: Option<crate::einsortieren::Einsortiert>,
+    /// Endgültig gelöschte Clips (Name), mit Löschprotokoll in `04_BERICHTE/` (siehe `loeschen`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub geloescht: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -93,6 +96,27 @@ pub fn zuordnen(
     Ok(z.karte_id)
 }
 
+/// Nimmt einen endgültig gelöschten Clip aus der Zusammenfassung und vermerkt ihn unter `geloescht`. Gibt die ID der
+/// Karte in der Datenbank zurück (falls die Karte dort steht). Fehlt der Clip schon, bleibt die Datei unverändert.
+pub fn clip_entfernen(datei: &Path, clip: &str) -> std::io::Result<Option<String>> {
+    let mut z: KartenZusammenfassung = serde_json::from_slice(&std::fs::read(datei)?).map_err(std::io::Error::other)?;
+    let vorher = z.clips.len();
+    z.clips.retain(|c| !c.name.eq_ignore_ascii_case(clip));
+    if z.clips.len() != vorher {
+        if !z.geloescht.iter().any(|g| g.eq_ignore_ascii_case(clip)) {
+            z.geloescht.push(clip.to_owned());
+        }
+        let text = serde_json::to_vec_pretty(&z).map_err(std::io::Error::other)?;
+        crate::sicher_schreiben(datei, &text)?;
+    }
+    Ok(z.karte_id)
+}
+
+/// Liest eine Zusammenfassung aus ihrer Datei (`None`, wenn unlesbar).
+pub fn lesen_datei(datei: &Path) -> Option<KartenZusammenfassung> {
+    serde_json::from_slice(&std::fs::read(datei).ok()?).ok()
+}
+
 /// Liest die bestehende Zusammenfassung einer Karte (`None`, wenn es keine gibt oder sie unlesbar ist).
 pub fn lesen(berichtordner: &Path, karte: &str) -> Option<KartenZusammenfassung> {
     let pfad = berichtordner.join(format!("{}{ENDUNG}", crate::struktur::ordnername(karte)));
@@ -112,6 +136,12 @@ pub fn frueheres_uebernehmen(neu: &mut KartenZusammenfassung, alt: &KartenZusamm
     }
     if neu.karte_id.is_none() {
         neu.karte_id = alt.karte_id.clone();
+    }
+    // Gelöscht bleibt gelöscht, ausser der Clip kam mit der Karte wieder herein (dann steht er wieder in „Zu klären“).
+    for g in &alt.geloescht {
+        if !neu.clips.iter().any(|c| c.name.eq_ignore_ascii_case(g)) && !neu.geloescht.contains(g) {
+            neu.geloescht.push(g.clone());
+        }
     }
 }
 
@@ -181,6 +211,7 @@ mod tests {
             projekt: Default::default(),
             karte_id: None,
             einsortiert: None,
+            geloescht: vec![],
             clips: vec![ClipEintrag {
                 name: "A001C003_261028_R1AB".into(),
                 pfad: "A001C003_261028_R1AB.mov".into(),
@@ -229,6 +260,7 @@ mod tests {
             projekt: Default::default(),
             karte_id: None,
             einsortiert: None,
+            geloescht: vec![],
             clips,
         };
         let mut alt = karte(vec![clip("A007C001", Some("T7"), "hand"), clip("A007C002", Some("T2"), "zeitfenster")]);

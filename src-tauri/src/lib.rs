@@ -1034,6 +1034,7 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
             projekt: projekt_zeilen(auftrag).into_iter().collect(),
             karte_id: datenbank.as_ref().and_then(|d| d.as_ref().ok()).cloned(),
             einsortiert: None,
+            geloescht: vec![],
             clips: clips
                 .iter()
                 .map(|c| {
@@ -1673,6 +1674,76 @@ async fn clip_zuordnen(
     .await
 }
 
+/// Ergebnis des endgültigen Löschens auf allen Kopien.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ClipGeloescht {
+    /// Kopien, aus denen der Clip gelöscht wurde.
+    kopien: usize,
+    dateien: usize,
+    bytes: u64,
+    protokolle: Vec<PathBuf>,
+}
+
+/// „Zu klären“: einen Clip endgültig löschen, auf jeder Kopie (Marlon, 15.10.2026: „endgültig und komplett, nicht
+/// wiederherstellbar“). Je Kopie siehe `ingest_kern::loeschen`: Dateien weg, neue ASC-MHL-Historie, Löschprotokoll in
+/// `04_BERICHTE/`; dann aus der Zusammenfassung. Nie auf der Karte, nie während eines Kopiervorgangs. Die Zeile in der
+/// Datenbank bleibt (ohne Take, stört nicht), bis der Plate Assistant `clip.geloescht` für den Ingest freigibt.
+#[tauri::command]
+async fn clip_loeschen(
+    app: tauri::AppHandle,
+    laufend: State<'_, Laufend>,
+    dateien: Vec<PathBuf>,
+    clip: String,
+) -> Result<ClipGeloescht, String> {
+    if laufend.aktiv.load(Ordering::SeqCst) {
+        return Err("Während des Kopierens wird nichts gelöscht. Danach nochmals versuchen.".into());
+    }
+    let version = app.package_info().version.to_string();
+    im_hintergrund(move || {
+        let stamm = soll::ohne_endung(&clip).to_owned();
+        let angaben =
+            mhl::Angaben { werkzeug: "Stage Ingest".into(), version, zeit: chrono::Utc::now(), nur_pruefen: false };
+        let lokal = chrono::Local::now();
+        let mut aus = ClipGeloescht { kopien: 0, dateien: 0, bytes: 0, protokolle: vec![] };
+        let mut fehler: Vec<String> = Vec::new();
+        for d in &dateien {
+            let Some(z) = ingest_kern::uebersicht::lesen_datei(d) else {
+                fehler.push(format!("{}: Zusammenfassung nicht lesbar", d.display()));
+                continue;
+            };
+            let Some(drehordner) = d.parent().and_then(Path::parent) else { continue };
+            let kartenordner = drehordner.join(struktur::KAMERA).join(struktur::ordnername(&z.karte));
+            match ingest_kern::loeschen::clip_endgueltig(&kartenordner, &stamm, &angaben, lokal) {
+                Ok(g) => {
+                    if !g.dateien.is_empty() {
+                        aus.kopien += 1;
+                        aus.dateien += g.dateien.len();
+                        aus.bytes += g.dateien.iter().map(|f| f.groesse).sum::<u64>();
+                    }
+                    aus.protokolle.extend(g.protokoll);
+                    if let Some(f) = g.fehler {
+                        fehler.push(format!("{}: {f}", kartenordner.display()));
+                    }
+                }
+                Err(e) => {
+                    fehler.push(format!("{}: {e}", kartenordner.display()));
+                    continue;
+                }
+            }
+            if let Err(e) = ingest_kern::uebersicht::clip_entfernen(d, &clip) {
+                fehler.push(format!("{}: {e}", d.display()));
+            }
+        }
+        if fehler.is_empty() {
+            Ok(aus)
+        } else {
+            Err(format!("Nicht überall gelöscht: {}", fehler.join("; ")))
+        }
+    })
+    .await
+}
+
 /// Clip in allen Zusammenfassungen und (falls die Karte dort steht) in der Datenbank umhängen.
 fn zuordnen_ueberall(
     p: &plate::Plate,
@@ -2113,6 +2184,7 @@ pub fn run() {
             plate_drehort_kurznamen,
             plate_abmelden,
             clip_zuordnen,
+            clip_loeschen,
             take_aus_clip,
             stage_projekt,
             projekt_uebersicht,

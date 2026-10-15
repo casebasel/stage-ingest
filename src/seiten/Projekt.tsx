@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { ask } from "@tauri-apps/plugin-dialog";
-import { ChevronDown, ChevronRight, Image as Bild, MapPinPlus, Play, Plus, RefreshCw, Settings, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Image as Bild, MapPinPlus, Play, Plus, RefreshCw, Settings, Trash2, X } from "lucide-react";
 import { NeuerDrehort, NeuesProjekt, ProjektEinstellungen } from "../ProjektEinstellungen";
 import { useKonto, type Projekt as ProjektT, type Zugang } from "../konto";
 import { useLauf } from "../lauf";
@@ -1278,6 +1278,24 @@ function ZuKlaeren({
     }
   }
 
+  // Endgültig löschen (Marlon, 15.10.2026): auf allen Kopien, mit Löschprotokoll und neuer ASC-MHL-Historie; nie auf der Karte.
+  async function loeschen(c: OffenerClip, schluessel: string) {
+    const kopien = c.dateien.length;
+    const ja = await ask(
+      `${c.clip} endgültig löschen?\n\nGelöscht wird auf ${kopien === 1 ? "der einen Kopie" : `allen ${kopien} Kopien`} (Karte ${c.karte}), samt Metadaten des Clips. Jede Kopie bekommt eine neue ASC-MHL-Historie und ein Löschprotokoll in 04_BERICHTE. Die Kamerakarte selbst bleibt unberührt.\n\nDas lässt sich in der App nicht rückgängig machen.`,
+      { title: "Clip endgültig löschen", kind: "warning", okLabel: "Endgültig löschen", cancelLabel: "Abbrechen" },
+    );
+    if (!ja) return;
+    setStand((s) => ({ ...s, [schluessel]: { ton: "laeuft", text: "Löscht …" } }));
+    try {
+      await invoke("clip_loeschen", { dateien: c.dateien, clip: c.clip });
+      gespeichert();
+    } catch (e) {
+      setStand((s) => ({ ...s, [schluessel]: { ton: "fehler", text: String(e) } }));
+      gespeichert();
+    }
+  }
+
   const mitVorschlag = u.zuKlaeren.filter((c) => wahlVon(c, `${c.karte}|${c.clip}`).take.startsWith("neu:"));
   async function alleVorschlaege() {
     const ja = await ask(
@@ -1395,9 +1413,20 @@ function ZuKlaeren({
                   </select>
                 </td>
                 <td className="spalte-aktion">
-                  <button className="knopf knopf-klein" disabled={!w.dreh || st?.ton === "laeuft"} onClick={() => zuordnen(c, schluessel)}>
-                    {w.take.startsWith("neu:") ? "Take anlegen" : "Zuordnen"}
-                  </button>
+                  <span className="aktion-reihe">
+                    <button className="knopf knopf-klein" disabled={!w.dreh || st?.ton === "laeuft"} onClick={() => zuordnen(c, schluessel)}>
+                      {w.take.startsWith("neu:") ? "Take anlegen" : "Zuordnen"}
+                    </button>
+                    <button
+                      className="knopf-symbol symbol-loeschen"
+                      aria-label={`${c.clip} endgültig löschen`}
+                      title="Endgültig löschen (auf allen Kopien)"
+                      disabled={st?.ton === "laeuft"}
+                      onClick={() => loeschen(c, schluessel)}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </span>
                 </td>
               </tr>
             );

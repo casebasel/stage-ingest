@@ -190,3 +190,23 @@ fn ergaenzte_kopie_ohne_ersetzte_begleitdatei_fuehrt_die_historie_weiter() {
         .starts_with("0002_")));
     verify(&r, &ziel);
 }
+
+#[test]
+fn nach_endgueltigem_loeschen_besteht_verify() {
+    let Some(r) = referenz() else { return };
+    let t = tempfile::tempdir().unwrap();
+    let karte_pfad = t.path().join("A001R132");
+    karte(&karte_pfad);
+    fs::write(karte_pfad.join("Clips/A001C002_261007_R132.mov"), vec![3u8; 500_000]).unwrap();
+    let ziel = t.path().join("2026-10-15_STUDIO/01_KAMERA/A001R132");
+    let a = Auftrag { quelle: karte_pfad, ziele: vec![ziel.clone()], mit_md5: true, ..Default::default() };
+    let kopie = kopieren(&a, &AtomicBool::new(false), |_| {}).unwrap();
+    mhl::schreiben(&ziel, &kopie, &angaben()).unwrap();
+    verify(&r, &ziel);
+
+    let g = ingest_kern::loeschen::clip_endgueltig(&ziel, "A001C002_261007_R132", &angaben(), chrono::Local::now())
+        .unwrap();
+    assert!(g.fehler.is_none(), "{:?}", g.fehler);
+    assert!(!ziel.join("Clips/A001C002_261007_R132.mov").exists());
+    verify(&r, &ziel);
+}

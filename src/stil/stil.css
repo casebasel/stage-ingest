@@ -709,6 +709,18 @@ input[type="checkbox"][role="switch"]:checked::before {
   padding-bottom: 2px !important;
   text-align: right;
 }
+.aktion-reihe {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.symbol-loeschen {
+  color: var(--text-3);
+}
+.symbol-loeschen:hover:not(:disabled) {
+  color: var(--rot);
+}
 .zelle-pfad {
   max-width: 0;
   width: 40%;

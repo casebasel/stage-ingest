@@ -365,6 +365,24 @@ pub fn ohne_historie(kopie: &Kopie) -> io::Result<Vec<String>> {
         .collect())
 }
 
+/// Neueste Hashes je Datei: (XXH3-128, MD5) als Hex.
+pub type Hashes = BTreeMap<String, (Option<String>, Option<String>)>;
+
+/// Neueste bekannte Hashes je Datei (XXH3-128, MD5) aus `<ziel>/ascmhl/` und die Nummer der neuesten Generation.
+/// Leer (Generation 0), wenn der Ordner keine Historie hat.
+pub fn bekannte_hashes(ziel: &Path) -> io::Result<(usize, Hashes)> {
+    let h = historie_lesen(&ziel.join(ORDNER))?;
+    let mut aus = Hashes::new();
+    for ((pfad, v), wert) in h.hashes {
+        let e = aus.entry(pfad).or_default();
+        match v {
+            Verfahren::Xxh128 => e.0 = Some(wert),
+            Verfahren::Md5 => e.1 = Some(wert),
+        }
+    }
+    Ok((h.generationen, aus))
+}
+
 /// Was eine mitgebrachte Historie schon enthält.
 #[derive(Default)]
 struct Historie {

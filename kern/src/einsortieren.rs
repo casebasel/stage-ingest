@@ -197,6 +197,7 @@ mod tests {
             projekt: Default::default(),
             karte_id: None,
             einsortiert: None,
+            geloescht: vec![],
         };
         uebersicht::schreiben(&dreh.join(BERICHTE), &z).unwrap()
     }

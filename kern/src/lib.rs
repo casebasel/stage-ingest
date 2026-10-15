@@ -24,6 +24,7 @@ pub mod kaskade;
 pub mod kennung;
 pub mod kopie;
 pub mod laufwerke;
+pub mod loeschen;
 pub mod mhl;
 pub mod mxf;
 mod ohne_cache;
