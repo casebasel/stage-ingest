@@ -290,8 +290,24 @@ pub fn zuordnung_aenderungen(
     )
 }
 
+/// Endgültig gelöschter Clip („Zu klären“): in der Datenbank nur weich löschen (`clip.geloescht`, Feldliste seit 0018;
+/// abgestimmt mit dem Plate Assistant 15.10.2026: nie hart entfernen, die App blendet ihn überall aus).
+pub fn loeschen_aenderung(karte_id: &str, clip: &str, jetzt: DateTime<Utc>, neue_id: String) -> Option<Value> {
+    let name = clipname(clip)?;
+    Some(aenderung(neue_id, "clip", &clip_id(karte_id, &name), "geloescht", json!(true), jetzt))
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn geloescht_nur_weich() {
+        let a = loeschen_aenderung("karte-a007r132", "A007C003_120101_R132", Utc::now(), "X".into()).unwrap();
+        assert_eq!(a["tabelle"], "clip");
+        assert_eq!(a["datensatz"], "clip-a007r132-a007c003_120101_r132");
+        assert_eq!(a["feld"], "geloescht");
+        assert_eq!(a["wert"], true);
+    }
     use super::*;
 
     fn zaehler() -> impl FnMut() -> String {

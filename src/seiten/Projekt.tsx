@@ -1289,7 +1289,7 @@ function ZuKlaeren({
     if (!ja) return;
     setStand((s) => ({ ...s, [schluessel]: { ton: "laeuft", text: "Löscht …" } }));
     try {
-      await invoke("clip_loeschen", { dateien: c.dateien, clip: c.clip });
+      await invoke("clip_loeschen", { zugang, dateien: c.dateien, clip: c.clip });
       gespeichert();
     } catch (e) {
       setStand((s) => ({ ...s, [schluessel]: { ton: "fehler", text: String(e) } }));

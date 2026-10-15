@@ -1688,12 +1688,14 @@ struct ClipGeloescht {
 
 /// „Zu klären“: einen Clip endgültig löschen, auf jeder Kopie (Marlon, 15.10.2026: „endgültig und komplett, nicht
 /// wiederherstellbar“). Je Kopie siehe `ingest_kern::loeschen`: Dateien weg, neue ASC-MHL-Historie, Löschprotokoll in
-/// `04_BERICHTE/`; dann aus der Zusammenfassung. Nie auf der Karte, nie während eines Kopiervorgangs. Die Zeile in der
-/// Datenbank bleibt (ohne Take, stört nicht), bis der Plate Assistant `clip.geloescht` für den Ingest freigibt.
+/// `04_BERICHTE/`; dann aus der Zusammenfassung. Nie auf der Karte, nie während eines Kopiervorgangs. In der Datenbank
+/// nur weich: `clip.geloescht = true` (Plate Assistant, 15.10.2026).
 #[tauri::command]
 async fn clip_loeschen(
     app: tauri::AppHandle,
     laufend: State<'_, Laufend>,
+    plate: State<'_, Arc<plate::Plate>>,
+    zugang: Option<plate::Zugang>,
     dateien: Vec<PathBuf>,
     clip: String,
 ) -> Result<ClipGeloescht, String> {
@@ -1701,7 +1703,9 @@ async fn clip_loeschen(
         return Err("Während des Kopierens wird nichts gelöscht. Danach nochmals versuchen.".into());
     }
     let version = app.package_info().version.to_string();
+    let p = Arc::clone(&plate);
     im_hintergrund(move || {
+        let mut karte_id = None;
         let stamm = soll::ohne_endung(&clip).to_owned();
         let angaben =
             mhl::Angaben { werkzeug: "Stage Ingest".into(), version, zeit: chrono::Utc::now(), nur_pruefen: false };
@@ -1732,8 +1736,20 @@ async fn clip_loeschen(
                     continue;
                 }
             }
-            if let Err(e) = ingest_kern::uebersicht::clip_entfernen(d, &clip) {
-                fehler.push(format!("{}: {e}", d.display()));
+            match ingest_kern::uebersicht::clip_entfernen(d, &clip) {
+                Ok(id) => karte_id = karte_id.or(id),
+                Err(e) => fehler.push(format!("{}: {e}", d.display())),
+            }
+        }
+        // In der gemeinsamen Datenbank nur weich löschen (der Plate Assistant blendet ihn dann aus).
+        if let (Some(z), Some(kid)) = (&zugang, &karte_id) {
+            match karte_db::loeschen_aenderung(kid, &clip, chrono::Utc::now(), plate::ulid_aehnlich()) {
+                Some(a) => match p.karte_schreiben(z, vec![a]) {
+                    Ok(abgelehnt) if abgelehnt.is_empty() => {}
+                    Ok(abgelehnt) => fehler.push(format!("Datenbank: {}", abgelehnt.join("; "))),
+                    Err(e) => fehler.push(format!("Datenbank: {e}")),
+                },
+                None => fehler.push(format!("Datenbank: Clipname {clip} nicht verwendbar")),
             }
         }
         if fehler.is_empty() {
