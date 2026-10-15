@@ -281,6 +281,7 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
       { clip: "A001C014_261028_R132", karte: "A001R132", startTc: "14:22:05:10", drehOrdner: "2026-10-28_RHEINUFER", freigegeben: false, dateien: ["/a", "/b"], clipdateien: ["/Volumes/NAS/x.mxf"], vorschlagPlate: "p1", vorschlagDreh: "d1" },
       { clip: "A001C015_120101_R132", karte: "A001R132", startTc: "14:31:40:02", drehOrdner: "2026-10-28_RHEINUFER", freigegeben: false, dateien: ["/a", "/b"], clipdateien: ["/Volumes/NAS/x.mxf"], vorschlagDreh: "d1", vorschlagTake: "t2", vorschlagGrund: "Take 2 · Name bis aufs Datum gleich" },
     ],
+    ohneAufnahme: [{ takeId: "t3", nummer: 3, plateId: "p1", drehId: "d1", clip: "A001C011_261028_R132", karte: "A001R132" }],
     karten: [
       { drehOrdner: "2026-10-28_Rheinufer", datei: "a", inhalt: { karte: "A001R131", beginn: "", freigegeben: true, unabhaengigeKopien: 2, clips: Array(22) } },
       { drehOrdner: "2026-10-28_Rheinufer", datei: "b", inhalt: { karte: "A001R132", beginn: "", freigegeben: false, unabhaengigeKopien: 1, clips: Array(14) } },

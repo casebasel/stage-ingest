@@ -21,6 +21,9 @@ pub struct Uebersicht {
     /// Zu klären: Clips auf eingelesenen Karten ohne Take und ohne Drehort-Zuordnung (eine Zeile pro Clip, über alle
     /// Ziele zusammengefasst).
     pub zu_klaeren: Vec<OffenerClip>,
+    /// Takes ohne Aufnahme: kein Clip auf der Karte, obwohl die Karte ihres Magazins eingelesen ist (Klappe ohne REC).
+    /// Marlon entscheidet in „Zu klären“: behalten oder weich löschen (16.10.2026).
+    pub ohne_aufnahme: Vec<TakeOhneAufnahme>,
     /// Zusammenfassungen, die nicht lesbar waren.
     pub unlesbar: Vec<PathBuf>,
     /// Hinweis, wenn der Plate Assistant nicht erreichbar war (dann nur die Karten).
@@ -73,6 +76,46 @@ pub struct OffenerClip {
     pub vorschlag_take: Option<String>,
     /// Kurz, warum: z. B. „Take 6 · Name bis aufs Datum gleich“.
     pub vorschlag_grund: Option<String>,
+    /// Schon von Hand einem Drehort zugeordnet (ohne Take).
+    pub dreh_id: Option<String>,
+}
+
+/// Takes ohne Karte, deren Magazin und Kennung auf einer eingelesenen Karte liegen, deren Zähler dort aber fehlt und
+/// die kein Clip als Vorschlag beansprucht: Klappe ohne Aufnahme (Treppenhaus 15.10.2026, Takes 2–4).
+fn takes_ohne_aufnahme(
+    drehs: &[DrehStand],
+    karten: &[GefundeneKarte],
+    vorgeschlagen: &HashMap<String, (String, String, String)>,
+) -> Vec<TakeOhneAufnahme> {
+    use ingest_kern::soll::ohne_datum;
+    let mut auf_karten: HashMap<(String, String), String> = HashMap::new();
+    for k in karten {
+        for c in &k.inhalt.clips {
+            if let Some((m, _, r)) = ohne_datum(&c.name) {
+                auf_karten.entry((m, r)).or_insert_with(|| k.inhalt.karte.clone());
+            }
+        }
+    }
+    let beansprucht: HashSet<&str> = vorgeschlagen.values().map(|(t, _, _)| t.as_str()).collect();
+    let mut aus = Vec::new();
+    for d in drehs {
+        for p in &d.plates {
+            for t in p.takes.iter().filter(|t| t.karte.is_none() && !t.studio && !beansprucht.contains(t.id.as_str())) {
+                let Some((m, _, r)) = ohne_datum(&t.clip) else { continue };
+                if let Some(karte) = auf_karten.get(&(m, r)) {
+                    aus.push(TakeOhneAufnahme {
+                        take_id: t.id.clone(),
+                        nummer: t.nummer,
+                        plate_id: p.id.clone(),
+                        dreh_id: d.id.clone(),
+                        clip: t.clip.clone(),
+                        karte: karte.clone(),
+                    });
+                }
+            }
+        }
+    }
+    aus
 }
 
 /// Takes ohne Karte, deren Clipname bis aufs Datum einem Clip ohne Take gleicht (Magazin, Zähler, Kennung), wenn der
@@ -130,6 +173,19 @@ fn vorschlaege_ohne_datum(
         .filter(|t| einmal.contains(&t.0))
         .map(|(c, take, dreh, grund)| (c, (take, dreh, grund)))
         .collect()
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TakeOhneAufnahme {
+    pub take_id: String,
+    pub nummer: i64,
+    pub plate_id: String,
+    pub dreh_id: String,
+    /// Geplanter Clipname im Plate Assistant (oft ein Vorschlag der App).
+    pub clip: String,
+    /// Eingelesene Karte desselben Magazins.
+    pub karte: String,
 }
 
 /// `A009C010_…` → (`A009`, 10): Kamera und Rolle, Clipnummer.
@@ -572,11 +628,9 @@ pub fn zusammenfuehren(
     let mut zu_klaeren: Vec<OffenerClip> = Vec::new();
     for (k, c) in karten.iter().flat_map(|k| k.inhalt.clips.iter().map(move |c| (k, c))) {
         let name = c.name.to_uppercase();
-        // Nur dem Drehort zugeordnet, aber ein Take passt bis aufs Datum: wieder vorschlagen.
-        if mit_take.contains(&name)
-            || zugeordnete_clips.contains(&name)
-            || (c.dreh_id.is_some() && !ohne_datum.contains_key(&name))
-        {
+        // Auch Clips, die nur einem Drehort zugeordnet sind: jeder Clip auf der Karte gehört zu einem Take (Marlon,
+        // 16.10.2026: „Alles, was auf der Karte ist, muss beim Ingest rein und zugeordnet werden“).
+        if mit_take.contains(&name) || zugeordnete_clips.contains(&name) {
             continue;
         }
         // Clipdatei dieser Kopie: `<Dreh>/01_KAMERA/<Karte>/<pfad>`.
@@ -608,23 +662,43 @@ pub fn zusammenfuehren(
                 vorschlag_dreh: None,
                 vorschlag_take: None,
                 vorschlag_grund: None,
+                dreh_id: c.dreh_id.clone(),
             }),
         }
     }
     // Vorschlag je offenem Clip: Nachbar auf derselben Rolle mit Take → dessen Plate.
     let take_plate = crate::zuordnung::take_zu_plate(drehs_json);
-    let mit_take: Vec<((String, u32), &str)> = karten
+    // Clips mit Take: aus den Zusammenfassungen (Take-ID) und über den genauen Clipnamen.
+    let mut mit_take: Vec<((String, u32), String)> = karten
         .iter()
         .flat_map(|k| k.inhalt.clips.iter())
-        .filter_map(|c| Some((rolle_und_nummer(&c.name)?, c.take_id.as_deref()?)))
+        .filter_map(|c| Some((rolle_und_nummer(&c.name)?, c.take_id.clone()?)))
         .collect();
+    for t in drehs.iter().flat_map(|d| &d.plates).flat_map(|p| &p.takes) {
+        if t.karte.is_some() && zugeordnete_clips.contains(&t.clip.to_uppercase()) {
+            if let Some(r) = rolle_und_nummer(&t.clip) {
+                mit_take.push((r, t.id.clone()));
+            }
+        }
+    }
+    // Ein Clip in einer Lücke gehört zum Drehort und zur Plate, wo die Lücke liegt: der Take davor auf derselben Rolle
+    // (sonst danach). War der Clip schon einem Drehort zugeordnet, nur Nachbarn dieses Drehorts; gibt es dort keinen,
+    // die einzige Plate des Drehorts.
     for o in &mut zu_klaeren {
         let Some((rolle, n)) = rolle_und_nummer(&o.clip) else { continue };
-        let davor = mit_take.iter().filter(|((r, m), _)| *r == rolle && *m < n).max_by_key(|((_, m), _)| *m);
-        let danach = mit_take.iter().filter(|((r, m), _)| *r == rolle && *m > n).min_by_key(|((_, m), _)| *m);
-        if let Some((plate, dreh)) = davor.or(danach).and_then(|(_, t)| take_plate.get(*t)) {
+        let im_dreh = |t: &str| o.dreh_id.as_ref().is_none_or(|d| take_plate.get(t).is_some_and(|(_, td)| td == d));
+        let davor =
+            mit_take.iter().filter(|((r, m), t)| *r == rolle && *m < n && im_dreh(t)).max_by_key(|((_, m), _)| *m);
+        let danach =
+            mit_take.iter().filter(|((r, m), t)| *r == rolle && *m > n && im_dreh(t)).min_by_key(|((_, m), _)| *m);
+        if let Some((plate, dreh)) = davor.or(danach).and_then(|(_, t)| take_plate.get(t)) {
             o.vorschlag_plate = Some(plate.clone());
             o.vorschlag_dreh = Some(dreh.clone());
+        } else if let Some(d) = o.dreh_id.as_ref().and_then(|id| drehs.iter().find(|d| &d.id == id)) {
+            o.vorschlag_dreh = Some(d.id.clone());
+            if let [p] = &d.plates[..] {
+                o.vorschlag_plate = Some(p.id.clone());
+            }
         }
     }
     for o in &mut zu_klaeren {
@@ -635,6 +709,7 @@ pub fn zusammenfuehren(
             o.vorschlag_grund = Some(grund.clone());
         }
     }
+    let ohne_aufnahme = takes_ohne_aufnahme(&drehs, &karten, &ohne_datum);
     let einsortieren = einsortierbar(&karten, &drehs, &take_zu_dreh, &clip_zu_dreh);
     let ohne_datenbank = karten.iter().filter(|k| k.inhalt.karte_id.is_none()).map(|k| k.datei.clone()).collect();
     // Anzeige: dieselbe Karte auf mehreren Zielen einmal (neuester Durchgang gewinnt). Vorher wurde schon beim Laden
@@ -642,7 +717,17 @@ pub fn zusammenfuehren(
     let mut karten = karten;
     karten.sort_by(|a, b| (&a.inhalt.karte, &b.inhalt.beginn).cmp(&(&b.inhalt.karte, &a.inhalt.beginn)));
     karten.dedup_by(|a, b| a.inhalt.karte == b.inhalt.karte);
-    Uebersicht { projekt, drehs, karten, zu_klaeren, unlesbar, hinweis: None, einsortieren, ohne_datenbank }
+    Uebersicht {
+        projekt,
+        drehs,
+        karten,
+        zu_klaeren,
+        ohne_aufnahme,
+        unlesbar,
+        hinweis: None,
+        einsortieren,
+        ohne_datenbank,
+    }
 }
 
 /// Liest Plan und Stand und verbindet beides. Ohne Zugang zum Plate Assistant: nur die Karten.
@@ -844,6 +929,8 @@ mod tests {
         v.sort();
         assert_eq!(v, [("010", "T6"), ("011", "T7"), ("012", "T8")].map(|(a, b)| (a.to_owned(), b.to_owned())));
         assert!(u.zu_klaeren.iter().all(|o| o.vorschlag_dreh.as_deref() == Some("D1")));
+        let ohne: Vec<i64> = u.ohne_aufnahme.iter().map(|t| t.nummer).collect();
+        assert_eq!(ohne, [2, 3, 4], "Klappen ohne Aufnahme");
     }
 
     #[test]

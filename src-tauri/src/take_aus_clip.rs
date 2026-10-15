@@ -122,6 +122,40 @@ pub fn take_aenderung(
     })
 }
 
+/// `take.clip` an einem bestehenden Take, wie CAP nach dem Stopp (Marlon, 16.10.2026: „die Takes so anpassen, dass es
+/// stimmt mit denen auf der Karte“). Nur mit `name`, `startTc` und `bilder`; sonst `None`.
+pub fn clip_am_take(
+    take_id: &str,
+    clip: &str,
+    angaben: Option<&ingest_kern::clip::ClipAngaben>,
+    jetzt: chrono::DateTime<Utc>,
+    aenderung_id: String,
+) -> Option<Value> {
+    let name: String = ingest_kern::soll::ohne_endung(clip).to_uppercase().replace(' ', "").chars().take(100).collect();
+    let tc = angaben?.start_tc.clone().filter(|t| !t.is_empty())?;
+    let bilder = angaben?.bilder.filter(|b| *b > 0)?;
+    Some(json!({
+        "id": aenderung_id,
+        "tabelle": "take",
+        "datensatz": take_id,
+        "feld": "clip",
+        "wert": { "name": name, "startTc": tc, "bilder": bilder },
+        "zeit": jetzt.timestamp_micros(),
+    }))
+}
+
+/// Take ohne Aufnahme weich löschen (im Plate Assistant wiederherstellbar).
+pub fn take_loeschen(take_id: &str, jetzt: chrono::DateTime<Utc>, aenderung_id: String) -> Value {
+    json!({
+        "id": aenderung_id,
+        "tabelle": "take",
+        "datensatz": take_id,
+        "feld": "geloescht",
+        "wert": true,
+        "zeit": jetzt.timestamp_micros(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::kopie::Kopie;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SollClip {
     /// Clipname ohne Endung, z. B. `A005C001_120101_R56E`.
@@ -186,10 +186,39 @@ pub fn abgleichen(kopie: &Kopie, soll: &[SollClip], clips: &[crate::ale::ClipZei
             mit_id.entry(id).or_default().push(c.pfad.clone());
         }
     }
+    // Dieselbe ID in mehreren Clips derselben Kamera: Die Kamera behält den Slate, bis die App einen neuen schreibt
+    // (ohne Verbindung keiner). Die ID gilt nur für den ersten Clip (kleinster Zähler); die folgenden sind ohne neuen
+    // Slate gedreht und kommen mit Begründung nach „Zu klären“ (Marlon, 16.10.2026; Treppenhaus C010–C012). Das deckt
+    // auch Info 1 vom vorigen Take ab.
+    let mut folgende: BTreeSet<String> = BTreeSet::new();
+    for (id, pfade) in mit_id.iter_mut() {
+        let mut je_kamera: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for p in pfade.drain(..) {
+            je_kamera.entry(kamera(ohne_endung(&p))).or_default().push(p);
+        }
+        for (_, mut liste) in je_kamera {
+            liste.sort_by_key(|p| (ohne_datum(p).map_or(u32::MAX, |k| k.1), p.clone()));
+            let erster = liste.remove(0);
+            for p in liste {
+                a.pruefen.push((
+                    p.clone(),
+                    format!(
+                        "Take-ID {id} schon in {} (ohne neuen Slate gedreht, z. B. Kamera ohne Verbindung)",
+                        ohne_endung(&erster)
+                    ),
+                ));
+                folgende.insert(ohne_endung(&p).to_owned());
+            }
+            pfade.push(erster);
+        }
+    }
     let take_der_id = |id: &str| soll.iter().position(|s| !s.take_id.is_empty() && s.take_id.eq_ignore_ascii_case(id));
-    // Clips, deren Info 1 einen anderen Take nennt als ihr Clipname (Widerspruch).
-    let clip_id: BTreeMap<String, String> =
-        clips.iter().filter_map(|c| Some((ohne_endung(&c.pfad).to_owned(), id_von(c)?))).collect();
+    // Clips, deren Info 1 einen anderen Take nennt als ihr Clipname (Widerspruch); die folgenden zählen nicht.
+    let clip_id: BTreeMap<String, String> = clips
+        .iter()
+        .filter(|c| !folgende.contains(ohne_endung(&c.pfad)))
+        .filter_map(|c| Some((ohne_endung(&c.pfad).to_owned(), id_von(c)?)))
+        .collect();
     for (i, s) in soll.iter().enumerate() {
         if s.take_id.is_empty() {
             continue;
@@ -239,6 +268,9 @@ pub fn abgleichen(kopie: &Kopie, soll: &[SollClip], clips: &[crate::ale::ClipZei
         .flat_map(|(_, ps)| ps.iter().map(|p| ohne_endung(p).to_owned()))
         .chain(gesperrt)
         .collect();
+    // Folgende Clips gleicher ID: nie über Timecode oder Zeitfenster (das Zeitfenster der Klappe ist das des ersten);
+    // über den Namen ohne Datum dürfen sie zugeordnet werden.
+    let nicht_raten: BTreeSet<String> = fremde_id.iter().cloned().chain(folgende.iter().cloned()).collect();
 
     for (i, s) in soll.iter().enumerate() {
         if erledigt.contains(&i) {
@@ -307,7 +339,7 @@ pub fn abgleichen(kopie: &Kopie, soll: &[SollClip], clips: &[crate::ale::ClipZei
     // Rückfall: Takes ohne Clipnamen über den Timecode, nur gegen Clips, die noch keinem Take gehören.
     let frei: Vec<(&String, (i64, i64), f64)> = clips
         .iter()
-        .filter(|c| !bekannt.contains(ohne_endung(&c.pfad)) && !fremde_id.contains(ohne_endung(&c.pfad)))
+        .filter(|c| !bekannt.contains(ohne_endung(&c.pfad)) && !nicht_raten.contains(ohne_endung(&c.pfad)))
         .filter_map(|c| {
             let a = c.angaben.as_ref()?;
             let fps = a.fps?;
@@ -349,7 +381,7 @@ pub fn abgleichen(kopie: &Kopie, soll: &[SollClip], clips: &[crate::ale::ClipZei
         let Some((von, bis)) = fenster(s) else { continue };
         let treffer: Vec<String> = clips
             .iter()
-            .filter(|c| !bekannt.contains(ohne_endung(&c.pfad)) && !fremde_id.contains(ohne_endung(&c.pfad)))
+            .filter(|c| !bekannt.contains(ohne_endung(&c.pfad)) && !nicht_raten.contains(ohne_endung(&c.pfad)))
             .filter(|c| {
                 c.angaben
                     .as_ref()
@@ -596,6 +628,57 @@ mod tests {
         assert_eq!(ohne, ["2", "3", "4"]);
         assert!(a.unerwartet.is_empty());
     }
+
+    /// Dasselbe mit Info 1 wie auf der echten Karte: C010–C012 tragen alle die ID von Take 6.
+    #[test]
+    fn treppenhaus_gleiche_id_ohne_verbindung() {
+        let take = |nr: &str, clip: &str| SollClip {
+            clip: clip.into(),
+            szene: "TREPPENHAUS-01".into(),
+            take: nr.into(),
+            take_id: format!("01TAKE{nr:0>20}"),
+            ..SollClip::default()
+        };
+        let soll = vec![
+            take("5", "A009C009_120101_R132"),
+            take("6", "A009C010_261015_R132"),
+            take("7", "A009C011_261015_R132"),
+            take("8", "A009C012_261015_R132"),
+            take("9", "A009C013_120101_R132"),
+        ];
+        let id6 = soll[1].take_id.clone();
+        let pfad = |n: u32| format!("A009R132/A009C{n:03}_120101_R132.mxf");
+        let k = kopie(&(9..=13).map(pfad).collect::<Vec<_>>().iter().map(String::as_str).collect::<Vec<_>>());
+        let zeile = |n: u32, id: &str| crate::ale::ClipZeile {
+            pfad: pfad(n),
+            angaben: None,
+            fehler: None,
+            kennung: Some(format!("PA:{id}")),
+            qr: vec![],
+        };
+        let clips = [
+            zeile(9, &soll[0].take_id),
+            zeile(10, &id6),
+            zeile(11, &id6),
+            zeile(12, &id6),
+            zeile(13, &soll[4].take_id),
+        ];
+        let a = abgleichen(&k, &soll, &clips);
+        let mut paare: Vec<(String, String)> = a
+            .gefunden
+            .iter()
+            .chain(&a.ueber_kennung)
+            .map(|(s, p)| (s.take.clone(), ohne_endung(p)[5..8].to_owned()))
+            .collect();
+        paare.sort();
+        assert_eq!(
+            paare,
+            [("5", "009"), ("6", "010"), ("7", "011"), ("8", "012"), ("9", "013")]
+                .map(|(a, b)| (a.to_owned(), b.to_owned()))
+        );
+        assert_eq!(a.pruefen.len(), 2, "C011 und C012 mit Hinweis");
+        assert!(a.mehrdeutig.is_empty() && a.unerwartet.is_empty());
+    }
 }
 
 #[cfg(test)]
@@ -796,8 +879,13 @@ mod timecode_tests {
         let k = kopie(&["A001C003_261028_R1AB.mov", "A001C004_261028_R1AB.mov"]);
         let clips = [mit_id("A001C003_261028_R1AB.mov", T1), mit_id("A001C004_261028_R1AB.mov", T1)];
         let a = abgleichen(&k, &[take_mit_id(T1, ""), take_mit_id(T2, "A001C004_261028_R1AB")], &clips);
-        assert!(a.ueber_kennung.is_empty() && a.gefunden.is_empty());
-        assert_eq!(a.mehrdeutig.len(), 2, "beide Takes nach „Zu klären“");
+        // Die ID gilt nur für den ersten Clip; C004 gehört über seinen Namen zu Take 2 (Marlon, 16.10.2026).
+        let p: Vec<(&str, &str)> = a.ueber_kennung.iter().map(|(s, p)| (s.take_id.as_str(), p.as_str())).collect();
+        assert_eq!(p, [(T1, "A001C003_261028_R1AB.mov")]);
+        let g: Vec<(&str, &str)> = a.gefunden.iter().map(|(s, p)| (s.take_id.as_str(), p.as_str())).collect();
+        assert_eq!(g, [(T2, "A001C004_261028_R1AB.mov")]);
+        assert!(a.mehrdeutig.is_empty());
+        assert_eq!(a.pruefen.len(), 1, "C004 mit Hinweis");
     }
 
     #[test]

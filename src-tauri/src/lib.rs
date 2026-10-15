@@ -1660,6 +1660,7 @@ async fn plate_projekt_aendern(
 /// „Zu klären“: einen Clip im Nachhinein einem Take oder nur einem Drehort zuordnen. Geschrieben wird in die
 /// Zusammenfassung der Karte auf jedem Ziel (`04_BERICHTE/*_ingest.json`), nie in den Kartenordner (ASC MHL bleibt).
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Tauri-Befehl: die Argumente kommen einzeln aus der Oberfläche
 async fn clip_zuordnen(
     plate: State<'_, Arc<plate::Plate>>,
     zugang: Option<plate::Zugang>,
@@ -1667,10 +1668,36 @@ async fn clip_zuordnen(
     clip: String,
     take_id: Option<String>,
     dreh_id: Option<String>,
+    clipdatei: Option<PathBuf>,
+    take_hat_clip: Option<bool>,
 ) -> Result<(), String> {
     let p = Arc::clone(&plate);
     im_hintergrund(move || {
-        zuordnen_ueberall(&p, zugang.as_ref(), &dateien, &clip, take_id.as_deref(), dreh_id.as_deref())
+        zuordnen_ueberall(&p, zugang.as_ref(), &dateien, &clip, take_id.as_deref(), dreh_id.as_deref())?;
+        // Den Clip auch am Take eintragen, wenn der Take noch keinen bestätigten Clip hat (Marlon, 16.10.2026).
+        if let (Some(z), Some(t), Some(d), Some(false)) = (&zugang, &take_id, &clipdatei, take_hat_clip) {
+            let angaben = ingest_kern::clip::lesen(d).ok();
+            if let Some(a) =
+                take_aus_clip::clip_am_take(t, &clip, angaben.as_ref(), chrono::Utc::now(), plate::ulid_aehnlich())
+            {
+                p.take_aendern(z, a).map_err(|e| format!("Zugeordnet, aber {e}"))?;
+            }
+        }
+        Ok(())
+    })
+    .await
+}
+
+/// „Zu klären“: einen Take ohne Aufnahme weich löschen (Marlon, 16.10.2026; im Plate Assistant wiederherstellbar).
+#[tauri::command]
+async fn take_loeschen(
+    plate: State<'_, Arc<plate::Plate>>,
+    zugang: plate::Zugang,
+    take_id: String,
+) -> Result<(), String> {
+    let p = Arc::clone(&plate);
+    im_hintergrund(move || {
+        p.take_aendern(&zugang, take_aus_clip::take_loeschen(&take_id, chrono::Utc::now(), plate::ulid_aehnlich()))
     })
     .await
 }
@@ -2215,6 +2242,7 @@ pub fn run() {
             plate_abmelden,
             clip_zuordnen,
             clip_loeschen,
+            take_loeschen,
             take_aus_clip,
             stage_projekt,
             projekt_uebersicht,

@@ -61,18 +61,23 @@ type OffenerClip = {
   vorschlagDreh?: string | null;
   vorschlagTake?: string | null;
   vorschlagGrund?: string | null;
+  /** Schon von Hand einem Drehort zugeordnet (ohne Take). */
+  drehId?: string | null;
 };
 type Uebersicht = {
   projekt: ProjektT;
   drehs: DrehStand[];
   karten: Karte[];
   zuKlaeren: OffenerClip[];
+  /** Takes ohne Aufnahme: kein Clip auf der eingelesenen Karte ihres Magazins (Klappe ohne REC). */
+  ohneAufnahme?: TakeOhneAufnahme[];
   unlesbar: string[];
   hinweis: string | null;
   einsortieren: Einsortierbar[];
   /** Zusammenfassungen (alle Kopien) von Karten, die noch nicht in der Datenbank stehen. */
   ohneDatenbank?: string[];
 };
+type TakeOhneAufnahme = { takeId: string; nummer: number; plateId: string; drehId: string; clip: string; karte: string };
 type Einsortierbar = {
   karte: string;
   von: string;
@@ -370,6 +375,13 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
     }));
   const [spieler, setSpieler] = useState<number | null>(null);
   const [einzeln, setEinzeln] = useState<AbspielEintrag | null>(null);
+  // Takes ohne Aufnahme, die Marlon behalten will (auf diesem Rechner gemerkt, je Projekt).
+  const [behalten, setBehaltenRoh] = useState<string[]>([]);
+  useEffect(() => setBehaltenRoh(gemerkt<string[]>(`behalten.${projekt?.id ?? ""}`, [])), [projekt?.id]);
+  const setBehalten = (ids: string[]) => {
+    setBehaltenRoh(ids);
+    merken(`behalten.${projekt?.id ?? ""}`, ids);
+  };
   const [pfadMenue, setPfadMenue] = useState<PfadMenueStand | null>(null);
   const [exportClip, setExportClip] = useState<{ datei: string; titel: string } | null>(null);
   pfadMenueOeffnen = (ev, t, titel) => {
@@ -513,8 +525,8 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
                 an={auswahl.art === "klaeren"}
                 onClick={() => setAuswahl({ art: "klaeren" })}
                 text="Zu klären"
-                zahl={u.zuKlaeren.length}
-                warn={u.zuKlaeren.length > 0}
+                zahl={u.zuKlaeren.length + (u.ohneAufnahme ?? []).filter((t) => !behalten.includes(t.takeId)).length}
+                warn={u.zuKlaeren.length + (u.ohneAufnahme ?? []).filter((t) => !behalten.includes(t.takeId)).length > 0}
               />
               <BaumKnopf an={auswahl.art === "karten"} onClick={() => setAuswahl({ art: "karten" })} text="Karten" zahl={u.karten.length} />
             </ul>
@@ -532,6 +544,8 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
                 neuerDrehort={() => nurEins("drehort")}
                 gespeichert={() => projekt && laden(projekt)}
                 abspielen={(datei, clip) => setEinzeln({ id: datei, datei, titel: "Zu klären", clip })}
+                behalten={behalten}
+                setBehalten={setBehalten}
               />
             )}
             {auswahl.art === "karten" && (
@@ -1231,17 +1245,23 @@ function ZuKlaeren({
   neuerDrehort,
   gespeichert,
   abspielen,
+  behalten,
+  setBehalten,
 }: {
   u: Uebersicht;
   zugang: Zugang | null;
   neuerDrehort: () => void;
   gespeichert: () => void;
   abspielen: (datei: string, clip: string) => void;
+  behalten: string[];
+  setBehalten: (ids: string[]) => void;
 }) {
   const [wahl, setWahl] = useState<Record<string, { dreh: string; take: string }>>({});
   const [stand, setStand] = useState<Record<string, { ton: Ton; text: string }>>({});
-  if (u.zuKlaeren.length === 0)
-    return <p className="leer-zeile">Nichts zu klären: Jeder eingelesene Clip ist einem Take oder einem Drehort zugeordnet.</p>;
+  const ohneAufnahme = (u.ohneAufnahme ?? []).filter((t) => !behalten.includes(t.takeId));
+  if (u.zuKlaeren.length === 0 && ohneAufnahme.length === 0)
+    return <p className="leer-zeile">Nichts zu klären: Jeder eingelesene Clip ist einem Take zugeordnet.</p>;
+  const alleTakes = u.drehs.flatMap((d) => d.plates.flatMap((p) => p.takes.map((t) => ({ t, p, d }))));
 
   // Vorschlag als Vorauswahl: neuer Take an der Plate des Nachbar-Clips (Marlon, 15.10.2026).
   // Bestehender Take mit gleichem Namen bis aufs Datum geht vor (Marlon, 16.10.2026: Uhr der Mini auf 2012).
@@ -1251,7 +1271,7 @@ function ZuKlaeren({
       ? { dreh: c.vorschlagDreh, take: c.vorschlagTake }
       : c.vorschlagPlate && c.vorschlagDreh && zugang && c.clipdateien?.length
         ? { dreh: c.vorschlagDreh, take: `neu:${c.vorschlagPlate}` }
-        : { dreh: "", take: "" });
+        : { dreh: c.drehId ?? "", take: "" });
 
   async function zuordnen(c: OffenerClip, schluessel: string, mitNeuladen = true): Promise<boolean> {
     const w = wahlVon(c, schluessel);
@@ -1273,7 +1293,17 @@ function ZuKlaeren({
         });
         setStand((s) => ({ ...s, [schluessel]: { ton: "ok", text: "Take angelegt und zugeordnet" } }));
       } else {
-        await invoke("clip_zuordnen", { zugang, dateien: c.dateien, clip: c.clip, takeId: w.take || null, drehId: w.dreh });
+        // Bestehender Take ohne bestätigten Clip: den Clip von der Karte auch am Take eintragen (Marlon, 16.10.2026).
+        const take = alleTakes.find((x) => x.t.id === w.take)?.t;
+        await invoke("clip_zuordnen", {
+          zugang,
+          dateien: c.dateien,
+          clip: c.clip,
+          takeId: w.take || null,
+          drehId: w.dreh,
+          clipdatei: c.clipdateien?.[0] ?? null,
+          takeHatClip: take ? Boolean(take.werte?.["take.clip.name"]) : null,
+        });
         setStand((s) => ({ ...s, [schluessel]: { ton: "ok", text: "Zugeordnet" } }));
       }
       if (mitNeuladen) gespeichert();
@@ -1321,6 +1351,80 @@ function ZuKlaeren({
     for (const c of mitVorschlag) await zuordnen(c, `${c.karte}|${c.clip}`, false);
     gespeichert();
   }
+
+  // Take ohne Aufnahme weich löschen (im Plate Assistant wiederherstellbar).
+  async function takeLoeschen(t: TakeOhneAufnahme, titel: string) {
+    const ja = await ask(`${titel} löschen?\n\nAuf der Karte ${t.karte} liegt kein Clip dazu. Der Take wird im Plate Assistant gelöscht und lässt sich dort wiederherstellen.`, {
+      title: "Take ohne Aufnahme",
+      kind: "warning",
+      okLabel: "Löschen",
+      cancelLabel: "Abbrechen",
+    });
+    if (!ja) return;
+    setStand((s) => ({ ...s, [t.takeId]: { ton: "laeuft", text: "Löscht …" } }));
+    try {
+      await invoke("take_loeschen", { zugang, takeId: t.takeId });
+      gespeichert();
+    } catch (e) {
+      setStand((s) => ({ ...s, [t.takeId]: { ton: "fehler", text: String(e) } }));
+    }
+  }
+
+  const ohneAufnahmeTeil = ohneAufnahme.length > 0 && (
+    <>
+      <div className="detail-kopf">
+        <h2>Takes ohne Aufnahme</h2>
+        <span className="leise">
+          {ohneAufnahme.length} {ohneAufnahme.length === 1 ? "Take" : "Takes"} ohne Clip auf der eingelesenen Karte · Klappe ohne REC?
+        </span>
+      </div>
+      <table className="tabelle zu-klaeren">
+        <thead>
+          <tr>
+            <th>Take</th>
+            <th>Geplanter Clip</th>
+            <th>Karte</th>
+            <th className="spalte-aktion">
+              <span className="unsichtbar">Entscheiden</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {ohneAufnahme.map((t) => {
+            const x = alleTakes.find((a) => a.t.id === t.takeId);
+            const titel = x ? `${plateTitel(x.p)} · Take ${t.nummer}` : `Take ${t.nummer}`;
+            const st = stand[t.takeId];
+            return (
+              <tr key={t.takeId}>
+                <td>
+                  {titel}
+                  {x && <span className="unterzeile leise">{x.d.name}</span>}
+                  {st && (
+                    <span className="unterzeile">
+                      <Status ton={st.ton}>{st.text}</Status>
+                    </span>
+                  )}
+                </td>
+                <td className="zahl leise">{t.clip}</td>
+                <td className="zahl">{t.karte}</td>
+                <td className="spalte-aktion">
+                  <span className="aktion-reihe">
+                    <button className="knopf knopf-klein" disabled={st?.ton === "laeuft"} onClick={() => setBehalten([...behalten, t.takeId])}>
+                      Behalten
+                    </button>
+                    <button className="knopf knopf-klein" disabled={!zugang || st?.ton === "laeuft"} onClick={() => takeLoeschen(t, titel)}>
+                      Löschen
+                    </button>
+                  </span>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </>
+  );
+  if (u.zuKlaeren.length === 0) return ohneAufnahmeTeil;
 
   return (
     <>
@@ -1453,6 +1557,7 @@ function ZuKlaeren({
           })}
         </tbody>
       </table>
+      {ohneAufnahmeTeil}
     </>
   );
 }

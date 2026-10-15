@@ -18,8 +18,8 @@ use serde_json::{json, Value};
 /// Konto nicht mehr; diese Liste ist die Sperre. Nie: dreh, plate, take, foto.
 pub const DARF_AENDERN: &[&str] =
     &["projekt", "ingest_meldung", "hdri_job", "dreh", "karte", "clip", "studio_take", "foto", "take"];
-/// `take` (gehört dem Plate Assistant): der Ingest legt nur Takes aus Clips an (abgestimmt 15.10.2026), mit diesen
-/// Feldern; ändert nie einen bestehenden Take.
+/// `take` (gehört dem Plate Assistant): der Ingest legt Takes aus Clips an (abgestimmt 15.10.2026), mit diesen Feldern.
+/// An bestehenden Takes nur `clip` (aus der Karte) und `geloescht` (Take ohne Aufnahme), siehe `aenderungen_pruefen`.
 const TAKE_ANLEGEN: &[&str] = &[
     "plate_id",
     "nummer",
@@ -66,10 +66,19 @@ pub fn aenderungen_pruefen(body: &Value) -> Result<(), String> {
             return Err(format!("Stage Ingest ändert am Drehort „{feld}“ nicht (gehört dem Plate Assistant)"));
         }
         if t == "take" {
-            let unbekannt =
-                a["wert"].as_object().into_iter().flatten().find(|(k, _)| !TAKE_ANLEGEN.contains(&k.as_str()));
-            if feld != "_anlegen" || a["wert"]["plate_id"].as_str().is_none_or(str::is_empty) || unbekannt.is_some() {
-                return Err("Stage Ingest legt an „take“ nur neue Takes aus Clips an (erlaubte Felder)".into());
+            match feld {
+                "_anlegen" => {
+                    let unbekannt =
+                        a["wert"].as_object().into_iter().flatten().find(|(k, _)| !TAKE_ANLEGEN.contains(&k.as_str()));
+                    if a["wert"]["plate_id"].as_str().is_none_or(str::is_empty) || unbekannt.is_some() {
+                        return Err("Stage Ingest legt an „take“ nur neue Takes aus Clips an (erlaubte Felder)".into());
+                    }
+                }
+                // Nach „Zu klären“ (Marlon, 16.10.2026): den Clip von der Karte an den Take schreiben, wie CAP nach
+                // dem Stopp (nur `name`, `startTc`, `bilder`), oder einen Take ohne Aufnahme weich löschen.
+                "clip" if take_clip_gueltig(&a["wert"]) => {}
+                "geloescht" if a["wert"] == true => {}
+                _ => return Err(format!("Stage Ingest ändert am Take „{feld}“ nicht")),
             }
         }
         if t == "foto" && (!FOTO_FELDER.contains(&feld) || a["wert"]["quelle"] != "clip") {
@@ -83,6 +92,16 @@ pub fn aenderungen_pruefen(body: &Value) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// `take.clip` genau wie CAP nach dem Stopp: `name`, `startTc`, `bilder`, alle drei gefüllt.
+fn take_clip_gueltig(w: &Value) -> bool {
+    w.as_object().is_some_and(|o| {
+        o.len() == 3
+            && o.get("name").and_then(Value::as_str).is_some_and(|n| !n.is_empty())
+            && o.get("startTc").and_then(Value::as_str).is_some_and(|t| !t.is_empty())
+            && o.get("bilder").and_then(Value::as_u64).is_some_and(|b| b > 0)
+    })
 }
 
 const SCHLUESSELBUND_DIENST: &str = "ch.filmstudiobasel.stage-ingest.plate-assistant";
@@ -370,6 +389,20 @@ impl Plate {
             Some("uebernommen" | "aelter" | "doppelt") => Ok(()),
             e => Err(format!(
                 "Take nicht angelegt: {} {}",
+                e.unwrap_or("unbekannt"),
+                v[0]["grund"].as_str().unwrap_or_default()
+            )),
+        }
+    }
+
+    /// Ändert einen bestehenden Take (eine Änderung `take`, Feld `clip` oder `geloescht`).
+    pub fn take_aendern(&self, z: &Zugang, aenderung: Value) -> Result<(), String> {
+        let body = json!({ "p_geraet": geraet_name(), "p_aenderungen": [aenderung] });
+        let v = self.anwenden(z, &body)?;
+        match v[0]["ergebnis"].as_str() {
+            Some("uebernommen" | "aelter" | "doppelt") => Ok(()),
+            e => Err(format!(
+                "Take nicht geändert: {} {}",
                 e.unwrap_or("unbekannt"),
                 v[0]["grund"].as_str().unwrap_or_default()
             )),
@@ -1164,6 +1197,23 @@ mod tests {
             assert!(aenderungen_pruefen(&json!({"p_aenderungen": [{"tabelle": "studio_take", "feld": f}]})).is_ok());
         }
         assert!(aenderungen_pruefen(&json!({"p_aenderungen": [{"tabelle": "einstellung", "feld": "notiz"}]})).is_err());
+        // Bestehender Take: nur `clip` wie CAP (alle drei Angaben) und weich löschen; sonst nichts.
+        let take = |f: &str, w: Value| json!({"p_aenderungen": [{"tabelle": "take", "feld": f, "wert": w}]});
+        assert!(aenderungen_pruefen(&take(
+            "clip",
+            json!({"name": "A009C010_120101_R132", "startTc": "15:13:25:04", "bilder": 120})
+        ))
+        .is_ok());
+        assert!(aenderungen_pruefen(&take("clip", json!({"name": "A009C010_120101_R132", "startTc": "15:13:25:04"})))
+            .is_err());
+        assert!(
+            aenderungen_pruefen(&take("clip", json!({"name": "X", "startTc": "1", "bilder": 1, "uuid": "u"}))).is_err()
+        );
+        assert!(aenderungen_pruefen(&take("geloescht", json!(true))).is_ok());
+        assert!(aenderungen_pruefen(&take("geloescht", json!(false))).is_err());
+        for f in ["bewertung", "nummer", "plate_id", "clip_name", "notiz", "lage"] {
+            assert!(aenderungen_pruefen(&take(f, json!("x"))).is_err(), "take.{f} muss gesperrt sein");
+        }
         assert!(drehort_kurzname_pruefen("RHEINUFER").is_ok());
         assert!(drehort_kurzname_pruefen("STUDIO").is_err());
         assert!(drehort_kurzname_pruefen("RHEIN__UFER").is_err());
