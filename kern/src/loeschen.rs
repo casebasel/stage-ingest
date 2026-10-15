@@ -147,6 +147,8 @@ pub fn clip_endgueltig(
     lokal: DateTime<Local>,
 ) -> io::Result<Geloescht> {
     erlaubt(kartenordner, stamm)?;
+    // Ein früherer Lauf kann zwischen neuer Generation und Kette abgebrochen sein (macOS über SMB, 16.10.2026).
+    mhl::kette_reparieren(kartenordner)?;
     let drehordner = kartenordner.parent().and_then(Path::parent).unwrap_or(kartenordner);
     let metadaten = struktur::metadatenordner(kartenordner);
     let mut weg = eintraege(kartenordner, stamm)?;
@@ -222,8 +224,9 @@ pub fn clip_endgueltig(
         }
     }
 
-    // Neue Historie über das, was bleibt.
-    if generationen > 0 {
+    // Neue Historie über das, was bleibt; nur wenn sich in der Kopie etwas geändert hat (nicht nur `05_METADATEN`).
+    let kopie_geaendert = !schon_weg.is_empty() || weg.iter().any(|w| w.starts_with(kartenordner));
+    if generationen > 0 && kopie_geaendert {
         let ablage = crate::zielstand::frueher_ordner(kartenordner, lokal, "_vor_loeschen");
         let neu = crate::zielstand::historie_beiseite(kartenordner, &ablage)
             .and_then(|()| verbleibend(kartenordner, &bekannt, angaben.zeit))
@@ -390,6 +393,24 @@ mod tests {
         let g = clip_endgueltig(&karte2, "A1C1_X", &angaben(), Local::now()).unwrap();
         assert!(g.generation.is_some());
         assert!(mhl::nachpruefen(&karte2, &Default::default(), |_| {}).unwrap().gut());
+    }
+
+    #[test]
+    fn kette_fehlt_wird_repariert_metadaten_allein_ohne_neue_historie() {
+        // Zustand auf dem NAS am 16.10.2026: neue Generation geschrieben, Kette fehlt; vom nächsten Clip nur noch die CSV.
+        let t = tempfile::tempdir().unwrap();
+        let dreh = t.path().join("D");
+        let karte = dreh.join("01_KAMERA/A008R56E");
+        kopie_anlegen(&karte, &[("A008R56E/A008C001_X.mov", b"bleibt")]);
+        fs::remove_file(karte.join("ascmhl/ascmhl_chain.xml")).unwrap();
+        fs::create_dir_all(dreh.join("05_METADATEN")).unwrap();
+        fs::write(dreh.join("05_METADATEN/A008C003_X.csv"), b"csv").unwrap();
+
+        let g = clip_endgueltig(&karte, "A008C003_X", &angaben(), Local::now()).unwrap();
+        assert!(karte.join("ascmhl/ascmhl_chain.xml").is_file());
+        assert!(g.historie_alt.is_none(), "nur Metadaten gelöscht: Historie bleibt");
+        assert!(!dreh.join("05_METADATEN/A008C003_X.csv").exists());
+        assert!(mhl::nachpruefen(&karte, &Default::default(), |_| {}).unwrap().gut());
     }
 
     #[test]

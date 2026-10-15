@@ -149,7 +149,7 @@ pub fn mxf_nach_mov(mxf: &Path, mov: &Path, rec709: bool) -> io::Result<Umgepack
     let mut datei = w.into_inner().map_err(|e| e.into_error())?;
     datei.seek(SeekFrom::Start(mdat_beginn + 8))?;
     datei.write_all(&(pos - mdat_beginn).to_be_bytes())?;
-    datei.sync_all()?;
+    crate::ohne_cache::datei_sichern(&datei)?;
     Ok(ergebnis)
 }
 

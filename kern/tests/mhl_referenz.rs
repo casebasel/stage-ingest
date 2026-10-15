@@ -210,3 +210,17 @@ fn nach_endgueltigem_loeschen_besteht_verify() {
     assert!(!ziel.join("Clips/A001C002_261007_R132.mov").exists());
     verify(&r, &ziel);
 }
+
+#[test]
+fn reparierte_kette_besteht_verify() {
+    let Some(r) = referenz() else { return };
+    let t = tempfile::tempdir().unwrap();
+    karte(&t.path().join("A001R132"));
+    let ziel = t.path().join("ziel/A001R132");
+    let a = Auftrag { quelle: t.path().join("A001R132"), ziele: vec![ziel.clone()], ..Default::default() };
+    let kopie = kopieren(&a, &AtomicBool::new(false), |_| {}).unwrap();
+    mhl::schreiben(&ziel, &kopie, &angaben()).unwrap();
+    fs::remove_file(ziel.join("ascmhl/ascmhl_chain.xml")).unwrap();
+    assert!(mhl::kette_reparieren(&ziel).unwrap());
+    verify(&r, &ziel);
+}

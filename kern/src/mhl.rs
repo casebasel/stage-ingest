@@ -397,6 +397,13 @@ fn historie_lesen(ordner: &Path) -> io::Result<Historie> {
     let mut h = Historie::default();
     let kette_pfad = ordner.join(KETTE);
     if !kette_pfad.exists() {
+        // Generationen ohne Kette (Schreiben brach zwischen `.mhl` und Kette ab): Kette aus den Dateien ableiten.
+        h.kette = generationen_ohne_kette(ordner)?;
+        h.generationen = h.kette.iter().map(|k| k.0).max().unwrap_or(0);
+        if h.kette.is_empty() {
+            return Ok(h);
+        }
+        hashes_lesen(ordner, &mut h)?;
         return Ok(h);
     }
     let fehler = |e: quick_xml::Error| io::Error::new(io::ErrorKind::InvalidData, e.to_string());
@@ -438,6 +445,15 @@ fn historie_lesen(ordner: &Path) -> io::Result<Historie> {
     h.kette.sort_by_key(|k| k.0);
     h.generationen = h.kette.iter().map(|k| k.0).max().unwrap_or(0);
 
+    hashes_lesen(ordner, &mut h)?;
+    Ok(h)
+}
+
+/// Dateihashes aller Generationen der Kette, ältere zuerst; spätere überschreiben.
+fn hashes_lesen(ordner: &Path, h: &mut Historie) -> io::Result<()> {
+    use quick_xml::events::Event;
+    let fehler = |e: quick_xml::Error| io::Error::new(io::ErrorKind::InvalidData, e.to_string());
+    let mut puffer = Vec::new();
     // Dateihashes aller Generationen, ältere zuerst; spätere überschreiben.
     for (_, datei, _) in &h.kette {
         let mut r = quick_xml::Reader::from_file(ordner.join(datei)).map_err(fehler)?;
@@ -466,7 +482,36 @@ fn historie_lesen(ordner: &Path) -> io::Result<Historie> {
             puffer.clear();
         }
     }
-    Ok(h)
+    Ok(())
+}
+
+/// `NNNN_….mhl` in `ascmhl/` ohne Kette, nach Nummer, mit C4 aus dem Inhalt.
+fn generationen_ohne_kette(ordner: &Path) -> io::Result<Vec<(usize, String, String)>> {
+    let Ok(liste) = std::fs::read_dir(ordner) else { return Ok(vec![]) };
+    let mut aus = Vec::new();
+    for e in liste.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let Some(nr) = name.strip_suffix(".mhl").and_then(|n| n.split('_').next()).and_then(|n| n.parse().ok()) else {
+            continue;
+        };
+        aus.push((nr, name, c4(&std::fs::read(e.path())?)));
+    }
+    aus.sort();
+    Ok(aus)
+}
+
+/// Schreibt die Kette neu, wenn Generationen da sind, aber `ascmhl_chain.xml` fehlt. Gibt zurück, ob repariert wurde.
+pub fn kette_reparieren(ziel: &Path) -> io::Result<bool> {
+    let ordner = ziel.join(ORDNER);
+    if ordner.join(KETTE).exists() {
+        return Ok(false);
+    }
+    let kette = generationen_ohne_kette(&ordner)?;
+    if kette.is_empty() {
+        return Ok(false);
+    }
+    crate::ohne_cache::sicher_schreiben(&ordner.join(KETTE), kette_xml(&kette).as_bytes())?;
+    Ok(true)
 }
 
 /// C4 ID: SHA-512 als Base58-Zahl, links mit `1` auf 88 Zeichen aufgefüllt, davor `c4`.

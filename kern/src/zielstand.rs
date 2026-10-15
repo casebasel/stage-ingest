@@ -184,7 +184,7 @@ pub fn begleitdateien_beiseite(
         // Gleiche Platte (neben der Kopie): Umbenennen. Sonst kopieren, sichern, dann erst entfernen.
         if std::fs::rename(&von, &nach).is_err() {
             std::fs::copy(&von, &nach)?;
-            std::fs::File::open(&nach)?.sync_all()?;
+            crate::ohne_cache::datei_sichern(&std::fs::File::open(&nach)?)?;
             std::fs::remove_file(&von)?;
         }
         if let Some(e) = nach.parent() {
@@ -217,7 +217,7 @@ pub(crate) fn historie_beiseite(ziel: &Path, ablage: &Path) -> std::io::Result<(
                     std::fs::create_dir_all(p)?;
                 }
                 std::fs::copy(e.path(), &z)?;
-                std::fs::File::open(&z)?.sync_all()?;
+                crate::ohne_cache::datei_sichern(&std::fs::File::open(&z)?)?;
             }
         }
         std::fs::remove_dir_all(&historie)?;

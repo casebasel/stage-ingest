@@ -451,7 +451,7 @@ fn festschreiben(ausstehend: &mut Vec<Ausstehend>, beruehrt: &mut BTreeSet<PathB
             // Manche Dateisysteme (SMB, exFAT über bestimmte Treiber) kennen F_FULLFSYNC nicht: dann jede Datei
             // einzeln mit dem stärksten Mittel, das es gibt.
             for a in ausstehend.iter() {
-                a.datei.sync_all()?;
+                crate::ohne_cache::datei_sichern(&a.datei)?;
             }
         }
     }
@@ -534,7 +534,7 @@ fn schreiben(wurzel: &Path, rx: Receiver<AnZiel>, zustand: &Mutex<Option<String>
                             }
                         }
                         #[cfg(not(target_os = "macos"))]
-                        datei.sync_all()?;
+                        crate::ohne_cache::datei_sichern(&datei)?;
                         ausstehend.push(Ausstehend { datei, teil, endgueltig, geaendert });
                         #[cfg(target_os = "macos")]
                         let voll = ausstehend.len() >= BUENDEL_DATEIEN || buendel_bytes >= BUENDEL_BYTES;

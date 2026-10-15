@@ -87,12 +87,42 @@ fn nicht_unterstuetzt_unix(_: &io::Error) -> bool {
     false
 }
 
+/// Bringt den Inhalt einer Datei auf die Platte. macOS: `sync_all` ist `F_FULLFSYNC`; über SMB (NAS) meldet das
+/// ENOTSUP (45; Marlon, 16.10.2026: Löschen und Schreiben auf dem NAS brachen daran ab). Dann das gewöhnliche `fsync`,
+/// das der Mac an den Server weitergibt; kennt auch das Dateisystem das nicht, ist es vom Server schon gesichert.
+pub(crate) fn datei_sichern(f: &File) -> io::Result<()> {
+    match f.sync_all() {
+        Err(e) if nicht_unterstuetzt_unix(&e) => fsync_einfach(f),
+        r => r,
+    }
+}
+
+#[cfg(unix)]
+fn fsync_einfach(f: &File) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    // SAFETY: gültiger Deskriptor der offenen Datei.
+    if unsafe { libc::fsync(f.as_raw_fd()) } == 0 {
+        return Ok(());
+    }
+    let e = io::Error::last_os_error();
+    if nicht_unterstuetzt_unix(&e) {
+        Ok(())
+    } else {
+        Err(e)
+    }
+}
+
+#[cfg(not(unix))]
+fn fsync_einfach(_: &File) -> io::Result<()> {
+    Ok(())
+}
+
 /// Schreibt eine Datei vollständig und bringt Inhalt und Ordnereintrag auf die Platte.
 pub fn sicher_schreiben(pfad: &Path, inhalt: &[u8]) -> io::Result<()> {
     use std::io::Write;
     let mut f = File::create(pfad)?;
     f.write_all(inhalt)?;
-    f.sync_all()?;
+    datei_sichern(&f)?;
     if let Some(o) = pfad.parent() {
         ordner_sichern(o)?;
     }
