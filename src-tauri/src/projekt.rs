@@ -68,6 +68,68 @@ pub struct OffenerClip {
     /// direkt davor liegt (sonst direkt danach).
     pub vorschlag_plate: Option<String>,
     pub vorschlag_dreh: Option<String>,
+    /// Vorschlag eines bestehenden Takes, dessen Clipname bis aufs Datum gleich ist (Magazin, Zähler, Kennung) und
+    /// dessen Zähler in die Reihe passt (Marlon, 16.10.2026: Uhr der Mini auf 2012, Namen im Plate Assistant mit 261015).
+    pub vorschlag_take: Option<String>,
+    /// Kurz, warum: z. B. „Take 6 · Name bis aufs Datum gleich“.
+    pub vorschlag_grund: Option<String>,
+}
+
+/// Takes ohne Karte, deren Clipname bis aufs Datum einem Clip ohne Take gleicht (Magazin, Zähler, Kennung), wenn der
+/// Zähler in die Reihe der sicheren Takes derselben Plate passt und eindeutig ist, in beide Richtungen. Gibt je Clipname
+/// (gross) Take, Drehort und Grund zurück.
+fn vorschlaege_ohne_datum(
+    drehs: &[DrehStand],
+    karten: &[GefundeneKarte],
+    mit_take: &HashSet<String>,
+    zugeordnet: &HashSet<String>,
+) -> HashMap<String, (String, String, String)> {
+    use ingest_kern::soll::{ohne_datum, passt_in_reihe};
+    let mut frei: HashMap<(String, u32, String), HashSet<String>> = HashMap::new();
+    for c in karten.iter().flat_map(|k| k.inhalt.clips.iter()) {
+        let name = c.name.to_uppercase();
+        if c.take_id.is_none() && !mit_take.contains(&name) && !zugeordnet.contains(&name) {
+            if let Some(k) = ohne_datum(&name) {
+                frei.entry(k).or_default().insert(name);
+            }
+        }
+    }
+    let mut treffer: Vec<(String, String, String, String)> = Vec::new();
+    for d in drehs {
+        for p in &d.plates {
+            let sicher: Vec<(i64, (String, u32, String))> = p
+                .takes
+                .iter()
+                .filter(|t| t.karte.is_some())
+                .filter_map(|t| Some((t.nummer, ohne_datum(&t.clip)?)))
+                .collect();
+            for t in p.takes.iter().filter(|t| t.karte.is_none()) {
+                let Some(k) = ohne_datum(&t.clip) else { continue };
+                let Some(namen) = frei.get(&k).filter(|n| n.len() == 1) else { continue };
+                let feste: Vec<(i64, u32)> =
+                    sicher.iter().filter(|(_, s)| s.0 == k.0 && s.2 == k.2).map(|(o, s)| (*o, s.1)).collect();
+                if passt_in_reihe(&feste, t.nummer, k.1) {
+                    let clip = namen.iter().next().cloned().unwrap_or_default();
+                    treffer.push((
+                        clip,
+                        t.id.clone(),
+                        d.id.clone(),
+                        format!("Take {} · Name bis aufs Datum gleich", t.nummer),
+                    ));
+                }
+            }
+        }
+    }
+    let mut je_clip: HashMap<&str, usize> = HashMap::new();
+    for t in &treffer {
+        *je_clip.entry(t.0.as_str()).or_default() += 1;
+    }
+    let einmal: HashSet<String> = je_clip.into_iter().filter(|(_, n)| *n == 1).map(|(c, _)| c.to_owned()).collect();
+    treffer
+        .into_iter()
+        .filter(|t| einmal.contains(&t.0))
+        .map(|(c, take, dreh, grund)| (c, (take, dreh, grund)))
+        .collect()
 }
 
 /// `A009C010_…` → (`A009`, 10): Kamera und Rolle, Clipnummer.
@@ -506,10 +568,15 @@ pub fn zusammenfuehren(
         .filter(|c| c.take_id.is_some())
         .map(|c| c.name.to_uppercase())
         .collect();
+    let ohne_datum = vorschlaege_ohne_datum(&drehs, &karten, &mit_take, &zugeordnete_clips);
     let mut zu_klaeren: Vec<OffenerClip> = Vec::new();
     for (k, c) in karten.iter().flat_map(|k| k.inhalt.clips.iter().map(move |c| (k, c))) {
         let name = c.name.to_uppercase();
-        if mit_take.contains(&name) || zugeordnete_clips.contains(&name) || c.dreh_id.is_some() {
+        // Nur dem Drehort zugeordnet, aber ein Take passt bis aufs Datum: wieder vorschlagen.
+        if mit_take.contains(&name)
+            || zugeordnete_clips.contains(&name)
+            || (c.dreh_id.is_some() && !ohne_datum.contains_key(&name))
+        {
             continue;
         }
         // Clipdatei dieser Kopie: `<Dreh>/01_KAMERA/<Karte>/<pfad>`.
@@ -539,6 +606,8 @@ pub fn zusammenfuehren(
                 clipdateien: clipdatei.into_iter().collect(),
                 vorschlag_plate: None,
                 vorschlag_dreh: None,
+                vorschlag_take: None,
+                vorschlag_grund: None,
             }),
         }
     }
@@ -556,6 +625,14 @@ pub fn zusammenfuehren(
         if let Some((plate, dreh)) = davor.or(danach).and_then(|(_, t)| take_plate.get(*t)) {
             o.vorschlag_plate = Some(plate.clone());
             o.vorschlag_dreh = Some(dreh.clone());
+        }
+    }
+    for o in &mut zu_klaeren {
+        if let Some((take, dreh, grund)) = ohne_datum.get(&o.clip.to_uppercase()) {
+            o.vorschlag_take = Some(take.clone());
+            o.vorschlag_dreh = Some(dreh.clone());
+            o.vorschlag_plate = None;
+            o.vorschlag_grund = Some(grund.clone());
         }
     }
     let einsortieren = einsortierbar(&karten, &drehs, &take_zu_dreh, &clip_zu_dreh);
@@ -715,6 +792,58 @@ mod tests {
         assert_eq!(take.dateien.len(), 2, "{:?}", take.dateien);
         assert!(take.dateien.iter().any(|d| d.starts_with(t.path().join("NAS"))));
         assert!(take.dateien.iter().any(|d| d.starts_with(t.path().join("T7"))));
+    }
+
+    #[test]
+    fn treppenhaus_name_bis_aufs_datum() {
+        // 16.10.2026: Uhr der Mini auf 2012. Take 1, 5, 9 haben die richtigen Namen (über Info 1 zugeordnet), 2–4 und
+        // 6–8 geschätzte mit 261015; C010–C012 hat Marlon nur dem Drehort zugeordnet.
+        let namen = [
+            (1, "A009C008_120101_R132"),
+            (2, "A009C009_261015_R132"),
+            (3, "A009C010_261015_R132"),
+            (4, "A009C011_261015_R132"),
+            (5, "A009C009_120101_R132"),
+            (6, "A009C010_261015_R132"),
+            (7, "A009C011_261015_R132"),
+            (8, "A009C012_261015_R132"),
+            (9, "A009C013_120101_R132"),
+        ];
+        let takes: Vec<Value> = namen
+            .iter()
+            .map(|(n, c)| json!({ "id": format!("T{n}"), "nummer": n, "clip_name": c, "geloescht": false }))
+            .collect();
+        let drehs = json!([{ "id": "D1", "name": "Treppenhaus", "datum": "2026-10-15", "geloescht": false,
+            "plate": [{ "id": "P1", "nummer": 1, "geloescht": false, "take": takes }] }]);
+        let clip = |n: u32, take: Option<&str>| {
+            let name = format!("A009C{n:03}_120101_R132");
+            json!({ "name": name, "pfad": format!("A009R132/{name}.mxf"), "startTc": null, "endTc": null,
+                    "takeId": take, "zuordnung": if take.is_some() { "info1" } else { "hand" },
+                    "drehId": if take.is_some() { Value::Null } else { json!("D1") } })
+        };
+        let inhalt: KartenZusammenfassung = serde_json::from_value(json!({
+            "format": 1, "karte": "A008R56E", "beginn": "", "version": "t", "freigegeben": true,
+            "unabhaengigeKopien": 1, "grund": "",
+            "clips": [clip(8, Some("T1")), clip(9, Some("T5")), clip(10, None), clip(11, None), clip(12, None),
+                      clip(13, Some("T9"))]
+        }))
+        .unwrap();
+        let karten = vec![GefundeneKarte {
+            dreh_ordner: "2026-10-15_EINGANG".into(),
+            datei: PathBuf::from("/x/2026-10-15_EINGANG/04_BERICHTE/A008R56E_ingest.json"),
+            inhalt,
+        }];
+        let p: Projekt =
+            serde_json::from_value(json!({"id": "projekt-x", "name": "X", "kurzname": "X", "aktiv": true})).unwrap();
+        let u = zusammenfuehren(p, &drehs, &json!([]), karten, vec![], &Value::Null);
+        let mut v: Vec<(String, String)> = u
+            .zu_klaeren
+            .iter()
+            .map(|o| (o.clip[5..8].to_owned(), o.vorschlag_take.clone().unwrap_or_default()))
+            .collect();
+        v.sort();
+        assert_eq!(v, [("010", "T6"), ("011", "T7"), ("012", "T8")].map(|(a, b)| (a.to_owned(), b.to_owned())));
+        assert!(u.zu_klaeren.iter().all(|o| o.vorschlag_dreh.as_deref() == Some("D1")));
     }
 
     #[test]

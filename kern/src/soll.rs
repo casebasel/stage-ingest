@@ -104,6 +104,23 @@ pub fn arri_reel(name: &str) -> Option<(String, String)> {
     ok.then(|| (erster[..4].to_owned(), karte.to_string()))
 }
 
+/// ARRI-Clipname ohne Datum: `A009C010_261015_R132` → (`A009`, 10, `R132`). Magazin, Zähler und Kennung sind
+/// massgeblich, das Datum nicht (Plate Assistant, 15.10.2026: es ist geschätzt, die Uhr der Mini stand auf 2012).
+pub fn ohne_datum(name: &str) -> Option<(String, u32, String)> {
+    let stamm = ohne_endung(name);
+    let (magazin, kennung) = arri_reel(stamm)?;
+    Some((magazin.to_ascii_uppercase(), stamm.get(5..8)?.parse().ok()?, kennung.to_ascii_uppercase()))
+}
+
+/// Passt der Zähler `z` in die Reihe? `feste`: (Reihenfolge, Zähler) der sicher zugeordneten Takes derselben Reihe
+/// (gleiche Plate bzw. Szene, gleiches Magazin). Der Zähler muss grösser sein als der des letzten festen Takes davor
+/// und kleiner als der des ersten danach: die Kamera zählt nur vorwärts.
+pub fn passt_in_reihe(feste: &[(i64, u32)], ordnung: i64, z: u32) -> bool {
+    let vor = feste.iter().filter(|(o, _)| *o < ordnung).max_by_key(|(o, _)| *o).map(|x| x.1);
+    let nach = feste.iter().filter(|(o, _)| *o > ordnung).min_by_key(|(o, _)| *o).map(|x| x.1);
+    vor.is_none_or(|v| z > v) && nach.is_none_or(|n| z < n)
+}
+
 pub fn ohne_endung(name: &str) -> &str {
     let name = name.rsplit(['/', '\\']).next().unwrap_or(name);
     match name.rsplit_once('.') {
@@ -236,6 +253,54 @@ pub fn abgleichen(kopie: &Kopie, soll: &[SollClip], clips: &[crate::ale::ClipZei
         match auf_karte.get(&stamm) {
             Some(pfad) => a.gefunden.push((s.clone(), pfad.clone())),
             None => a.fehlt.push(s.clone()),
+        }
+    }
+
+    // Name ohne Datum: Magazin, Zähler und Kennung gleich, das Datum anders (geschätzter Name des Plate Assistant,
+    // falsch gestellte Kamerauhr). Nur wenn der Zähler in die Reihe der sicheren Takes derselben Szene passt und
+    // eindeutig ist, in beide Richtungen.
+    {
+        let ordnung = |s: &SollClip| s.take.trim().parse::<i64>().ok();
+        let sicher: Vec<(String, i64, (String, u32, String))> = a
+            .gefunden
+            .iter()
+            .chain(&a.ueber_kennung)
+            .chain(&a.ueber_qr)
+            .filter_map(|(s, p)| Some((s.szene.clone(), ordnung(s)?, ohne_datum(p)?)))
+            .collect();
+        let frei: BTreeMap<(String, u32, String), String> = auf_karte
+            .iter()
+            .filter(|(n, _)| !bekannt.contains(*n) && !fremde_id.contains(*n))
+            .filter_map(|(n, p)| Some((ohne_datum(n)?, p.clone())))
+            .collect();
+        let mut vorschlaege: Vec<(usize, String)> = Vec::new();
+        for (i, s) in a.fehlt.iter().enumerate() {
+            let (Some(k), Some(o)) = (ohne_datum(&s.clip), ordnung(s)) else { continue };
+            let Some(p) = frei.get(&k) else { continue };
+            let feste: Vec<(i64, u32)> = sicher
+                .iter()
+                .filter(|(sz, _, kk)| *sz == s.szene && kk.0 == k.0 && kk.2 == k.2)
+                .map(|(_, o, kk)| (*o, kk.1))
+                .collect();
+            if passt_in_reihe(&feste, o, k.1) {
+                vorschlaege.push((i, p.clone()));
+            }
+        }
+        let mut je_clip: BTreeMap<&String, usize> = BTreeMap::new();
+        for (_, p) in &vorschlaege {
+            *je_clip.entry(p).or_default() += 1;
+        }
+        let eindeutig: BTreeMap<usize, String> =
+            vorschlaege.iter().filter(|(_, p)| je_clip[p] == 1).map(|(i, p)| (*i, p.clone())).collect();
+        let fehlt = std::mem::take(&mut a.fehlt);
+        for (i, s) in fehlt.into_iter().enumerate() {
+            match eindeutig.get(&i) {
+                Some(p) => {
+                    bekannt.insert(ohne_endung(p).to_owned());
+                    a.gefunden.push((s, p.clone()));
+                }
+                None => a.fehlt.push(s),
+            }
         }
     }
 
@@ -478,6 +543,58 @@ mod tests {
         assert_eq!(a.fehlt[0].bewertung, "Gut");
         assert_eq!(soll[2].bewertung, "Favorit", "nie „Circle“ (BEGRIFFE „Bewertung“)");
         assert_eq!(a.unerwartet, ["A005C004_120101_R56E.mov"]);
+    }
+
+    #[test]
+    fn name_ohne_datum_und_reihe() {
+        assert_eq!(ohne_datum("A009C010_261015_R132.mxf"), Some(("A009".into(), 10, "R132".into())));
+        assert!(passt_in_reihe(&[(5, 9), (9, 13)], 6, 10));
+        assert!(!passt_in_reihe(&[(1, 8), (5, 9), (9, 13)], 3, 10), "Take 3 liegt vor Take 5 (C009)");
+        assert!(passt_in_reihe(&[], 3, 10));
+    }
+
+    /// Treppenhaus 15.10.2026: Uhr der Mini auf 2012, Namen im Plate Assistant mit 261015. Takes 1, 5, 9, 10 haben den
+    /// richtigen Namen; 2–4 tragen geschätzte Namen C009–C011, die vor Take 5 (C009) nicht sein können; 6–8 C010–C012.
+    #[test]
+    fn treppenhaus_datum_falsch() {
+        let take = |nr: &str, clip: &str| SollClip {
+            clip: clip.into(),
+            szene: "TREPPENHAUS-01".into(),
+            take: nr.into(),
+            start_tc: String::new(),
+            end_tc: String::new(),
+            bewertung: String::new(),
+            quelle: "plate".into(),
+            take_id: format!("T{nr}"),
+            start_zeit: String::new(),
+            fenster_bis: String::new(),
+            drehtag: String::new(),
+        };
+        let soll = vec![
+            take("1", "A009C008_120101_R132"),
+            take("2", "A009C009_261015_R132"),
+            take("3", "A009C010_261015_R132"),
+            take("4", "A009C011_261015_R132"),
+            take("5", "A009C009_120101_R132"),
+            take("6", "A009C010_261015_R132"),
+            take("7", "A009C011_261015_R132"),
+            take("8", "A009C012_261015_R132"),
+            take("9", "A009C013_120101_R132"),
+        ];
+        let pfade: Vec<String> = (8..=13).map(|n| format!("A009R132/A009C{n:03}_120101_R132.mxf")).collect();
+        let k = kopie(&pfade.iter().map(String::as_str).collect::<Vec<_>>());
+        let a = abgleichen(&k, &soll, &[]);
+        let mut paare: Vec<(String, String)> =
+            a.gefunden.iter().map(|(s, p)| (s.take.clone(), ohne_endung(p)[5..8].to_owned())).collect();
+        paare.sort();
+        assert_eq!(
+            paare,
+            [("1", "008"), ("5", "009"), ("6", "010"), ("7", "011"), ("8", "012"), ("9", "013")]
+                .map(|(a, b)| (a.to_owned(), b.to_owned()))
+        );
+        let ohne: Vec<&str> = a.fehlt.iter().map(|s| s.take.as_str()).collect();
+        assert_eq!(ohne, ["2", "3", "4"]);
+        assert!(a.unerwartet.is_empty());
     }
 }
 

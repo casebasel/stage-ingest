@@ -59,6 +59,8 @@ type OffenerClip = {
   /** Vorschlag für einen neuen Take: Plate des Nachbar-Clips auf derselben Rolle. */
   vorschlagPlate?: string | null;
   vorschlagDreh?: string | null;
+  vorschlagTake?: string | null;
+  vorschlagGrund?: string | null;
 };
 type Uebersicht = {
   projekt: ProjektT;
@@ -1242,11 +1244,14 @@ function ZuKlaeren({
     return <p className="leer-zeile">Nichts zu klären: Jeder eingelesene Clip ist einem Take oder einem Drehort zugeordnet.</p>;
 
   // Vorschlag als Vorauswahl: neuer Take an der Plate des Nachbar-Clips (Marlon, 15.10.2026).
+  // Bestehender Take mit gleichem Namen bis aufs Datum geht vor (Marlon, 16.10.2026: Uhr der Mini auf 2012).
   const wahlVon = (c: OffenerClip, schluessel: string) =>
     wahl[schluessel] ??
-    (c.vorschlagPlate && c.vorschlagDreh && zugang && c.clipdateien?.length
-      ? { dreh: c.vorschlagDreh, take: `neu:${c.vorschlagPlate}` }
-      : { dreh: "", take: "" });
+    (c.vorschlagTake && c.vorschlagDreh
+      ? { dreh: c.vorschlagDreh, take: c.vorschlagTake }
+      : c.vorschlagPlate && c.vorschlagDreh && zugang && c.clipdateien?.length
+        ? { dreh: c.vorschlagDreh, take: `neu:${c.vorschlagPlate}` }
+        : { dreh: "", take: "" });
 
   async function zuordnen(c: OffenerClip, schluessel: string, mitNeuladen = true): Promise<boolean> {
     const w = wahlVon(c, schluessel);
@@ -1297,11 +1302,20 @@ function ZuKlaeren({
     }
   }
 
-  const mitVorschlag = u.zuKlaeren.filter((c) => wahlVon(c, `${c.karte}|${c.clip}`).take.startsWith("neu:"));
+  const mitVorschlag = u.zuKlaeren.filter((c) => {
+    const t = wahlVon(c, `${c.karte}|${c.clip}`).take;
+    return t.startsWith("neu:") || (!!c.vorschlagTake && t === c.vorschlagTake);
+  });
+  const neue = mitVorschlag.filter((c) => wahlVon(c, `${c.karte}|${c.clip}`).take.startsWith("neu:")).length;
   async function alleVorschlaege() {
+    const bestehend = mitVorschlag.length - neue;
+    const teile = [
+      bestehend > 0 && `${bestehend} ${bestehend === 1 ? "Clip seinem Take" : "Clips ihren Takes"} zuordnen (Name bis aufs Datum gleich)`,
+      neue > 0 && `${neue} neue Takes anlegen, je an der vorgeschlagenen Einstellung (Nummer = nächste freie, Werte vom Clip)`,
+    ].filter(Boolean);
     const ja = await ask(
-      `${mitVorschlag.length} neue Takes anlegen, je an der vorgeschlagenen Einstellung (Nummer = nächste freie, Werte vom Clip)?\n\nNur anlegen, wenn an diesen Einstellungen gerade nicht gedreht wird: ein iPhone, das noch nicht abgeglichen hat, vergäbe sonst dieselbe Nummer.`,
-      { title: "Takes aus Clips anlegen", kind: "info", okLabel: "Anlegen", cancelLabel: "Abbrechen" },
+      `${teile.join("\n")}?${neue > 0 ? "\n\nNeue Takes nur anlegen, wenn an diesen Einstellungen gerade nicht gedreht wird: ein iPhone, das noch nicht abgeglichen hat, vergäbe sonst dieselbe Nummer." : ""}`,
+      { title: "Vorschläge übernehmen", kind: "info", okLabel: "Übernehmen", cancelLabel: "Abbrechen" },
     );
     if (!ja) return;
     for (const c of mitVorschlag) await zuordnen(c, `${c.karte}|${c.clip}`, false);
@@ -1317,7 +1331,7 @@ function ZuKlaeren({
         </span>
         {mitVorschlag.length > 0 && (
           <button className="knopf knopf-klein" style={{ marginLeft: "auto" }} onClick={alleVorschlaege}>
-            Alle Vorschläge anlegen ({mitVorschlag.length})
+            Alle Vorschläge übernehmen ({mitVorschlag.length})
           </button>
         )}
       </div>
@@ -1360,6 +1374,11 @@ function ZuKlaeren({
                   <span className="unterzeile zahl leise">
                     {c.karte} · {c.startTc ?? "ohne TC"} · {c.drehOrdner}
                   </span>
+                  {c.vorschlagGrund && !st && (
+                    <span className="unterzeile">
+                      <Status ton="leise">Vorschlag: {c.vorschlagGrund}</Status>
+                    </span>
+                  )}
                   {st && (
                     <span className="unterzeile">
                       <Status ton={st.ton}>{st.text}</Status>
@@ -1407,7 +1426,7 @@ function ZuKlaeren({
                       p.takes.map((t) => (
                         <option key={t.id} value={t.id}>
                           {plateTitel(p)} · Take {t.nummer}
-                          {t.clip ? ` (hat schon ${t.clip})` : ""}
+                          {t.karte ? ` (hat schon ${t.clip})` : t.clip ? ` · geplant ${t.clip}` : ""}
                         </option>
                       )),
                     )}
