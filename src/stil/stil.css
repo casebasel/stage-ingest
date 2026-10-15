@@ -2281,3 +2281,18 @@ input[type="checkbox"][role="switch"]:checked::before {
   margin: 6px 0 0;
   font-size: 13px;
 }
+
+/* „Zu klären“: kleines Bild aus der Mitte des Clips. */
+.zelle-bild {
+  width: 132px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+.mittelbild-klein {
+  display: block;
+  width: 120px;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: var(--rund-klein);
+  background: oklch(0 0 0);
+}

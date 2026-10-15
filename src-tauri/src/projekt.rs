@@ -3,7 +3,7 @@
 //! kopiert, welche Takes haben noch keinen Clip (Karte fehlt), was ist zu klären.
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use ingest_kern::uebersicht::{self, GefundeneKarte};
 use serde::Serialize;
@@ -61,6 +61,9 @@ pub struct OffenerClip {
     pub freigegeben: bool,
     /// Alle Zusammenfassungen dieser Karte (eine pro Ziel); eine Zuordnung wird in alle geschrieben.
     pub dateien: Vec<PathBuf>,
+    /// Erreichbare Kopien der Clipdatei (Vorschaubild, Abspielen, Pfad kopieren; Marlon, 15.10.2026: „Bildvorschau,
+    /// um zu wissen, zu welchem Drehort sie gehören“).
+    pub clipdateien: Vec<PathBuf>,
 }
 
 #[derive(Debug, Serialize)]
@@ -475,9 +478,23 @@ pub fn zusammenfuehren(
         if mit_take.contains(&name) || zugeordnete_clips.contains(&name) || c.dreh_id.is_some() {
             continue;
         }
+        // Clipdatei dieser Kopie: `<Dreh>/01_KAMERA/<Karte>/<pfad>`.
+        let clipdatei = k
+            .datei
+            .parent()
+            .and_then(Path::parent)
+            .map(|d| {
+                d.join(ingest_kern::struktur::KAMERA)
+                    .join(ingest_kern::struktur::ordnername(&k.inhalt.karte))
+                    .join(&c.pfad)
+            })
+            .filter(|p| !c.pfad.is_empty() && p.is_file());
         // Dieselbe Karte liegt auf mehreren Zielen: eine Zeile, alle Dateien.
         match zu_klaeren.iter_mut().find(|o| o.karte == k.inhalt.karte && o.clip.eq_ignore_ascii_case(&c.name)) {
-            Some(o) => o.dateien.push(k.datei.clone()),
+            Some(o) => {
+                o.dateien.push(k.datei.clone());
+                o.clipdateien.extend(clipdatei);
+            }
             None => zu_klaeren.push(OffenerClip {
                 clip: c.name.clone(),
                 karte: k.inhalt.karte.clone(),
@@ -485,6 +502,7 @@ pub fn zusammenfuehren(
                 dreh_ordner: k.dreh_ordner.clone(),
                 freigegeben: k.inhalt.freigegeben,
                 dateien: vec![k.datei.clone()],
+                clipdateien: clipdatei.into_iter().collect(),
             }),
         }
     }

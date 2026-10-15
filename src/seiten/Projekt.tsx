@@ -54,6 +54,8 @@ type OffenerClip = {
   drehOrdner: string;
   freigegeben: boolean;
   dateien: string[];
+  /** Erreichbare Kopien der Clipdatei (Vorschaubild, Abspielen, Pfad kopieren). */
+  clipdateien?: string[];
 };
 type Uebersicht = {
   projekt: ProjektT;
@@ -1072,6 +1074,27 @@ function HdriListe({ hdri }: { hdri: HdriStand[] }) {
 // Vorschaubilder einmal pro Sitzung laden (die App speichert sie zusätzlich auf der Platte).
 const vorschauen = new Map<string, Promise<string>>();
 
+/** Kleines Bild aus der Mitte eines Clips (Liste „Zu klären“): woran man erkennt, wohin der Clip gehört. */
+function MittelbildKlein({ datei }: { datei: string }) {
+  const artCmd = useEinstellungen().artCmd.trim();
+  const [bild, setBild] = useState<string | null>(null);
+  const [fehler, setFehler] = useState(false);
+  useEffect(() => {
+    let aus = false;
+    setBild(null);
+    setFehler(false);
+    vorschauLaden(datei, artCmd)
+      .then((b) => !aus && setBild(b.length >= 3 ? b[1] : (b[0] ?? null)))
+      .catch(() => !aus && setFehler(true));
+    return () => {
+      aus = true;
+    };
+  }, [datei, artCmd]);
+  if (fehler) return <span className="mittelbild-klein vorschau-platz">kein Bild</span>;
+  if (!bild) return <span className="mittelbild-klein vorschau-platz" aria-busy="true" />;
+  return <img className="mittelbild-klein" src={bild} alt="Bild aus der Mitte des Clips" loading="lazy" />;
+}
+
 /** Standbild eines Takes (`art = vorschau`, vom iPhone per CAP nach dem Stopp geholt, oft nichtssagend): Ist die
  *  Kopie des Clips erreichbar, zeigt die App stattdessen das Bild aus der Mitte des Clips (Marlon, 14.10.2026); bis es
  *  da ist und falls es fehlt, das Standbild. Andere Fotos unverändert. */
@@ -1228,86 +1251,109 @@ function ZuKlaeren({
   }
 
   return (
-    <table className="tabelle">
-      <thead>
-        <tr>
-          <th>Clip</th>
-          <th>Karte</th>
-          <th>Start</th>
-          <th>Liegt in</th>
-          <th>Drehort</th>
-          <th>Take</th>
-          <th className="spalte-aktion">
-            <span className="unsichtbar">Zuordnen</span>
-          </th>
-        </tr>
-      </thead>
-      <tbody>
-        {u.zuKlaeren.map((c) => {
-          const schluessel = `${c.karte}|${c.clip}`;
-          const w = wahl[schluessel] ?? { dreh: "", take: "" };
-          const dreh = u.drehs.find((d) => d.id === w.dreh);
-          const st = stand[schluessel];
-          return (
-            <tr key={schluessel}>
-              <td className="zahl">
-                <Status ton="warn">{c.clip}</Status>
-                {st && (
-                  <span className="unterzeile">
-                    <Status ton={st.ton}>{st.text}</Status>
-                  </span>
-                )}
-              </td>
-              <td className="zahl">{c.karte}</td>
-              <td className="zahl">{c.startTc ?? "–"}</td>
-              <td className="zahl leise">{c.drehOrdner}</td>
-              <td>
-                <select
-                  aria-label={`Drehort für ${c.clip}`}
-                  value={w.dreh}
-                  onChange={(e) => {
-                    if (e.target.value === "__neu") return neuerDrehort();
-                    setWahl({ ...wahl, [schluessel]: { dreh: e.target.value, take: "" } });
-                  }}
-                >
-                  <option value="">Drehort wählen …</option>
-                  {u.drehs.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name}
-                      {d.datum && ` · ${d.datum}`}
-                    </option>
-                  ))}
-                  <option value="__neu">+ Neuer Drehort …</option>
-                </select>
-              </td>
-              <td>
-                <select
-                  aria-label={`Take für ${c.clip}`}
-                  value={w.take}
-                  disabled={!dreh}
-                  onChange={(e) => setWahl({ ...wahl, [schluessel]: { ...w, take: e.target.value } })}
-                >
-                  <option value="">Ohne Take (nur Drehort)</option>
-                  {dreh?.plates.flatMap((p) =>
-                    p.takes.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {plateTitel(p)} · Take {t.nummer}
-                        {t.clip ? ` (hat schon ${t.clip})` : ""}
-                      </option>
-                    )),
+    <>
+      <div className="detail-kopf">
+        <h2>Zu klären</h2>
+        <span className="leise">
+          {u.zuKlaeren.length} {u.zuKlaeren.length === 1 ? "Clip" : "Clips"} ohne Take · das Bild aus der Mitte zeigt, wohin er gehört
+        </span>
+      </div>
+      <table className="tabelle">
+        <thead>
+          <tr>
+            <th>Bild</th>
+            <th>Clip</th>
+            <th>Karte</th>
+            <th>Start</th>
+            <th>Liegt in</th>
+            <th>Drehort</th>
+            <th>Take</th>
+            <th className="spalte-aktion">
+              <span className="unsichtbar">Zuordnen</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {u.zuKlaeren.map((c) => {
+            const schluessel = `${c.karte}|${c.clip}`;
+            const w = wahl[schluessel] ?? { dreh: "", take: "" };
+            const dreh = u.drehs.find((d) => d.id === w.dreh);
+            const st = stand[schluessel];
+            return (
+              <tr
+                key={schluessel}
+                title={c.clipdateien?.length ? "Doppelklick spielt den Clip · Rechtsklick: Pfad kopieren" : undefined}
+                onDoubleClick={() => c.clipdateien?.[0] && originalOeffnen(c.clipdateien[0])}
+                onContextMenu={(ev) =>
+                  pfadMenueOeffnen(
+                    ev,
+                    { id: schluessel, nummer: 0, art: "", bewertung: "", clip: c.clip, karte: c.karte, freigegeben: c.freigegeben, dateien: c.clipdateien ?? [] },
+                    c.clip,
+                  )
+                }
+              >
+                <td className="zelle-bild">
+                  {c.clipdateien?.[0] ? <MittelbildKlein datei={c.clipdateien[0]} /> : <span className="leise">–</span>}
+                </td>
+                <td className="zahl">
+                  <Status ton="warn">{c.clipdateien?.[0] ? <ClipMitBild clip={c.clip} datei={c.clipdateien[0]} /> : c.clip}</Status>
+                  {st && (
+                    <span className="unterzeile">
+                      <Status ton={st.ton}>{st.text}</Status>
+                    </span>
                   )}
-                </select>
-              </td>
-              <td className="spalte-aktion">
-                <button className="knopf knopf-klein" disabled={!w.dreh || st?.ton === "laeuft"} onClick={() => zuordnen(c, schluessel)}>
-                  Zuordnen
-                </button>
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+                </td>
+                <td className="zahl">{c.karte}</td>
+                <td className="zahl">{c.startTc ?? "–"}</td>
+                <td className="zahl leise">{c.drehOrdner}</td>
+                <td>
+                  <select
+                    aria-label={`Drehort für ${c.clip}`}
+                    value={w.dreh}
+                    onChange={(e) => {
+                      if (e.target.value === "__neu") return neuerDrehort();
+                      setWahl({ ...wahl, [schluessel]: { dreh: e.target.value, take: "" } });
+                    }}
+                  >
+                    <option value="">Drehort wählen …</option>
+                    {u.drehs.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name}
+                        {d.datum && ` · ${d.datum}`}
+                      </option>
+                    ))}
+                    <option value="__neu">+ Neuer Drehort …</option>
+                  </select>
+                </td>
+                <td>
+                  <select
+                    aria-label={`Take für ${c.clip}`}
+                    value={w.take}
+                    disabled={!dreh}
+                    onChange={(e) => setWahl({ ...wahl, [schluessel]: { ...w, take: e.target.value } })}
+                  >
+                    <option value="">Ohne Take (nur Drehort)</option>
+                    {dreh?.plates.flatMap((p) =>
+                      p.takes.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {plateTitel(p)} · Take {t.nummer}
+                          {t.clip ? ` (hat schon ${t.clip})` : ""}
+                        </option>
+                      )),
+                    )}
+                  </select>
+                </td>
+                <td className="spalte-aktion">
+                  <button className="knopf knopf-klein" disabled={!w.dreh || st?.ton === "laeuft"} onClick={() => zuordnen(c, schluessel)}>
+                    Zuordnen
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </>
   );
 }
 
