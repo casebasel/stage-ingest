@@ -271,6 +271,7 @@ pub fn zusammenfuehren(
     jobs_json: &Value,
     karten: Vec<GefundeneKarte>,
     unlesbar: Vec<PathBuf>,
+    db: &Value,
 ) -> Uebersicht {
     let gilt = |x: &Value| x["geloescht"] != true;
     // HDRI-Jobs nach HDRI-ID (Tabelle `hdri_job`, fehlt vor 0019 oder ohne Leserecht: leer).
@@ -350,6 +351,27 @@ pub fn zusammenfuehren(
             if besser(nach_clip.get(&name)) {
                 nach_clip.insert(name, stand);
             }
+        }
+    }
+    // Gemeinsame Datenbank (`karte`, `clip`): eingelesen auf einem anderen Rechner oder Ziel nicht erreichbar
+    // (Marlon, 15.10.2026: unter Windows eingelesen, der Mac zeigte „Karte fehlt“). Die Zusammenfassungen auf den
+    // Zielen haben Vorrang (sie kennen die Datei); die Datenbank füllt nur, was dort fehlt.
+    let db_karten: HashMap<String, (String, bool)> = db["karten"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|k| gilt(k))
+        .map(|k| (text(&k["id"]), (text(&k["name"]), k["freigegeben"] == true)))
+        .collect();
+    for c in db["clips"].as_array().into_iter().flatten().filter(|c| gilt(c)) {
+        let Some((karte, freigegeben)) = db_karten.get(&text(&c["karte_id"])) else { continue };
+        let stand = Eingelesen { karte: karte.clone(), freigegeben: *freigegeben, datei: None, csv: None };
+        for t in [text(&c["take_id"]), text(&c["studio_take_id"])].into_iter().filter(|t| !t.is_empty()) {
+            nach_take.entry(t).or_insert_with(|| stand.clone());
+        }
+        let name = text(&c["name"]).to_uppercase();
+        if !name.is_empty() {
+            nach_clip.entry(name).or_insert(stand);
         }
     }
     let mut zugeordnete_clips: HashSet<String> = HashSet::new();
@@ -561,7 +583,15 @@ fn studio_einhaengen(drehs: &mut Value, studio: &Value) {
 pub fn laden(plate: &Plate, zugang: Option<&Zugang>, projekt: Projekt, basis: &[PathBuf]) -> Uebersicht {
     let mut karten = Vec::new();
     let mut unlesbar = Vec::new();
-    for b in basis {
+    // Eingetragene Ziele und alle erreichbaren Ablagen (Merkdatei), jede einmal.
+    let mut orte: Vec<PathBuf> = Vec::new();
+    for b in basis.iter().cloned().chain(ingest_kern::ablage::finden()) {
+        let echt = std::fs::canonicalize(&b).unwrap_or_else(|_| b.clone());
+        if !orte.iter().any(|o| std::fs::canonicalize(o).unwrap_or_else(|_| o.clone()) == echt) {
+            orte.push(b);
+        }
+    }
+    for b in &orte {
         let (g, k) = uebersicht::suchen(b, &projekt.kurzname);
         karten.extend(g);
         unlesbar.extend(k);
@@ -591,7 +621,8 @@ pub fn laden(plate: &Plate, zugang: Option<&Zugang>, projekt: Projekt, basis: &[
     if let Some(Ok(studio)) = zugang.map(|z| plate.studio(z, &projekt.id)) {
         studio_einhaengen(&mut drehs, &studio);
     }
-    let mut u = zusammenfuehren(projekt, &drehs, &jobs, karten, unlesbar);
+    let db = zugang.map(|z| plate.karten_und_clips(z, &projekt.id)).unwrap_or(Value::Null);
+    let mut u = zusammenfuehren(projekt, &drehs, &jobs, karten, unlesbar, &db);
     u.hinweis = hinweis;
     u
 }
@@ -649,11 +680,35 @@ mod tests {
             .collect();
         let p: Projekt =
             serde_json::from_value(json!({"id": "projekt-x", "name": "X", "kurzname": "X", "aktiv": true})).unwrap();
-        let u = zusammenfuehren(p, &drehs, &json!([]), karten, vec![]);
+        let u = zusammenfuehren(p, &drehs, &json!([]), karten, vec![], &Value::Null);
         let take = &u.drehs[0].plates[0].takes[0];
         assert_eq!(take.dateien.len(), 2, "{:?}", take.dateien);
         assert!(take.dateien.iter().any(|d| d.starts_with(t.path().join("NAS"))));
         assert!(take.dateien.iter().any(|d| d.starts_with(t.path().join("T7"))));
+    }
+
+    #[test]
+    fn eingelesen_auf_einem_anderen_rechner_aus_der_datenbank() {
+        // Unter Windows eingelesen, am Mac kein Ziel erreichbar: der Take ist trotzdem eingelesen und sicher.
+        let drehs = json!([{ "id": "D1", "name": "Eingang", "datum": "2026-10-15", "geloescht": false, "plate": [
+            { "id": "P1", "nummer": 1, "geloescht": false, "take": [
+                { "id": "T1", "nummer": 1, "clip_name": "A009C001_261015_R132", "geloescht": false },
+                { "id": "T2", "nummer": 2, "clip_name": "A009C002_261015_R132", "geloescht": false } ] } ] }]);
+        let db = json!({
+            "karten": [{ "id": "karte-x-a008r56e", "name": "A008R56E", "freigegeben": true }],
+            "clips": [{ "name": "A009C001_120101_R132", "karte_id": "karte-x-a008r56e", "take_id": "T1", "zuordnung": "info1" }]
+        });
+        let p: Projekt =
+            serde_json::from_value(json!({"id": "projekt-x", "name": "X", "kurzname": "X", "aktiv": true})).unwrap();
+        let u = zusammenfuehren(p, &drehs, &json!([]), vec![], vec![], &db);
+        let t = &u.drehs[0].plates[0].takes;
+        assert_eq!(
+            (t[0].karte.as_deref(), t[0].freigegeben),
+            (Some("A008R56E"), true),
+            "über die Take-ID, auch wenn der Clipname vom Plan abweicht"
+        );
+        assert!(t[1].karte.is_none(), "kein Clip in der Datenbank: Karte fehlt");
+        assert!(t[0].datei.is_none(), "ohne erreichbares Ziel keine Datei");
     }
 
     #[test]
@@ -749,7 +804,7 @@ mod tests {
             inhalt: KartenZusammenfassung { karte: "A002R1AB".into(), ..karte.inhalt.clone() },
         };
         let (o1, o2) = (ohne("o1"), ohne("o2"));
-        let u = zusammenfuehren(p, &drehs, &jobs, vec![karte, zweite, o1, o2], vec![]);
+        let u = zusammenfuehren(p, &drehs, &jobs, vec![karte, zweite, o1, o2], vec![], &Value::Null);
         assert_eq!(u.karten.len(), 2, "Anzeige: jede Karte einmal");
         assert_eq!(u.einsortieren.len(), 1);
         assert_eq!(u.einsortieren[0].kopien.len(), 2, "Einsortieren erreicht jede Platte");

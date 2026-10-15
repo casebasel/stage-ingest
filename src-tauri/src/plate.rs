@@ -312,6 +312,25 @@ impl Plate {
         self.speicher_laden(z, "fotos", pfad)
     }
 
+    /// Eingelesene Karten und ihre Clips des Projekts aus der gemeinsamen Datenbank (für die Projektseite auf einem
+    /// Rechner, der die Karten nicht selbst eingelesen hat). Fehlt etwas (Rechte, alter Server): leer.
+    pub fn karten_und_clips(&self, z: &Zugang, projekt_id: &str) -> Value {
+        let p = url_teil(projekt_id);
+        let karten = self
+            .lesen(z, &format!("karte?projekt_id=eq.{p}&select=id,name,freigegeben,geloescht"))
+            .unwrap_or(Value::Null);
+        let clips = self
+            .lesen(
+                z,
+                &format!("clip?projekt_id=eq.{p}&select=name,karte_id,take_id,studio_take_id,zuordnung,geloescht"),
+            )
+            .or_else(|_| {
+                self.lesen(z, &format!("clip?projekt_id=eq.{p}&select=name,karte_id,take_id,zuordnung,geloescht"))
+            })
+            .unwrap_or(Value::Null);
+        serde_json::json!({ "karten": karten, "clips": clips })
+    }
+
     /// Hat der Take schon ein Mittelbild (`foto`, `art = vorschau`, `quelle = clip`)? Dann legt der Ingest kein zweites an.
     pub fn mittelbild_vorhanden(&self, z: &Zugang, take_id: &str) -> Result<bool, String> {
         let v = self.lesen(

@@ -152,6 +152,54 @@ pub fn sicherstellen(ordner: &Path, neue_id: impl FnOnce() -> String) -> std::io
     Ok(a)
 }
 
+/// Alle erreichbaren Ablagen (Ordner mit [`DATEI`]) auf den verbundenen Laufwerken, bis zwei Ebenen unter der
+/// Wurzel: am Mac `/Volumes/<Laufwerk>/…`, unter Windows `<Buchstabe>:\\…`. So findet die Projektseite die Karten auf
+/// dem NAS auch auf einem Rechner, der selbst nicht einliest (Marlon, 15.10.2026: „am Windows importieren und am Mac
+/// review machen und umcodieren“).
+pub fn finden() -> Vec<PathBuf> {
+    let wurzeln: Vec<PathBuf> = if cfg!(windows) {
+        (b'A'..=b'Z').map(|b| PathBuf::from(format!("{}:\\", b as char))).filter(|p| p.is_dir()).collect()
+    } else if cfg!(target_os = "macos") {
+        std::fs::read_dir("/Volumes").into_iter().flatten().flatten().map(|e| e.path()).collect()
+    } else {
+        ["/media", "/mnt"]
+            .iter()
+            .flat_map(|w| std::fs::read_dir(w).into_iter().flatten().flatten())
+            .map(|e| e.path())
+            .collect()
+    };
+    finden_in(&wurzeln)
+}
+
+/// [`finden`] unter gegebenen Wurzeln (für Tests).
+pub fn finden_in(wurzeln: &[PathBuf]) -> Vec<PathBuf> {
+    let unter = |o: &Path| -> Vec<PathBuf> {
+        std::fs::read_dir(o)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.is_dir() && !p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.')))
+            .take(100)
+            .collect()
+    };
+    let mut aus = Vec::new();
+    for w in wurzeln {
+        if w.join(DATEI).is_file() {
+            aus.push(w.clone());
+            continue;
+        }
+        for k in unter(w) {
+            if k.join(DATEI).is_file() {
+                aus.push(k);
+                continue;
+            }
+            aus.extend(unter(&k).into_iter().filter(|kk| kk.join(DATEI).is_file()));
+        }
+    }
+    aus
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,6 +209,21 @@ mod tests {
         let b = ablage.join("HAPPY_END/2026-10-14_4_STOCK/04_BERICHTE");
         fs::create_dir_all(&b).unwrap();
         fs::write(b.join(format!("A007R132{}", crate::uebersicht::ENDUNG)), b"{}").unwrap();
+    }
+
+    #[test]
+    fn ablagen_auf_verbundenen_laufwerken_finden() {
+        let t = tempfile::tempdir().unwrap();
+        let ingest = t.path().join("Footage/ingest");
+        fs::create_dir_all(&ingest).unwrap();
+        sicherstellen(&ingest, || "01M4ZE6B7C".into()).unwrap();
+        fs::create_dir_all(t.path().join("SSD/leer")).unwrap();
+        assert_eq!(finden_in(&[t.path().join("Footage"), t.path().join("SSD")]), vec![ingest.clone()]);
+        assert_eq!(
+            finden_in(std::slice::from_ref(&ingest)),
+            vec![ingest],
+            "die Ablage ist selbst das Laufwerk (Windows F:)"
+        );
     }
 
     #[test]
