@@ -72,6 +72,19 @@ pub(crate) fn ordner_sichern(ordner: &Path) -> io::Result<()> {
 fn ordner_sichern_unbekannt(e: &io::Error) -> bool {
     matches!(e.kind(), io::ErrorKind::InvalidInput | io::ErrorKind::Unsupported | io::ErrorKind::PermissionDenied)
         || (cfg!(windows) && matches!(e.raw_os_error(), Some(1 | 50 | 87)))
+        || nicht_unterstuetzt_unix(e)
+}
+
+/// macOS über SMB meldet beim Sichern eines Ordners ENOTSUP (45, „Operation not supported“; Marlon, 16.10.2026:
+/// Löschen auf dem NAS brach daran ab). Rust ordnet das keiner Fehlerart zu.
+#[cfg(unix)]
+fn nicht_unterstuetzt_unix(e: &io::Error) -> bool {
+    e.raw_os_error().is_some_and(|c| c == libc::ENOTSUP || c == libc::EOPNOTSUPP)
+}
+
+#[cfg(not(unix))]
+fn nicht_unterstuetzt_unix(_: &io::Error) -> bool {
+    false
 }
 
 /// Schreibt eine Datei vollständig und bringt Inhalt und Ordnereintrag auf die Platte.

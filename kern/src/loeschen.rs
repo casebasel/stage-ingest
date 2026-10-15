@@ -27,6 +27,9 @@ pub struct GeloeschteDatei {
     pub pfad: String,
     pub groesse: u64,
     pub xxh128: Option<String>,
+    /// Fehlte schon (ein früherer Löschlauf brach nach dieser Datei ab); steht nur noch in der alten Historie.
+    #[serde(default)]
+    pub schon_weg: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -165,12 +168,27 @@ pub fn clip_endgueltig(
         protokoll: None,
         fehler: None,
     };
-    if weg.is_empty() {
+    // Vor dem Löschen: was die Historie über die Dateien weiss (fürs Protokoll und die neue Historie). Dateien des Clips,
+    // die sie nennt, die aber schon fehlen: ein früherer Lauf brach ab (Marlon, 16.10.2026, macOS über SMB); dann wird
+    // der Rest jetzt fertig gemacht.
+    let (generationen, bekannt) = mhl::bekannte_hashes(kartenordner)?;
+    let schon_weg: Vec<(&String, Option<String>)> = bekannt
+        .iter()
+        .filter(|(p, _)| p.split('/').any(|teil| gehoert_zum_clip(teil, stamm)) && !kartenordner.join(p).exists())
+        .map(|(p, h)| (p, h.0.clone()))
+        .collect();
+    if weg.is_empty() && schon_weg.is_empty() {
         return Ok(ergebnis);
     }
-
-    // Vor dem Löschen: was die Historie über die Dateien weiss (fürs Protokoll und die neue Historie).
-    let (generationen, bekannt) = mhl::bekannte_hashes(kartenordner)?;
+    let karte_rel = relativ(drehordner, kartenordner);
+    for (p, xxh) in &schon_weg {
+        ergebnis.dateien.push(GeloeschteDatei {
+            pfad: format!("{karte_rel}/{p}"),
+            groesse: 0,
+            xxh128: xxh.clone(),
+            schon_weg: true,
+        });
+    }
     for w in &weg {
         let dateien: Vec<PathBuf> = if w.is_dir() {
             walkdir::WalkDir::new(w)
@@ -188,6 +206,7 @@ pub fn clip_endgueltig(
                 pfad: relativ(drehordner, &d),
                 groesse: d.metadata().map(|m| m.len()).unwrap_or(0),
                 xxh128: d.starts_with(kartenordner).then(|| bekannt.get(&in_karte).and_then(|h| h.0.clone())).flatten(),
+                schon_weg: false,
             });
         }
     }
@@ -245,8 +264,15 @@ fn protokoll(
     t += &format!("Werkzeug:  {} {}\n", angaben.werkzeug, angaben.version);
     t += "Grund:     von Hand endgültig gelöscht (Zu klären)\n\n";
     t += "Gelöschte Dateien (Pfad im Drehordner, Bytes, XXH3-128 laut ASC MHL):\n";
-    for d in &g.dateien {
+    for d in g.dateien.iter().filter(|d| !d.schon_weg) {
         t += &format!("  {}  {}  {}\n", d.pfad, d.groesse, d.xxh128.as_deref().unwrap_or("-"));
+    }
+    let frueher: Vec<_> = g.dateien.iter().filter(|d| d.schon_weg).collect();
+    if !frueher.is_empty() {
+        t += "\nSchon bei einem früheren, abgebrochenen Löschlauf entfernt (XXH3-128 laut ASC MHL):\n";
+        for d in frueher {
+            t += &format!("  {}  {}\n", d.pfad, d.xxh128.as_deref().unwrap_or("-"));
+        }
     }
     t += "\nASC MHL:\n";
     match (&g.historie_alt, &g.generation) {
@@ -337,6 +363,33 @@ mod tests {
         // Nochmals: nichts mehr da, nichts geschieht.
         let g2 = clip_endgueltig(&karte, "A009C010_261015_R56E", &angaben(), Local::now()).unwrap();
         assert!(g2.dateien.is_empty() && g2.protokoll.is_none());
+    }
+
+    #[test]
+    fn abgebrochenen_lauf_fertig_machen() {
+        let t = tempfile::tempdir().unwrap();
+        let dreh = t.path().join("D");
+        let karte = dreh.join("01_KAMERA/A008R56E");
+        kopie_anlegen(&karte, &[("A008R56E/A008C003_X.mov", b"weg"), ("A008R56E/A008C001_X.mov", b"bleibt")]);
+        fs::create_dir_all(dreh.join("05_METADATEN")).unwrap();
+        fs::write(dreh.join("05_METADATEN/A008C003_X.csv"), b"csv").unwrap();
+        // Früherer Lauf: Clipdatei schon weg, sonst nichts.
+        fs::remove_file(karte.join("A008R56E/A008C003_X.mov")).unwrap();
+
+        let g = clip_endgueltig(&karte, "A008C003_X", &angaben(), Local::now()).unwrap();
+        assert!(g.fehler.is_none(), "{:?}", g.fehler);
+        assert!(g.dateien.iter().any(|d| d.schon_weg && d.pfad == "01_KAMERA/A008R56E/A008R56E/A008C003_X.mov"));
+        assert!(!dreh.join("05_METADATEN/A008C003_X.csv").exists());
+        assert!(mhl::nachpruefen(&karte, &Default::default(), |_| {}).unwrap().gut());
+        assert!(fs::read_to_string(g.protokoll.unwrap()).unwrap().contains("abgebrochenen"));
+
+        // Auch ohne übrige Dateien (nur noch die Historie nennt den Clip) wird fertig gemacht.
+        let karte2 = dreh.join("01_KAMERA/K2");
+        kopie_anlegen(&karte2, &[("A1C1_X.mov", b"weg"), ("b.mov", b"bleibt")]);
+        fs::remove_file(karte2.join("A1C1_X.mov")).unwrap();
+        let g = clip_endgueltig(&karte2, "A1C1_X", &angaben(), Local::now()).unwrap();
+        assert!(g.generation.is_some());
+        assert!(mhl::nachpruefen(&karte2, &Default::default(), |_| {}).unwrap().gut());
     }
 
     #[test]
