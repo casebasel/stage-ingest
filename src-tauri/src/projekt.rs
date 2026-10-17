@@ -306,26 +306,39 @@ fn unstimmigkeiten_finden(
     let wie = |zuordnung: &str| match zuordnung {
         "hand" => "von Hand".to_owned(),
         "" => "über den Namen".to_owned(),
-        z => format!("beim Einlesen über {z}"),
+        "info1" => "beim Einlesen über die Take-ID im Clip".to_owned(),
+        "qr" => "beim Einlesen über den QR der Klappe".to_owned(),
+        "clipname" => "beim Einlesen über den Clipnamen".to_owned(),
+        "timecode" => "beim Einlesen über den Timecode".to_owned(),
+        "zeitfenster" => "beim Einlesen über die Zeit zwischen den Klappen".to_owned(),
+        _ => "beim Einlesen".to_owned(),
+    };
+    // Satzanfang gross: „der Timecode des Takes“ → „Der Timecode des Takes“.
+    let gross = |s: &str| {
+        let mut z = s.chars();
+        z.next().map(|c| c.to_uppercase().chain(z).collect::<String>()).unwrap_or_default()
     };
     let mut aus = Vec::new();
     for (clip, Zugeordnet { take, zuordnung, karte, dateien, clipdateien }) in &clips {
         let Some(w) = widerspruch.get(clip) else { continue };
-        let vorne = format!("{} zugeordnet ({})", name(take), wie(zuordnung));
+        let vorne = format!("Zugeordnet zu {} ({}).", name(take), wie(zuordnung));
         let (schluessel, text, vorschlag) = match w {
             Widerspruch::AndererTake(y, beleg) => (
                 format!("widerspruch:{clip}:{take}:{y}"),
-                format!("{vorne}, aber {beleg} nennt {}", name(y)),
+                format!("{vorne} {} passt aber zu {}.", gross(beleg), name(y)),
                 take_von.contains_key(y.as_str()).then(|| y.clone()),
             ),
             Widerspruch::Unmoeglich => (
                 format!("unmoeglich:{clip}:{take}"),
-                format!("{vorne}, aber der Clip beginnt nicht zwischen dessen Klappe und der nächsten"),
+                format!("{vorne} Der Clip beginnt aber nicht zwischen dessen Klappe und der nächsten."),
                 None,
             ),
             Widerspruch::AndererClip(c, beleg) => (
                 format!("andererclip:{clip}:{take}:{c}"),
-                format!("{vorne}, aber {beleg} gibt dem Take {c}: je Take nimmt eine Kamera einen Clip auf"),
+                format!(
+                    "{vorne} {} gibt diesem Take aber {c}; eine Kamera nimmt je Take nur einen Clip auf.",
+                    gross(beleg)
+                ),
                 None,
             ),
         };
@@ -371,7 +384,7 @@ fn unstimmigkeiten_finden(
                 vorschlag_take: None,
                 vorschlag_dreh: None,
                 text: format!(
-                    "{} zugeordnet ({}), der Take hat aber schon {erster} von Kamera {kamera}: je Take nimmt eine Kamera einen Clip auf",
+                    "Zugeordnet zu {} ({}). Der Take hat aber schon {erster} von Kamera {kamera}; eine Kamera nimmt je Take nur einen Clip auf.",
                     name(&take),
                     wie(zuordnung)
                 ),
@@ -456,6 +469,8 @@ fn kern_vorschlaege(
     }
     // Take → Karten mit seinem Clip (Zusammenfassung, Name von der Kamera, Vorschlag des Kerns).
     let mut mit_clip: HashMap<String, BTreeSet<String>> = HashMap::new();
+    // Take → Name seines Clips, für die Begründung „zwischen Take 1 (A009C008) und Take 5 (A009C009)“.
+    let mut clip_von: HashMap<String, String> = HashMap::new();
     // Takes, für die ein offener Clip in Frage kommt (irgendeine Karte).
     let mut moeglich_alle: HashSet<String> = HashSet::new();
     let mut offen_alle: Vec<String> = Vec::new();
@@ -527,7 +542,7 @@ fn kern_vorschlaege(
         for (liste, grund) in [
             (&rein.ueber_qr, "der QR der Klappe im Bild"),
             (&rein.gefunden, "der Clipname von der Kamera"),
-            (&rein.ueber_kennung, "die Take-ID im Clip (Aufnahme bestätigt)"),
+            (&rein.ueber_kennung, "die Take-ID im Clip"),
             (&rein.ueber_timecode, "der Timecode des Takes"),
             (&rein.ueber_zeitfenster, "die Zeit zwischen den Klappen"),
         ] {
@@ -664,7 +679,8 @@ fn kern_vorschlaege(
         // sein könnte, und was über die Zeit dieser Karte bekannt ist.
         for c in &k.inhalt.clips {
             if let Some(t) = c.take_id.clone().or_else(|| zugeordnet.get(&c.name.to_uppercase()).cloned()) {
-                mit_clip.entry(t).or_default().insert(karte.clone());
+                mit_clip.entry(t.clone()).or_default().insert(karte.clone());
+                clip_von.entry(t).or_insert_with(|| c.name.clone());
             }
         }
         for t in &neu_zugeordnet {
@@ -708,6 +724,15 @@ fn kern_vorschlaege(
     // Versatz (Simulation 17.10.2026: ein Take mit Aufnahme stand als „ohne Aufnahme“). Am Anfang und Ende der Reihe:
     // unklar, Marlon entscheidet. Ohne Bezug zu einer eingelesenen Karte: Karte fehlt.
     let neu_alle: HashSet<String> = kv.take.values().map(|(t, _, _)| t.clone()).collect();
+    for (clip, (t, _, _)) in &kv.take {
+        clip_von.entry(t.clone()).or_insert_with(|| clip.clone());
+    }
+    // Kurz: „Plate 2“, ohne Namen der Einstellung.
+    let plate_name: HashMap<&String, String> = drehs
+        .iter()
+        .flat_map(|d| &d.plates)
+        .map(|p| (&p.id, plate_titel(p).split(" · ").next().unwrap_or_default().to_owned()))
+        .collect();
     let mut reihe: Vec<(chrono::DateTime<chrono::Utc>, &SollClip)> = soll_alle
         .iter()
         .filter(|s| take_info.contains_key(&s.take_id))
@@ -734,13 +759,9 @@ fn kern_vorschlaege(
             continue;
         }
         let mut eintrag = |karte: &str, sicher: bool, grund: String| {
+            // Leer: nur aus der Datenbank (Karte gerade nicht erreichbar). Bestätigen braucht die Zusammenfassung auf dem
+            // Ziel; die Oberfläche sagt das einmal über der Liste.
             let dateien = lage.get(karte).map(|l| l.dateien.clone()).unwrap_or_default();
-            // Nur aus der Datenbank: Die Bestätigung braucht die Zusammenfassung auf dem Ziel.
-            let grund = if dateien.is_empty() {
-                format!("{grund} · Karte gerade nicht erreichbar (Stand aus der Datenbank)")
-            } else {
-                grund
-            };
             kv.ohne_clip.push(TakeOhneAufnahme {
                 take_id: s.take_id.clone(),
                 nummer: *nummer,
@@ -759,22 +780,38 @@ fn kern_vorschlaege(
                 let karte = format!("{m}{kennung}");
                 if lage.contains_key(&karte) {
                     let grund = if offen_alle.iter().any(|n| n.eq_ignore_ascii_case(&s.clip)) {
-                        format!("Clip {} von der Kamera gemeldet, noch keinem Take zugeordnet: oben prüfen", s.clip)
+                        format!("Die Kamera hat {} gemeldet; der Clip steht unter „Clips ohne Take“", s.clip)
                     } else {
-                        format!("Clip {} von der Kamera gemeldet, aber nicht auf der Karte {karte}", s.clip)
+                        format!("Die Kamera hat {} gemeldet, auf der Karte {karte} fehlt der Clip aber", s.clip)
                     };
                     eintrag(&karte, false, grund);
                 }
                 continue;
             }
         }
-        let vor = reihe[..i]
+        let vor_take = reihe[..i]
             .iter()
             .rev()
             .take_while(|(z, _)| *klappe - *z <= nah)
-            .find_map(|(_, x)| mit_clip.get(&x.take_id));
-        let nach =
-            reihe[i + 1..].iter().take_while(|(z, _)| *z - *klappe <= nah).find_map(|(_, x)| mit_clip.get(&x.take_id));
+            .find_map(|(_, x)| mit_clip.contains_key(&x.take_id).then_some(x.take_id.as_str()));
+        let nach_take = reihe[i + 1..]
+            .iter()
+            .take_while(|(z, _)| *z - *klappe <= nah)
+            .find_map(|(_, x)| mit_clip.contains_key(&x.take_id).then_some(x.take_id.as_str()));
+        let (vor, nach) = (vor_take.and_then(|t| mit_clip.get(t)), nach_take.and_then(|t| mit_clip.get(t)));
+        // „Take 4 (A010C004)“, mit Einstellung, wenn der Nachbar an einer anderen steht; Clip ohne Datum und Kennung.
+        let nachbar = |t: &str| -> String {
+            let (nummer, eigene) = take_info.get(t).map(|x| (x.2, &x.1 == plate)).unwrap_or((0, true));
+            let einstellung = if eigene {
+                String::new()
+            } else {
+                take_info.get(t).and_then(|x| plate_name.get(&x.1)).map(|n| format!("{n} · ")).unwrap_or_default()
+            };
+            match clip_von.get(t) {
+                Some(c) => format!("{einstellung}Take {nummer} ({})", c.split('_').next().unwrap_or(c)),
+                None => format!("{einstellung}Take {nummer}"),
+            }
+        };
         // Karte des Takes und, wo er nicht zwischen zwei Clips liegt, warum unklar.
         let (karte, randlage, beteiligt): (String, Option<String>, Vec<&String>) = match (vor, nach) {
             (Some(a), Some(b)) => {
@@ -793,21 +830,28 @@ fn kern_vorschlaege(
                         }
                         let folgend = ra.iter().any(|(ca, x)| rb.iter().any(|(cb, y)| ca == cb && *y == x + 1));
                         let erste = a.iter().next().cloned().unwrap_or_default();
-                        let grund = (!folgend).then(|| format!("Zwischen zwei Karten ({erste} und {}): Klappe ohne REC oder Clip auf einer anderen Karte", b.iter().next().cloned().unwrap_or_default()));
+                        let grund = (!folgend).then(|| {
+                            format!(
+                                "Klappe zwischen den Karten {erste} und {}: Die Kamera lief nicht, oder der Clip liegt auf einer anderen Karte",
+                                b.iter().next().cloned().unwrap_or_default()
+                            )
+                        });
                         (erste, grund, a.iter().chain(b).collect())
                     }
                 }
             }
             (Some(a), None) => {
                 let k = a.iter().next_back().cloned().unwrap_or_default();
-                let grund =
-                    format!("Nach dem letzten Clip der Karte {k}: Klappe ohne REC oder Clip auf einer späteren Karte");
+                let grund = format!(
+                    "Klappe nach dem letzten Clip der Karte {k}: Die Kamera lief nicht, oder der Clip liegt auf einer späteren Karte"
+                );
                 (k, Some(grund), vec![])
             }
             (None, Some(b)) => {
                 let k = b.iter().next().cloned().unwrap_or_default();
-                let grund =
-                    format!("Vor dem ersten Clip der Karte {k}: Klappe ohne REC oder Clip auf einer früheren Karte");
+                let grund = format!(
+                    "Klappe vor dem ersten Clip der Karte {k}: Die Kamera lief nicht, oder der Clip liegt auf einer früheren Karte"
+                );
                 (k, Some(grund), vec![])
             }
             (None, None) => {
@@ -825,7 +869,13 @@ fn kern_vorschlaege(
                 else {
                     continue;
                 };
-                (k, Some("Kein Take mit sicherem Clip in der Nähe: offene Clips oben zuordnen".into()), vec![])
+                (
+                    k,
+                    Some(
+                        "Kein Take in der Nähe hat einen eindeutigen Clip: zuerst die Clips ohne Take zuordnen".into(),
+                    ),
+                    vec![],
+                )
             }
         };
         let eine_kamera = lage.get(&karte).is_some_and(|l| {
@@ -846,19 +896,25 @@ fn kern_vorschlaege(
             && !platzhalter
             && !ohne_zeit;
         let grund = if sicher {
-            "Keine Aufnahme auf der Karte (Klappe ohne REC)".to_owned()
+            match (vor_take, nach_take) {
+                (Some(a), Some(b)) => {
+                    format!("Zwischen {} und {} liegt kein Clip für diesen Take", nachbar(a), nachbar(b))
+                }
+                _ => "Auf der Karte liegt kein Clip für diesen Take".to_owned(),
+            }
         } else if s.rec_bestaetigt {
-            "Aufnahme von der Kamera bestätigt, aber kein Clip zugeordnet: offene Clips oben prüfen".to_owned()
+            "Die Kamera hat REC bestätigt, aber kein Clip ist zugeordnet: unter „Clips ohne Take“ nachsehen".to_owned()
         } else if moeglich {
-            "Ein offener Clip kann zu diesem Take gehören: oben prüfen".to_owned()
+            "Ein Clip ohne Take kann zu diesem Take gehören: unter „Clips ohne Take“ nachsehen".to_owned()
         } else if platzhalter {
-            "Platzhalter des Plate Assistant (an der Kamera ohne App aufgenommen): offene Clips oben prüfen".to_owned()
+            "Platzhalter des Plate Assistant (an der Kamera ohne iPhone aufgenommen): unter „Clips ohne Take“ nachsehen"
+                .to_owned()
         } else if let Some(r) = randlage {
             r
         } else if !eine_kamera {
-            "Mehrere Kameras an diesem Tag: vielleicht nur mit einer anderen Kamera aufgenommen".to_owned()
+            "An diesem Tag liefen mehrere Kameras: Vielleicht hat eine andere Kamera aufgenommen".to_owned()
         } else {
-            "Clips ohne Zeit auf der Karte: oben prüfen".to_owned()
+            "Auf der Karte liegen Clips ohne Timecode: unter „Clips ohne Take“ nachsehen".to_owned()
         };
         eintrag(&karte, sicher, grund);
     }
@@ -1840,7 +1896,13 @@ mod tests {
         assert!(t2.ohne_aufnahme && t2.karte.is_none(), "{t2:?}");
         assert_eq!(t2.clip, "", "C023 gehört Take 3: der geplante Name von Take 2 verschwindet");
         assert_eq!(u.ohne_aufnahme.len(), 1);
-        assert!(u.ohne_aufnahme[0].dateien.is_empty() && u.ohne_aufnahme[0].grund.contains("nicht erreichbar"));
+        // Nur aus der Datenbank: keine Zusammenfassung zum Bestätigen (die Oberfläche sagt es einmal über der Liste); die
+        // Begründung nennt die Nachbarn.
+        assert!(u.ohne_aufnahme[0].dateien.is_empty());
+        assert_eq!(
+            u.ohne_aufnahme[0].grund,
+            "Zwischen Take 1 (A010C022) und Take 3 (A010C023) liegt kein Clip für diesen Take"
+        );
         assert_eq!(u.drehs[0].plates[0].takes[2].karte.as_deref(), Some("A010R132"));
     }
 

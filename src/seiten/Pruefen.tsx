@@ -26,7 +26,7 @@ export function Pruefen({ vorschlag }: { vorschlag: { ordner: string } | null })
     if (typeof o === "string") setZielBasis(o);
   }
 
-  // Aus dem Protokoll: „Kopie ergänzen“ mit der vorhandenen Kopie als Quelle.
+  // Aus dem Protokoll: „Fehlende Kopie erstellen“ mit der vorhandenen Kopie als Quelle.
   useEffect(() => {
     if (!vorschlag) return;
     setQuelleKopie(vorschlag.ordner);
@@ -83,12 +83,12 @@ export function Pruefen({ vorschlag }: { vorschlag: { ordner: string } | null })
 
 <section className="block" aria-labelledby="t-kaskade">
         <div className="block-kopf">
-          <h2 id="t-kaskade">Fehlende Kopie aus einer Kopie erstellen</h2>
+          <h2 id="t-kaskade">Fehlende Kopie aus einer Kopie erstellen (Kaskade)</h2>
         </div>
         <p className="leise block-text">
           Wenn die Karte nicht mehr da ist: Eine geprüfte Kopie wird auf eine andere Platte kopiert und gegen die
-          ursprünglichen Prüfsummen der Karte (ASC MHL) geprüft. Danach zählen beide Kopien für die Freigabe. Ist die Karte
-          noch da, besser beim Einlesen „Kopie ergänzen“.
+          ursprünglichen Prüfsummen der Karte (ASC MHL) geprüft, in anderen Programmen „Cascading Copy“. Danach zählen
+          beide Kopien für die Freigabe. Ist die Karte noch da, besser beim Einlesen „Kopie ergänzen“.
         </p>
         <div className="kaskade">
           <div className="kaskade-schritt">

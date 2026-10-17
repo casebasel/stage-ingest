@@ -242,7 +242,7 @@ function zaehlung(geraete: (ZielGeraet | undefined | null)[]) {
         : { ton: "warn", text: "Laufwerk unbekannt: zählt mit anderen unbekannten als eine" };
     erste.set(schluessel, i);
     return g.kennung.sicher
-      ? { ton: "ok", text: "Eigene Kopie" }
+      ? { ton: "ok", text: "Unabhängige Kopie" }
       : { ton: "warn", text: "Laufwerk unbekannt: zählt höchstens einmal" };
   });
   return { zeilen, unabhaengig: erste.size };
@@ -582,7 +582,7 @@ function Auftrag({ pflicht, zurEinrichtung, laufwerke }: { pflicht: boolean; zur
       {q && !lauf.laeuft && <KartenGedaechtnis pfad={q.pfad} />}
       <section className="block" aria-labelledby="t-dreh">
         <div className="block-kopf">
-          <h2 id="t-dreh">Dreh</h2>
+          <h2 id="t-dreh">Drehort</h2>
           {(lauf.paDreh || lauf.automatisch) && <Status ton="ok">Takes aus dem Plate Assistant</Status>}
           {lauf.soll && !lauf.soll.fehler && <Status ton="ok">{lauf.soll.liste.length} Takes von der Stage</Status>}
           {lauf.soll?.fehler && <Status ton="warn">Soll-Liste nicht geladen</Status>}
@@ -1159,7 +1159,7 @@ function Urteil({
           ))}
           {(ergebnis.nachtraege?.length ?? 0) > 0 && (
             <div className="nachtraege" role="alert">
-              <Status ton="warn">Nach dem Bericht nicht alles geklappt (die Kopie ist davon nicht betroffen):</Status>
+              <Status ton="warn">Nach dem Bericht ging nicht alles durch (die Kopie selbst ist in Ordnung):</Status>
               <ul>
                 {ergebnis.nachtraege!.map((n) => (
                   <li key={n}>{n}</li>
@@ -1313,15 +1313,15 @@ function AbgleichTabelle({ ergebnis }: { ergebnis: KartenErgebnis }) {
   type Zeile = { ton: Ton; stand: string; take: string; clip: string; weg: string };
   const take = (s: { szene: string; take: string }) => `${s.szene} / ${s.take}`;
   const zeilen: Zeile[] = [
-    ...a.fehlt.map((s) => ({ ton: "warn" as Ton, stand: "Fehlt auf der Karte", take: take(s), clip: s.clip, weg: s.bewertung })),
+    ...a.fehlt.map((s) => ({ ton: "warn" as Ton, stand: "Kein Clip auf der Karte", take: take(s), clip: s.clip, weg: s.bewertung })),
     ...a.mehrdeutig.map(([s, ps]) => ({ ton: "warn" as Ton, stand: "Mehrdeutig, zu klären", take: take(s), clip: ps.map(name).join(", "), weg: "" })),
-    ...a.unerwartet.map((p) => ({ ton: "warn" as Ton, stand: "Ohne Take, zu klären", take: "–", clip: name(p), weg: "" })),
-    ...(a.pruefen ?? []).map(([p, grund]) => ({ ton: "warn" as Ton, stand: "Kennung prüfen", take: "–", clip: name(p), weg: grund })),
-    ...(a.ueberQr ?? []).map(([s, p]) => ({ ton: "ok" as Ton, stand: "Da", take: take(s), clip: name(p), weg: "QR" })),
-    ...a.gefunden.map(([s, p]) => ({ ton: "ok" as Ton, stand: "Da", take: take(s), clip: name(p), weg: "Clipname" })),
-    ...(a.ueberKennung ?? []).map(([s, p]) => ({ ton: "ok" as Ton, stand: "Da", take: take(s), clip: name(p), weg: "Info 1" })),
-    ...a.ueberTimecode.map(([s, p]) => ({ ton: "ok" as Ton, stand: "Da", take: take(s), clip: name(p), weg: "Timecode" })),
-    ...a.ueberZeitfenster.map(([s, p]) => ({ ton: "ok" as Ton, stand: "Da", take: take(s), clip: name(p), weg: "Klappenzeit" })),
+    ...a.unerwartet.map((p) => ({ ton: "warn" as Ton, stand: "Clip ohne Take, zu klären", take: "–", clip: name(p), weg: "" })),
+    ...(a.pruefen ?? []).map(([p, grund]) => ({ ton: "warn" as Ton, stand: "Take-ID prüfen", take: "–", clip: name(p), weg: grund })),
+    ...(a.ueberQr ?? []).map(([s, p]) => ({ ton: "ok" as Ton, stand: "Zugeordnet", take: take(s), clip: name(p), weg: "QR" })),
+    ...a.gefunden.map(([s, p]) => ({ ton: "ok" as Ton, stand: "Zugeordnet", take: take(s), clip: name(p), weg: "Clipname" })),
+    ...(a.ueberKennung ?? []).map(([s, p]) => ({ ton: "ok" as Ton, stand: "Zugeordnet", take: take(s), clip: name(p), weg: "Take-ID (Info 1)" })),
+    ...a.ueberTimecode.map(([s, p]) => ({ ton: "ok" as Ton, stand: "Zugeordnet", take: take(s), clip: name(p), weg: "Timecode" })),
+    ...a.ueberZeitfenster.map(([s, p]) => ({ ton: "ok" as Ton, stand: "Zugeordnet", take: take(s), clip: name(p), weg: "Zeit zwischen Klappen" })),
   ];
   return (
     <table className="tabelle">
@@ -1425,8 +1425,8 @@ function Metadaten({ ergebnis }: { ergebnis: KartenErgebnis }) {
           <thead>
             <tr>
               <th>Clip</th>
-              <th className="rechts">Neigung</th>
-              <th className="rechts">Rollen</th>
+              <th className="rechts">Tilt</th>
+              <th className="rechts">Roll</th>
               <th className="rechts">Bereich</th>
               <th className="rechts">Brennweite</th>
             </tr>

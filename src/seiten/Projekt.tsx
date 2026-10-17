@@ -161,13 +161,13 @@ function stand(t: TakeStand): { ton: Ton; stand: string } {
   if (t.unstimmig) return { ton: "warn", stand: "Zu klären" };
   if (t.freigegeben) return { ton: "ok", stand: "Sicher" };
   if (t.karte) return { ton: "rot", stand: "Nicht freigegeben" };
-  if (t.ohneAufnahme) return { ton: "leise", stand: "Ohne Aufnahme" };
+  if (t.ohneAufnahme) return { ton: "leise", stand: "Ohne Clip" };
   // Die Karte ist eingelesen, aber der Clip des Takes ist offen oder fraglich: in „Zu klären“ entscheiden.
   if (t.clipOffen) return { ton: "warn", stand: "Zu klären" };
   return { ton: "fehler", stand: "Karte fehlt" };
 }
 
-/** Karte noch nicht eingelesen (nicht „ohne Aufnahme“ und nicht in „Zu klären“). */
+/** Karte noch nicht eingelesen (nicht „ohne Clip“ und nicht in „Zu klären“). */
 const karteFehlt = (t: TakeStand) => !t.karte && !t.ohneAufnahme && !t.clipOffen;
 
 // Grundspalten jeder Take-Tabelle (Gruppe „Take“); „Take“ selbst ist immer sichtbar.
@@ -202,16 +202,12 @@ const GRUNDSPALTEN: Spalte[] = [
     gruppe: "Take",
     quelle: "Plate Assistant / Karte (darüberfahren: Bild aus der Mitte)",
     mono: true,
+    // Ohne Clip: kein Name, auch nicht der vom iPhone vorhergesagte (Marlon, 17.10.2026: „geplant, aber anders
+    // geschrieben“ verwirrte). Karte noch nicht eingelesen: der erwartete Name laut Plate Assistant.
     wert: (t) =>
-      t.ohneAufnahme ? (
-        t.clip ? (
-          <span className="leise" title="Name, den die App vorgeschlagen hat; die Kamera hat dazu nichts aufgenommen">
-            geplant {t.clip}
-          </span>
-        ) : undefined
-      ) : !t.karte && t.clip ? (
-        <span className="leise" title="Name im Plate Assistant; auf keiner eingelesenen Karte zugeordnet">
-          geplant {t.clip}
+      t.ohneAufnahme ? undefined : !t.karte && t.clip ? (
+        <span className="leise" title="Clipname laut Plate Assistant; die Karte dazu ist noch nicht eingelesen oder der Clip noch nicht zugeordnet">
+          erwartet {t.clip}
         </span>
       ) : t.clip ? (
         t.datei ? (
@@ -1320,9 +1316,11 @@ function Grossbild({
   );
 }
 
-/** Zu klären: Clips auf den Karten ohne Take. Im Nachhinein einem Take oder nur einem Drehort zuordnen
- *  (auch einem neu angelegten). Gespeichert in der Zusammenfassung der Karte auf allen Zielen und, wenn die Karte
- *  in der gemeinsamen Datenbank steht, auch dort (der Plate Assistant zeigt es dann an). */
+/** Zu klären: Abgleich der Klappen aus dem Plate Assistant mit den Clips auf den Karten, in drei Teilen. Widersprüche
+ *  (Zuordnung gegen die Belege im Clip), Clips ohne Take (einem Take, einem neuen Take oder nur einem Drehort zuordnen)
+ *  und Takes ohne Clip („Ohne Clip bestätigen“, der Take bleibt). Gespeichert in der Zusammenfassung der Karte auf
+ *  allen Zielen und,
+ *  wenn die Karte in der gemeinsamen Datenbank steht, auch dort (der Plate Assistant zeigt es dann an). */
 function ZuKlaeren({
   u,
   zugang,
@@ -1342,7 +1340,7 @@ function ZuKlaeren({
   const ohneAufnahme = u.ohneAufnahme ?? [];
   const unstimmig = u.unstimmigkeiten ?? [];
   if (u.zuKlaeren.length === 0 && ohneAufnahme.length === 0 && unstimmig.length === 0)
-    return <p className="leer-zeile">Nichts zu klären: Jeder eingelesene Clip ist einem Take zugeordnet.</p>;
+    return <p className="leer-zeile">Nichts zu klären: Jeder Clip hat seinen Take, und jeder Take hat seinen Clip oder ist als „ohne Clip“ bestätigt.</p>;
   const alleTakes = u.drehs.flatMap((d) => d.plates.flatMap((p) => p.takes.map((t) => ({ t, p, d }))));
 
   // Vorschlag als Vorauswahl: neuer Take an der Plate des Nachbar-Clips (Marlon, 15.10.2026).
@@ -1404,7 +1402,7 @@ function ZuKlaeren({
     const kopien = c.dateien.length;
     const ja = await ask(
       `${c.clip} endgültig löschen?\n\nGelöscht wird auf ${kopien === 1 ? "der einen Kopie" : `allen ${kopien} Kopien`} (Karte ${c.karte}), samt Metadaten des Clips. Jede Kopie bekommt eine neue ASC-MHL-Historie und ein Löschprotokoll in 04_BERICHTE. Die Kamerakarte selbst bleibt unberührt.\n\nDas lässt sich in der App nicht rückgängig machen.`,
-      { title: "Clip endgültig löschen", kind: "warning", okLabel: "Endgültig löschen", cancelLabel: "Abbrechen" },
+      { title: "Clip aus allen Kopien löschen", kind: "warning", okLabel: "Endgültig löschen", cancelLabel: "Abbrechen" },
     );
     if (!ja) return;
     setStand((s) => ({ ...s, [schluessel]: { ton: "laeuft", text: "Wartet, bis das Löschen davor fertig ist …" } }));
@@ -1430,12 +1428,14 @@ function ZuKlaeren({
   async function alleVorschlaege() {
     const bestehend = mitVorschlag.length - neue;
     const teile = [
-      bestehend > 0 && `${bestehend} ${bestehend === 1 ? "Clip seinem Take" : "Clips ihren Takes"} zuordnen (QR, Name von der Kamera, Take-ID, Timecode oder Zeit zwischen zwei Klappen)`,
-      neue > 0 && `${neue} neue Takes anlegen, je an der vorgeschlagenen Einstellung (Nummer = nächste freie, Werte vom Clip)`,
+      bestehend > 0 &&
+        `${bestehend === 1 ? "1 Clip seinem vorgeschlagenen Take" : `${bestehend} Clips ihren vorgeschlagenen Takes`} zuordnen (über QR, Clipname, Take-ID, Timecode oder die Zeit zwischen zwei Klappen)`,
+      neue > 0 &&
+        `${neue === 1 ? "1 neuen Take" : `${neue} neue Takes`} anlegen, je an der vorgeschlagenen Einstellung (nächste freie Nummer, Werte vom Clip)`,
     ].filter(Boolean);
     const ja = await ask(
-      `${teile.join("\n")}?${neue > 0 ? "\n\nNeue Takes nur anlegen, wenn an diesen Einstellungen gerade nicht gedreht wird: ein iPhone, das noch nicht abgeglichen hat, vergäbe sonst dieselbe Nummer." : ""}`,
-      { title: "Vorschläge übernehmen", kind: "info", okLabel: "Übernehmen", cancelLabel: "Abbrechen" },
+      `${teile.join("\n")}?${neue > 0 ? "\n\nNeue Takes nur anlegen, wenn an diesen Einstellungen gerade nicht gedreht wird: Ein iPhone, das noch nicht abgeglichen hat, vergäbe sonst dieselbe Nummer." : ""}`,
+      { title: "Alle Vorschläge übernehmen", kind: "info", okLabel: "Übernehmen", cancelLabel: "Abbrechen" },
     );
     if (!ja) return;
     for (const c of mitVorschlag) await zuordnen(c, `${c.karte}|${c.clip}`, false);
@@ -1446,12 +1446,10 @@ function ZuKlaeren({
   // Der Take bleibt im Plate Assistant, die Bestätigung steht in den Zusammenfassungen der Karte (Mac und Windows).
   async function bestaetigen(t: TakeOhneAufnahme, titel: string, mitNeuladen = true): Promise<boolean> {
     if (!t.sicher) {
-      const ja = await ask(`${titel} ohne Aufnahme bestätigen?\n\nNicht sicher: ${t.grund}.\n\nDer Take bleibt im Plate Assistant und verschwindet aus „Zu klären“.`, {
-        title: "Ohne Aufnahme bestätigen",
-        kind: "info",
-        okLabel: "Bestätigen",
-        cancelLabel: "Abbrechen",
-      });
+      const ja = await ask(
+        `${titel} trotzdem als „ohne Clip“ bestätigen?\n\nNicht eindeutig: ${t.grund}.\n\nDer Take bleibt im Plate Assistant und steht danach als „Ohne Clip“ in der Take-Liste.`,
+        { title: "Ohne Clip bestätigen", kind: "info", okLabel: "Bestätigen", cancelLabel: "Abbrechen" },
+      );
       if (!ja) return false;
     }
     setStand((s) => ({ ...s, [t.takeId]: { ton: "laeuft", text: "Speichert …" } }));
@@ -1466,21 +1464,24 @@ function ZuKlaeren({
     }
   }
 
-  const sichere = ohneAufnahme.filter((t) => t.sicher);
-  async function alleSicherenBestaetigen() {
+  // Eindeutig ohne Clip und bestätigbar (die Bestätigung braucht die Karte auf einem verbundenen Ziel).
+  const eindeutige = ohneAufnahme.filter((t) => t.sicher);
+  const bestaetigbar = eindeutige.filter((t) => t.dateien.length > 0);
+  const nichtVerbunden = ohneAufnahme.filter((t) => t.dateien.length === 0).length;
+  async function alleEindeutigenBestaetigen() {
     const ja = await ask(
-      `${sichere.length} Takes ohne Aufnahme bestätigen?\n\nBei jedem liegt die Klappe zwischen zwei Clips derselben Karte, kein offener Clip passt dazu und die Kamera hat kein REC gemeldet. Die Takes bleiben im Plate Assistant.`,
-      { title: "Ohne Aufnahme bestätigen", kind: "info", okLabel: "Alle bestätigen", cancelLabel: "Abbrechen" },
+      `${bestaetigbar.length} Takes als „ohne Clip“ bestätigen?\n\nBei jedem ist eindeutig, dass die Kamera nicht aufgenommen hat: Die Klappe liegt zwischen zwei Takes, deren Clips auf derselben Karte liegen, die Kamera hat kein REC gemeldet, und kein Clip ohne Take passt dazu.\n\nDie Takes bleiben im Plate Assistant und stehen danach als „Ohne Clip“ in der Take-Liste.`,
+      { title: "Ohne Clip bestätigen", kind: "info", okLabel: "Alle bestätigen", cancelLabel: "Abbrechen" },
     );
     if (!ja) return;
-    for (const t of sichere) await bestaetigen(t, "", false);
+    for (const t of bestaetigbar) await bestaetigen(t, "", false);
     gespeichert();
   }
 
   // Löschen nur ausnahmsweise, mit deutlicher Warnung (weich: im Papierkorb des Plate Assistant wiederherstellbar).
   async function takeLoeschen(t: TakeOhneAufnahme, titel: string) {
     const ja = await ask(
-      `${titel} wirklich löschen?\n\nDer Take verschwindet im Plate Assistant, in der Stage und hier, auf allen Geräten. Wiederherstellen geht nur im Papierkorb des Plate Assistant.\n\nMeist genügt „Ohne Aufnahme bestätigen“: Dann bleibt der Take erhalten.`,
+      `${titel} wirklich löschen?\n\nDer Take verschwindet im Plate Assistant, in der Stage und hier, auf allen Geräten. Wiederherstellen geht nur im Papierkorb des Plate Assistant.\n\nMeist genügt „Ohne Clip bestätigen“: Dann bleibt der Take erhalten.`,
       { title: "Take löschen", kind: "warning", okLabel: "Take löschen", cancelLabel: "Abbrechen" },
     );
     if (!ja) return;
@@ -1493,15 +1494,13 @@ function ZuKlaeren({
     }
   }
 
-  // Unstimmigkeit: umhängen auf den Take der Belege, lösen (zurück nach „Zu klären“) oder „stimmt so“.
+  // Widerspruch: dem Take der Belege neu zuordnen, Zuordnung aufheben (Clip wieder ohne Take) oder beibehalten.
   async function unstimmigAendern(x: Unstimmigkeit, art: "umhaengen" | "loesen" | "stimmt") {
     if (art === "loesen") {
-      const ja = await ask(`${x.clip} von seinem Take lösen?\n\nDer Clip steht danach oben unter den Clips ohne Take, mit Vorschlag, wenn es einen sicheren gibt.`, {
-        title: "Zuordnung lösen",
-        kind: "info",
-        okLabel: "Lösen",
-        cancelLabel: "Abbrechen",
-      });
+      const ja = await ask(
+        `Zuordnung von ${x.clip} aufheben?\n\nDer Clip steht danach unter „Clips ohne Take“, mit Vorschlag, wenn es einen eindeutigen gibt.`,
+        { title: "Zuordnung aufheben", kind: "info", okLabel: "Aufheben", cancelLabel: "Abbrechen" },
+      );
       if (!ja) return;
     }
     setStand((s) => ({ ...s, [x.schluessel]: { ton: "laeuft", text: "Speichert …" } }));
@@ -1528,20 +1527,27 @@ function ZuKlaeren({
     }
   }
 
-  const unstimmigTeil = unstimmig.length > 0 && (
-    <>
+  // Drei Teile, das Dringendste zuerst: Widersprüche (eine falsche Zuordnung wiegt schwerer als eine fehlende), Clips
+  // ohne Take, Takes ohne Clip. Je Teil ein Satz, was er ist und was zu tun ist (Marlon, 17.10.2026: „von der Wortwahl
+  // und den Sätzen noch nicht klar“).
+  const widerspruchTeil = unstimmig.length > 0 && (
+    <section className="zk-teil" aria-labelledby="zk-widersprueche">
       <div className="detail-kopf">
-        <h2>Unstimmigkeiten</h2>
-        <span className="leise">
-          {unstimmig.length} {unstimmig.length === 1 ? "zugeordneter Clip passt" : "zugeordnete Clips passen"} nicht zu den Belegen im Clip
-        </span>
+        <h2 id="zk-widersprueche">
+          Widersprüche <span className="leise zahl">{unstimmig.length}</span>
+        </h2>
       </div>
+      <p className="zk-erklaerung">
+        Bei {unstimmig.length === 1 ? "diesem Clip passt" : "diesen Clips passt"} die Zuordnung nicht zu dem, was im Clip
+        steht (Timecode, Take-ID, QR der Klappe). Je Clip entscheiden: dem passenden Take neu zuordnen, die Zuordnung
+        aufheben oder beibehalten.
+      </p>
       <table className="tabelle zu-klaeren">
         <thead>
           <tr>
             <th>Bild</th>
             <th>Clip</th>
-            <th>Befund</th>
+            <th>Widerspruch</th>
             <th className="spalte-aktion">
               <span className="unsichtbar">Entscheiden</span>
             </th>
@@ -1572,93 +1578,32 @@ function ZuKlaeren({
                 </td>
                 <td>{x.text}</td>
                 <td className="spalte-aktion">
-                  <span className="aktion-reihe">
+                  <span className="aktion-stapel">
                     {ziel && (
-                      <button className="knopf knopf-klein" disabled={beschaeftigt} onClick={() => unstimmigAendern(x, "umhaengen")}>
-                        Auf {plateTitel(ziel.p)} · Take {ziel.t.nummer} umhängen
+                      <button
+                        className="knopf knopf-klein"
+                        disabled={beschaeftigt}
+                        onClick={() => unstimmigAendern(x, "umhaengen")}
+                        title="Den Clip dem Take zuordnen, zu dem Timecode, Take-ID oder QR passen"
+                      >
+                        Neu zuordnen: {plateTitel(ziel.p).split(" · ")[0]} · Take {ziel.t.nummer}
                       </button>
                     )}
-                    <button className="knopf knopf-klein" disabled={beschaeftigt} onClick={() => unstimmigAendern(x, "loesen")}>
-                      Lösen
-                    </button>
-                    <button className="knopf knopf-klein" disabled={beschaeftigt} onClick={() => unstimmigAendern(x, "stimmt")}>
-                      Stimmt so
-                    </button>
-                  </span>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </>
-  );
-
-  const ohneAufnahmeTeil = ohneAufnahme.length > 0 && (
-    <>
-      <div className="detail-kopf">
-        <h2>Takes ohne Aufnahme</h2>
-        <span className="leise">
-          {ohneAufnahme.length} {ohneAufnahme.length === 1 ? "Take" : "Takes"} ohne Clip auf den eingelesenen Karten
-          {sichere.length > 0 && sichere.length < ohneAufnahme.length && ` · ${sichere.length} sicher`}
-        </span>
-        {sichere.length > 1 && (
-          <button className="knopf knopf-klein" style={{ marginLeft: "auto" }} onClick={alleSicherenBestaetigen}>
-            Alle sicheren bestätigen ({sichere.length})
-          </button>
-        )}
-      </div>
-      <table className="tabelle zu-klaeren">
-        <thead>
-          <tr>
-            <th>Take</th>
-            <th>Geplanter Clip</th>
-            <th>Karte</th>
-            <th>Befund</th>
-            <th className="spalte-aktion">
-              <span className="unsichtbar">Entscheiden</span>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {ohneAufnahme.map((t) => {
-            const x = alleTakes.find((a) => a.t.id === t.takeId);
-            const titel = x ? `${plateTitel(x.p)} · Take ${t.nummer}` : `Take ${t.nummer}`;
-            const st = stand[t.takeId];
-            return (
-              <tr key={t.takeId}>
-                <td>
-                  {titel}
-                  {x && <span className="unterzeile leise">{x.d.name}</span>}
-                  {st && (
-                    <span className="unterzeile">
-                      <Status ton={st.ton}>{st.text}</Status>
-                    </span>
-                  )}
-                </td>
-                <td className="zahl leise">{t.clip || "–"}</td>
-                <td className="zahl">{t.karte}</td>
-                <td>
-                  <Status ton={t.sicher ? "leise" : "warn"}>{t.sicher ? "Sicher ohne Aufnahme" : "Unklar"}</Status>
-                  <span className="unterzeile leise">{t.grund}</span>
-                </td>
-                <td className="spalte-aktion">
-                  <span className="aktion-reihe">
                     <button
                       className="knopf knopf-klein"
-                      disabled={!t.dateien.length || st?.ton === "laeuft" || st?.ton === "ok"}
-                      onClick={() => bestaetigen(t, titel)}
+                      disabled={beschaeftigt}
+                      onClick={() => unstimmigAendern(x, "loesen")}
+                      title="Der Clip steht danach unter „Clips ohne Take“"
                     >
-                      Ohne Aufnahme bestätigen
+                      Zuordnung aufheben
                     </button>
                     <button
-                      className="knopf-symbol symbol-loeschen"
-                      aria-label={`${titel} löschen`}
-                      title="Take löschen (nur ausnahmsweise)"
-                      disabled={!zugang || st?.ton === "laeuft"}
-                      onClick={() => takeLoeschen(t, titel)}
+                      className="knopf knopf-klein"
+                      disabled={beschaeftigt}
+                      onClick={() => unstimmigAendern(x, "stimmt")}
+                      title="Die Zuordnung stimmt; der Widerspruch erscheint nicht mehr"
                     >
-                      <Trash2 size={15} />
+                      Beibehalten
                     </button>
                   </span>
                 </td>
@@ -1667,30 +1612,26 @@ function ZuKlaeren({
           })}
         </tbody>
       </table>
-    </>
+    </section>
   );
-  if (u.zuKlaeren.length === 0)
-    return (
-      <>
-        {unstimmigTeil}
-        {ohneAufnahmeTeil}
-      </>
-    );
 
-  return (
-    <>
-      {unstimmigTeil}
+  const clipTeil = u.zuKlaeren.length > 0 && (
+    <section className="zk-teil" aria-labelledby="zk-clips">
       <div className="detail-kopf">
-        <h2>Zu klären</h2>
-        <span className="leise">
-          {u.zuKlaeren.length} {u.zuKlaeren.length === 1 ? "Clip" : "Clips"} ohne Take · das Bild aus der Mitte zeigt, wohin er gehört
-        </span>
+        <h2 id="zk-clips">
+          Clips ohne Take <span className="leise zahl">{u.zuKlaeren.length}</span>
+        </h2>
         {mitVorschlag.length > 0 && (
           <button className="knopf knopf-klein" style={{ marginLeft: "auto" }} onClick={alleVorschlaege}>
             Alle Vorschläge übernehmen ({mitVorschlag.length})
           </button>
         )}
       </div>
+      <p className="zk-erklaerung">
+        {u.zuKlaeren.length === 1 ? "Dieser Clip liegt" : "Diese Clips liegen"} auf einer eingelesenen Karte, gehören aber
+        noch zu keinem Take. Das Bild aus der Mitte zeigt, was drauf ist. Einem Take zuordnen, einen neuen Take daraus
+        anlegen oder nur einem Drehort zuordnen.
+      </p>
       <table className="tabelle zu-klaeren">
         <thead>
           <tr>
@@ -1773,7 +1714,7 @@ function ZuKlaeren({
                     disabled={!dreh}
                     onChange={(e) => setWahl({ ...wahl, [schluessel]: { ...w, take: e.target.value } })}
                   >
-                    <option value="">Ohne Take (nur Drehort)</option>
+                    <option value="">Nur Drehort, ohne Take</option>
                     {zugang && c.clipdateien?.length && dreh?.plates.length ? (
                       <optgroup label="Neuer Take aus diesem Clip">
                         {dreh.plates.map((p) => (
@@ -1788,7 +1729,7 @@ function ZuKlaeren({
                       p.takes.map((t) => (
                         <option key={t.id} value={t.id}>
                           {plateTitel(p)} · Take {t.nummer}
-                          {t.karte ? ` (hat schon ${t.clip})` : t.clip ? ` · geplant ${t.clip}` : ""}
+                          {t.karte ? ` (hat schon ${t.clip})` : t.clip ? ` · erwartet ${t.clip}` : ""}
                         </option>
                       )),
                     )}
@@ -1802,7 +1743,7 @@ function ZuKlaeren({
                     <button
                       className="knopf-symbol symbol-loeschen"
                       aria-label={`${c.clip} endgültig löschen`}
-                      title="Endgültig löschen (auf allen Kopien)"
+                      title="Aus allen Kopien endgültig löschen (die Kamerakarte bleibt unberührt)"
                       disabled={st?.ton === "laeuft"}
                       onClick={() => loeschen(c, schluessel)}
                     >
@@ -1815,7 +1756,111 @@ function ZuKlaeren({
           })}
         </tbody>
       </table>
-      {ohneAufnahmeTeil}
+    </section>
+  );
+
+  const takeTeil = ohneAufnahme.length > 0 && (
+    <section className="zk-teil" aria-labelledby="zk-takes">
+      <div className="detail-kopf">
+        <h2 id="zk-takes">
+          Takes ohne Clip <span className="leise zahl">{ohneAufnahme.length}</span>
+        </h2>
+        {eindeutige.length > 1 && (
+          <button
+            className="knopf knopf-klein"
+            style={{ marginLeft: "auto" }}
+            onClick={alleEindeutigenBestaetigen}
+            disabled={bestaetigbar.length === 0}
+            title={bestaetigbar.length === 0 ? "Erst die Karten verbinden (NAS oder Platte)" : undefined}
+          >
+            Alle eindeutigen bestätigen ({bestaetigbar.length || eindeutige.length})
+          </button>
+        )}
+      </div>
+      <p className="zk-erklaerung">
+        Für {ohneAufnahme.length === 1 ? "diesen Take" : "diese Takes"} wurde im Plate Assistant eine Klappe geschlagen,
+        auf den eingelesenen Karten liegt aber kein Clip dazu, meist weil die Kamera nicht lief. „Ohne Clip bestätigen“
+        behält den Take im Plate Assistant und nimmt ihn von dieser Liste.
+      </p>
+      {nichtVerbunden > 0 && (
+        <p className="zk-erklaerung">
+          <Status ton="leise">
+            {nichtVerbunden === ohneAufnahme.length ? "Die Karten sind" : "Einige Karten sind"} gerade nicht verbunden: Die
+            Liste stammt aus der Datenbank. Bestätigen geht erst mit verbundenem NAS oder Platte, denn die Bestätigung
+            wird bei der Karte gespeichert.
+          </Status>
+        </p>
+      )}
+      <table className="tabelle zu-klaeren">
+        <thead>
+          <tr>
+            <th>Take</th>
+            <th>Karte</th>
+            <th>Stand</th>
+            <th className="spalte-aktion">
+              <span className="unsichtbar">Entscheiden</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {ohneAufnahme.map((t) => {
+            const x = alleTakes.find((a) => a.t.id === t.takeId);
+            const titel = x ? `${plateTitel(x.p)} · Take ${t.nummer}` : `Take ${t.nummer}`;
+            const st = stand[t.takeId];
+            return (
+              <tr key={t.takeId}>
+                <td>
+                  {titel}
+                  {x && <span className="unterzeile leise">{x.d.name}</span>}
+                  {st && (
+                    <span className="unterzeile">
+                      <Status ton={st.ton}>{st.text}</Status>
+                    </span>
+                  )}
+                </td>
+                <td className="zahl">{t.karte}</td>
+                <td>
+                  <Status ton={t.sicher ? "leise" : "warn"}>{t.sicher ? "Kein Clip (eindeutig)" : "Unklar"}</Status>
+                  <span className="unterzeile leise">{t.grund}</span>
+                </td>
+                <td className="spalte-aktion">
+                  <span className="aktion-reihe">
+                    <button
+                      className="knopf knopf-klein"
+                      disabled={!t.dateien.length || st?.ton === "laeuft" || st?.ton === "ok"}
+                      onClick={() => bestaetigen(t, titel)}
+                      title={
+                        t.dateien.length
+                          ? "Take ohne Clip behalten und von dieser Liste nehmen"
+                          : "Erst die Karte verbinden (NAS oder Platte): Die Bestätigung wird bei der Karte gespeichert"
+                      }
+                    >
+                      Ohne Clip bestätigen
+                    </button>
+                    <button
+                      className="knopf-symbol symbol-loeschen"
+                      aria-label={`${titel} löschen`}
+                      title="Take löschen (nur ausnahmsweise)"
+                      disabled={!zugang || st?.ton === "laeuft"}
+                      onClick={() => takeLoeschen(t, titel)}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </span>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </section>
+  );
+
+  return (
+    <>
+      {widerspruchTeil}
+      {clipTeil}
+      {takeTeil}
     </>
   );
 }

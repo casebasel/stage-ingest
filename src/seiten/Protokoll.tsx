@@ -284,8 +284,13 @@ function KarteDetail({ k, kopieErgaenzen }: { k: ProtokollKarte; kopieErgaenzen:
           {k.drehOrdner && ` / ${k.drehOrdner}`}
         </span>
         {!k.sicher && gute && (
-          <button className="knopf knopf-klein" style={{ marginLeft: "auto" }} onClick={() => kopieErgaenzen(gute.ordner)}>
-            <CopyPlus size={14} strokeWidth={1.75} aria-hidden /> Kopie ergänzen
+          <button
+            className="knopf knopf-klein"
+            style={{ marginLeft: "auto" }}
+            onClick={() => kopieErgaenzen(gute.ordner)}
+            title="Aus einer geprüften Kopie eine weitere auf einer anderen Platte erstellen (unter „Prüfen“)"
+          >
+            <CopyPlus size={14} strokeWidth={1.75} aria-hidden /> Fehlende Kopie erstellen
           </button>
         )}
       </div>

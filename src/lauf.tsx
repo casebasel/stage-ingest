@@ -109,7 +109,7 @@ function useLaufHalten() {
         ? (n: number) =>
             konto.projektAendern(p.id, { kopien: n }).catch((err) =>
               message(`Kopienzahl nicht im Projekt gespeichert (gilt nur auf diesem Rechner):\n${String(err)}`, {
-                title: "Kopien vor der Freigabe",
+                title: "Unabhängige Kopien für die Freigabe",
                 kind: "warning",
               }).catch(() => {}),
             )

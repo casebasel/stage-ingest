@@ -45,7 +45,7 @@ const WAHLEN: { wahl: Wahl; wort: string; Zeichen: typeof Sun }[] = [
 
 function Gerust() {
   const [seite, setSeite] = useState<Seite>("einlesen");
-  // „Kopie ergänzen“ aus dem Protokoll: die vorhandene Kopie unter „Prüfen“ vorwählen.
+  // „Fehlende Kopie erstellen“ aus dem Protokoll: die vorhandene Kopie unter „Prüfen“ vorwählen.
   const [kaskadeQuelle, setKaskadeQuelle] = useState<{ ordner: string } | null>(null);
   const [wahl, setWahl] = useState<Wahl>(gemerkteWahl);
   useEffect(() => anwenden(wahl), [wahl]);

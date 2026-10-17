@@ -65,7 +65,7 @@ export function ProjektEinstellungen({ projekt, schliessen }: { projekt: Projekt
     const lang = (Object.keys(w) as (keyof Werte)[]).find((k) => w[k].trim().length > 200);
     if (lang) return "Höchstens 200 Zeichen pro Feld.";
     const k = w.kopien.trim();
-    if (k && !/^[2-9]$/.test(k)) return "Kopien vor der Freigabe: eine Zahl von 2 bis 9 (leer = 2). Eine einzige Kopie nur als Testschwelle in der Einrichtung.";
+    if (k && !/^[2-9]$/.test(k)) return "Unabhängige Kopien für die Freigabe: eine Zahl von 2 bis 9 (leer = 2). Eine einzige Kopie nur als Testschwelle in der Einrichtung.";
     const px = pixel(w.aufloesung_px);
     if (px && !/^[1-9][0-9]{0,5}x[1-9][0-9]{0,5}$/.test(px)) return "Auflösung in Pixeln als Breite x Höhe, z. B. 3840x2160.";
     return null;
@@ -148,10 +148,10 @@ export function ProjektEinstellungen({ projekt, schliessen }: { projekt: Projekt
         {eingabe("look", "Look", "z. B. ARRI 709")}
       </Feld>
       <Feld
-        name="Kopien vor der Freigabe"
-        hilfe="Unabhängige, geprüfte Kopien auf verschiedenen Platten, bevor eine Karte als sicher gilt. Leer = 2; Netflix verlangt 3."
+        name="Unabhängige Kopien für die Freigabe"
+        hilfe="Unabhängige, geprüfte Kopien auf verschiedenen Platten, bevor eine Karte „Sicher zum Formatieren“ ist. Leer = 2. Netflix verlangt 3-2-1: drei Kopien auf zwei Arten von Medien, eine davon an einem anderen Ort."
       >
-        {eingabe("kopien", "Kopien vor der Freigabe", "2")}
+        {eingabe("kopien", "Unabhängige Kopien für die Freigabe", "2")}
       </Feld>
       <div className="knopfreihe einstellungen-knoepfe">
         {stand && <Status ton={stand.ton}>{stand.text}</Status>}

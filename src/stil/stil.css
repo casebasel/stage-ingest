@@ -2346,6 +2346,29 @@ input[type="checkbox"][role="switch"]:checked::before {
   vertical-align: top;
 }
 /* Warum ein Clip offen bleibt: Prosa, nicht Daten; umbricht, statt die Tabelle zu verbreitern. */
+/* Entscheidungen untereinander, gleich breit: lässt dem Text des Widerspruchs Platz. */
+.aktion-stapel {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  min-width: 210px;
+}
+/* Ein Satz unter jedem Teil von „Zu klären“: was er ist und was zu tun ist. */
+.zk-erklaerung {
+  max-width: 96ch;
+  margin: 0;
+  padding: 10px 16px 2px;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.zk-erklaerung + .tabelle {
+  margin-top: 8px;
+}
+.zk-teil + .zk-teil {
+  margin-top: 12px;
+}
 .zu-klaeren .hinweis-text {
   display: block;
   max-width: 48ch;

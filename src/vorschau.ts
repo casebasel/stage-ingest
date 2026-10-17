@@ -380,13 +380,13 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
       { clip: "A002C001_120101_R9QX", karte: "A002R9QX", startTc: "15:02:11:00", drehOrdner: "2026-10-28_RHEINUFER", freigegeben: false, dateien: ["/c"], clipdateien: ["/Volumes/NAS/y.mxf"], hinweis: "Take-ID PA:01JAB… im ersten Clip der Karte: der Slate kann von der vorigen Karte stammen" },
     ],
     unstimmigkeiten: [
-      { schluessel: "w1", clip: "A001C011_261028_R132", karte: "A001R132", takeId: "t4", vorschlagTake: "t5", vorschlagDreh: "d1", text: "On Loc 2 · Brücke · Take 1 zugeordnet (von Hand), aber die Take-ID im Clip (Aufnahme bestätigt) nennt On Loc 2 · Brücke · Take 2", dateien: ["/a", "/b"], clipdateien: ["/Volumes/NAS/x.mxf"] },
-      { schluessel: "w2", clip: "A001C012_261028_R132", karte: "A001R132", takeId: "t5", text: "On Loc 2 · Brücke · Take 2 zugeordnet (von Hand), aber der Clip beginnt nicht zwischen dessen Klappe und der nächsten", dateien: ["/a", "/b"], clipdateien: ["/Volumes/NAS/x.mxf"] },
+      { schluessel: "w1", clip: "A001C011_261028_R132", karte: "A001R132", takeId: "t4", vorschlagTake: "t5", vorschlagDreh: "d1", text: "Zugeordnet zu On Loc 2 · Brücke · Take 1 (von Hand). Die Take-ID im Clip passt aber zu On Loc 2 · Brücke · Take 2.", dateien: ["/a", "/b"], clipdateien: ["/Volumes/NAS/x.mxf"] },
+      { schluessel: "w2", clip: "A001C012_261028_R132", karte: "A001R132", takeId: "t5", text: "Zugeordnet zu On Loc 2 · Brücke · Take 2 (von Hand). Der Clip beginnt aber nicht zwischen dessen Klappe und der nächsten.", dateien: ["/a", "/b"], clipdateien: ["/Volumes/NAS/x.mxf"] },
     ],
     ohneAufnahme: [
-      { takeId: "t6", nummer: 3, plateId: "p2", drehId: "d1", clip: "A001C013_261028_R132", karte: "A001R132", sicher: true, grund: "Keine Aufnahme auf der Karte (Klappe ohne REC)", dateien: ["/a", "/b"] },
-      { takeId: "t7", nummer: 4, plateId: "p2", drehId: "d1", clip: "A001C014_261028_R132", karte: "A001R132", sicher: false, grund: "Ein offener Clip kann zu diesem Take gehören: oben prüfen", dateien: ["/a", "/b"] },
-      { takeId: "t8", nummer: 5, plateId: "p2", drehId: "d1", clip: "A001C015_261028_R132", karte: "A001R132", sicher: true, grund: "Keine Aufnahme auf der Karte (Klappe ohne REC)", dateien: ["/a", "/b"] },
+      { takeId: "t6", nummer: 3, plateId: "p2", drehId: "d1", clip: "A001C013_261028_R132", karte: "A001R132", sicher: true, grund: "Zwischen Take 2 (A001C012) und Take 6 (A001C013) liegt kein Clip für diesen Take", dateien: ["/a", "/b"] },
+      { takeId: "t7", nummer: 4, plateId: "p2", drehId: "d1", clip: "A001C014_261028_R132", karte: "A001R132", sicher: false, grund: "Ein Clip ohne Take kann zu diesem Take gehören: unter „Clips ohne Take“ nachsehen", dateien: ["/a", "/b"] },
+      { takeId: "t8", nummer: 5, plateId: "p2", drehId: "d1", clip: "A001C015_261028_R132", karte: "A001R132", sicher: true, grund: "Zwischen Take 2 (A001C012) und Take 6 (A001C013) liegt kein Clip für diesen Take", dateien: params.get("karten") === "weg" ? [] : ["/a", "/b"] },
     ],
     karten: [
       { drehOrdner: "2026-10-28_Rheinufer", datei: "a", inhalt: { karte: "A001R131", beginn: "", freigegeben: true, unabhaengigeKopien: 2, clips: Array(22) } },

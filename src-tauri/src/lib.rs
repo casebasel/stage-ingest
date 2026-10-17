@@ -55,7 +55,7 @@ impl Drop for Belegt {
 fn belegen(laufend: &Laufend, nicht: &str) -> Result<Belegt, String> {
     if laufend.aktiv.swap(true, Ordering::SeqCst) {
         return Err(format!(
-            "Gerade läuft ein anderer Vorgang (Kopieren, Prüfen oder Löschen); {nicht}. Danach nochmals."
+            "Es läuft schon ein anderer Vorgang (Kopieren, Prüfen oder Löschen); {nicht}. Danach nochmals versuchen."
         ));
     }
     Ok(Belegt(Arc::clone(&laufend.aktiv)))
@@ -692,7 +692,9 @@ async fn karte_einlesen(
     auftrag: KartenAuftrag,
 ) -> Result<KartenErgebnis, String> {
     if laufend.aktiv.swap(true, Ordering::SeqCst) {
-        return Err("Es läuft schon ein Kopiervorgang.".into());
+        return Err(
+            "Es läuft schon ein anderer Vorgang (Kopieren, Prüfen oder Löschen). Danach nochmals versuchen.".into()
+        );
     }
     laufend.abbruch.store(false, Ordering::SeqCst);
     let aktiv = Arc::clone(&laufend.aktiv);
@@ -1233,7 +1235,9 @@ async fn kopie_aus_kopie(
     projekt: Option<PlateProjekt>,
 ) -> Result<KaskadenErgebnis, String> {
     if laufend.aktiv.swap(true, Ordering::SeqCst) {
-        return Err("Es läuft schon ein Vorgang.".into());
+        return Err(
+            "Es läuft schon ein anderer Vorgang (Kopieren, Prüfen oder Löschen). Danach nochmals versuchen.".into()
+        );
     }
     laufend.abbruch.store(false, Ordering::SeqCst);
     let aktiv = Arc::clone(&laufend.aktiv);
@@ -1420,7 +1424,9 @@ async fn karte_einsortieren(
 ) -> Result<Vec<EinsortiertStand>, String> {
     let p = Arc::clone(&plate);
     if laufend.aktiv.swap(true, Ordering::SeqCst) {
-        return Err("Es läuft schon ein Vorgang.".into());
+        return Err(
+            "Es läuft schon ein anderer Vorgang (Kopieren, Prüfen oder Löschen). Danach nochmals versuchen.".into()
+        );
     }
     laufend.abbruch.store(false, Ordering::SeqCst);
     let aktiv = Arc::clone(&laufend.aktiv);
@@ -1544,7 +1550,9 @@ async fn ziel_nachpruefen(
     ordner: PathBuf,
 ) -> Result<mhl::Nachpruefung, String> {
     if laufend.aktiv.swap(true, Ordering::SeqCst) {
-        return Err("Es läuft schon ein Vorgang.".into());
+        return Err(
+            "Es läuft schon ein anderer Vorgang (Kopieren, Prüfen oder Löschen). Danach nochmals versuchen.".into()
+        );
     }
     laufend.abbruch.store(false, Ordering::SeqCst);
     let aktiv = Arc::clone(&laufend.aktiv);
