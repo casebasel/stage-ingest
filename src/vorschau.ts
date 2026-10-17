@@ -125,6 +125,13 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
   "plugin:app|version": () => "Vorschau mit Beispieldaten, nichts wird kopiert",
   "plugin:updater|check": () => null,
   "plugin:opener|open_path": () => null,
+  // Rückfragen in der Vorschau bestätigen (es geschieht nichts Echtes): `ask` fragt über `message` und vergleicht mit
+  // der Beschriftung des OK-Knopfs.
+  "plugin:dialog|message": (a) => {
+    const b = a.buttons as { OkCancelCustom?: [string, string] } | string | undefined;
+    if (b && typeof b === "object" && b.OkCancelCustom) return b.OkCancelCustom[0];
+    return b === "YesNo" ? "Yes" : "Ok";
+  },
   "plugin:dialog|open": (a) => {
     const titel = String((a.options as { title?: string })?.title ?? "");
     if (titel.startsWith("Karte")) return KARTE;
