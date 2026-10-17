@@ -67,6 +67,9 @@ const DREH_FELDER: &[&str] = &["_anlegen", "name", "datum"];
 /// zusammengeführt); ein Clip zusätzlich umhängen („Zu klären“). Projekt, Name und Reel sind nach dem Anlegen fest.
 // `speicherort` ändert sich beim Einsortieren (Systemkarte; änderbar seit 0018, Plate Assistant 09.10.2026).
 const KARTE_FELDER: &[&str] = &["_anlegen", "speicherort", "ordner_datum", "ablage"];
+/// Höchstens so gross darf `user_metadata.stage_ingest` werden (steht in jedem Token des Kontos; Plate Assistant).
+const OBERFLAECHE_HOECHSTENS: usize = 2048;
+
 const CLIP_FELDER: &[&str] = &["_anlegen", "take_id", "studio_take_id", "dreh_id", "zuordnung", "geloescht", "technik"];
 
 /// Prüft alle Änderungen einer Anfrage an `aenderungen_anwenden`, bevor sie das Netz verlassen.
@@ -108,6 +111,11 @@ pub fn aenderungen_pruefen(body: &Value) -> Result<(), String> {
                 // Tilt und Roll aus dem Clip (Marlon, 17.10.2026: „das soll der Ingest machen“): nur die vier Zahlen.
                 "aus_clip" if crate::aus_clip::gueltig(&a["wert"]) => {}
                 "clip_name" if name_ok(&a["wert"]) && paar(a, "geloescht", &|w| *w == false) => {}
+                // Kamerawerte an Takes aus Clips nachführen (Marlon, 17.10.2026; Regeln vom Plate Assistant): je
+                // Schlüssel, nie `quelle`, Blende und Fokus nie 0.
+                f if f
+                    .strip_prefix("kamera.")
+                    .is_some_and(|k| crate::take_aus_clip::kamera_wert_gueltig(k, &a["wert"])) => {}
                 _ => return Err(format!("Stage Ingest ändert am Take „{feld}“ nicht")),
             }
         }
@@ -767,6 +775,111 @@ impl Plate {
         } else {
             Err(format!("Tilt/Roll am Take nicht überall: {}", fehler.join("; ")))
         }
+    }
+
+    /// Kamerawerte an den Takes eines Projekts nachführen, die der Ingest aus einem Clip angelegt hat (`kamera.quelle`
+    /// „ale“), aus `clip.technik` ihres massgebenden Clips (`take_aus_clip::kamera_abweichungen`). Gibt die Zahl der
+    /// geschriebenen Werte zurück; ohne `clip.technik` (vor 0031) nichts.
+    pub fn kamera_nachfuehren(&self, z: &Zugang, projekt_id: &str) -> Result<usize, String> {
+        if !self.technik_spalte_da(z) {
+            return Ok(0);
+        }
+        let zeilen = self.lesen(
+            z,
+            &format!(
+                "clip?projekt_id=eq.{}&geloescht=not.is.true&take_id=not.is.null&select=take_id",
+                url_teil(projekt_id)
+            ),
+        )?;
+        let mut take_ids: Vec<String> =
+            zeilen.as_array().into_iter().flatten().map(|c| text(&c["take_id"])).filter(|t| !t.is_empty()).collect();
+        take_ids.sort();
+        take_ids.dedup();
+        let mut liste = Vec::new();
+        for teil in take_ids.chunks(50) {
+            let ids: Vec<String> = teil.iter().map(|t| url_teil(t)).collect();
+            let takes = self.lesen(z, &format!("take?id=in.({})&select=id,kamera,geloescht", ids.join(",")))?;
+            let takes: Vec<Value> = takes
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|t| t["kamera"]["quelle"] == "ale" && t["geloescht"] != true)
+                .cloned()
+                .collect();
+            if takes.is_empty() {
+                continue;
+            }
+            let ale: Vec<String> = takes.iter().map(|t| url_teil(&text(&t["id"]))).collect();
+            let clips = self.lesen(
+                z,
+                &format!(
+                    "clip?take_id=in.({})&geloescht=not.is.true&select=take_id,name,technik,geaendert_am,felder_zeit",
+                    ale.join(",")
+                ),
+            )?;
+            let clips = clips.as_array().cloned().unwrap_or_default();
+            liste.extend(crate::take_aus_clip::kamera_abweichungen(&takes, &clips));
+        }
+        let mut gut = 0;
+        let mut fehler = Vec::new();
+        for teil in liste.chunks(50) {
+            let a = crate::take_aus_clip::kamera_aenderungen(teil, chrono::Utc::now(), ulid_aehnlich);
+            let body = json!({ "p_geraet": geraet_name(), "p_aenderungen": a });
+            for x in self.anwenden(z, &body)?.as_array().into_iter().flatten() {
+                match x["ergebnis"].as_str() {
+                    Some("uebernommen" | "aelter" | "doppelt") => gut += 1,
+                    e => fehler.push(format!("{} {}", e.unwrap_or("?"), x["grund"].as_str().unwrap_or_default())),
+                }
+            }
+        }
+        if fehler.is_empty() {
+            Ok(gut)
+        } else {
+            Err(format!("Kamerawerte am Take nicht überall: {}", fehler.join("; ")))
+        }
+    }
+
+    /// Einstellungen der Oberfläche am Konto: `user_metadata.stage_ingest` (Marlon, 17.10.2026: Spalten der Projektseite
+    /// auf allen Ingest-Rechnern gleich; mit dem Plate Assistant abgestimmt, keine Migration). Nur für die Oberfläche, nie
+    /// für Rechte: Jeder Benutzer kann sie selbst ändern. `Null`, wenn nichts gespeichert ist.
+    pub fn oberflaeche_lesen(&self, z: &Zugang) -> Result<Value, String> {
+        Ok(self.benutzer(z, None)?["user_metadata"]["stage_ingest"].clone())
+    }
+
+    /// Schreibt einen Teil von `stage_ingest`. GoTrue führt nur die oberste Ebene zusammen, deshalb immer das ganze Objekt
+    /// lesen, ändern, zurückschreiben (Plate Assistant); schreiben zwei Rechner gleichzeitig, gilt der letzte. Klein halten:
+    /// Der Wert steht im Token jedes Geräts dieses Kontos.
+    pub fn oberflaeche_schreiben(&self, z: &Zugang, teil: &str, wert: Value) -> Result<(), String> {
+        let mut alles = self.oberflaeche_lesen(z)?;
+        if !alles.is_object() {
+            alles = json!({});
+        }
+        alles[teil] = wert;
+        if alles.to_string().len() > OBERFLAECHE_HOECHSTENS {
+            return Err("Einstellungen zu gross für das Konto".into());
+        }
+        self.benutzer(z, Some(json!({ "data": { "stage_ingest": alles } }))).map(|_| ())
+    }
+
+    /// `GET /auth/v1/user` bzw. mit `aendern` `PUT`; bei 401 einmal neu anmelden.
+    fn benutzer(&self, z: &Zugang, aendern: Option<Value>) -> Result<Value, String> {
+        let url = format!("{}/auth/v1/user", z.adresse.trim_end_matches('/'));
+        for neu in [false, true] {
+            let token = self.token(z, neu)?;
+            let anfrage = |a: ureq::Request| {
+                a.set("apikey", &key_bereinigen(&z.anon_key)).set("Authorization", &format!("Bearer {token}"))
+            };
+            let antwort = match &aendern {
+                Some(body) => anfrage(agent().put(&url)).send_json(body.clone()),
+                None => anfrage(agent().get(&url)).call(),
+            };
+            match antwort {
+                Ok(a) => return a.into_json().map_err(|e| e.to_string()),
+                Err(ureq::Error::Status(401, _)) if !neu => continue,
+                Err(e) => return Err(fehler(e)),
+            }
+        }
+        Err("Anmeldung beim Plate Assistant abgelehnt".into())
     }
 
     /// Ändert einen bestehenden Take (eine Änderung `take`, Feld `clip` oder `geloescht`).

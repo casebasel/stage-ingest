@@ -363,6 +363,45 @@ fn technik_in_datenbank(
     p.technik_schreiben(z, &neu)
 }
 
+/// Gewählte Spalten der Projektseite am Konto (auf allen Ingest-Rechnern gleich; Marlon, 17.10.2026). `None`, wenn das
+/// Konto noch keine hat.
+#[tauri::command]
+async fn spalten_lesen(
+    plate: State<'_, Arc<plate::Plate>>,
+    zugang: plate::Zugang,
+) -> Result<Option<Vec<String>>, String> {
+    let p = Arc::clone(&plate);
+    im_hintergrund(move || {
+        let v = p.oberflaeche_lesen(&zugang)?;
+        Ok(serde_json::from_value::<Vec<String>>(v["spalten"].clone()).ok().filter(|s| !s.is_empty()))
+    })
+    .await
+}
+
+/// Gewählte Spalten am Konto speichern.
+#[tauri::command]
+async fn spalten_speichern(
+    plate: State<'_, Arc<plate::Plate>>,
+    zugang: plate::Zugang,
+    spalten: Vec<String>,
+) -> Result<(), String> {
+    let p = Arc::clone(&plate);
+    im_hintergrund(move || p.oberflaeche_schreiben(&zugang, "spalten", serde_json::json!(spalten))).await
+}
+
+/// Projektseite: Kamerawerte an den Takes nachführen, die der Ingest aus einem Clip angelegt hat (Marlon, 17.10.2026;
+/// Regeln vom Plate Assistant, siehe `take_aus_clip::kamera_abweichungen`). Nach `technik_nachtragen`, denn die Werte
+/// kommen aus `clip.technik`. Gibt die Zahl der geschriebenen Werte zurück.
+#[tauri::command]
+async fn kamera_nachfuehren(
+    plate: State<'_, Arc<plate::Plate>>,
+    zugang: plate::Zugang,
+    projekt: PlateProjekt,
+) -> Result<usize, String> {
+    let p = Arc::clone(&plate);
+    im_hintergrund(move || p.kamera_nachfuehren(&zugang, &projekt.id)).await
+}
+
 /// Projektseite: `clip.technik` für ältere Karten nachtragen, deren Kopie hier erreichbar ist (Marlon, 17.10.2026: „Also
 /// alles kommt in die Datenbank“). Nur Clips ohne Wert, höchstens 100 je Aufruf (liest die Köpfe der Clipdateien).
 /// Gibt die Zahl der geschriebenen zurück.
@@ -3012,6 +3051,9 @@ pub fn run() {
             einstellung_art_aendern,
             aus_clip_nachtragen,
             technik_nachtragen,
+            kamera_nachfuehren,
+            spalten_lesen,
+            spalten_speichern,
             zur_seite_liste,
             studio_take_bewerten,
             zur_seite_wegwerfen,

@@ -475,12 +475,15 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
         );
       }
       // Alle Werte aus den Dateien in die Datenbank (`clip.technik`), für ältere Karten mit erreichbarer Kopie: im
-      // Hintergrund, je Sitzung und Projekt einmal (höchstens 100 Clips je Durchgang).
+      // Hintergrund, je Sitzung und Projekt einmal (höchstens 100 Clips je Durchgang). Danach die Kamerawerte an den
+      // Takes, die der Ingest aus Clips angelegt hat (Marlon, 17.10.2026; Regeln vom Plate Assistant).
       if (konto.darfSchreiben && p.id && !lauf.laeuft && !technikVersucht.current.has(p.id)) {
         technikVersucht.current.add(p.id);
-        invoke<number>("technik_nachtragen", { zugang: konto.zugang, projekt: { id: p.id, kurzname: p.kurzname }, basis: e.ziele }).catch(
-          (err) => setNachgetragen({ ton: "warn", text: `Werte der Dateien nicht in die Datenbank nachgetragen: ${String(err)}` }),
-        );
+        const projekt = { id: p.id, kurzname: p.kurzname };
+        invoke<number>("technik_nachtragen", { zugang: konto.zugang, projekt, basis: e.ziele })
+          .catch((err) => setNachgetragen({ ton: "warn", text: `Werte der Dateien nicht in die Datenbank nachgetragen: ${String(err)}` }))
+          .then(() => invoke<number>("kamera_nachfuehren", { zugang: konto.zugang, projekt }))
+          .catch((err) => setNachgetragen({ ton: "warn", text: `Kamerawerte nicht an alle Takes nachgeführt: ${String(err)}` }));
       }
       // Eindeutige Zuordnungen, die die App erst nach dem Einlesen erkannt hat (Clipname von der Kamera am Take bestätigt),
       // in Datenbank und Zusammenfassungen nachtragen (Marlon, 17.10.2026: „automatisch nachtragen“), dann neu laden.

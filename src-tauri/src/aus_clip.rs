@@ -75,10 +75,12 @@ fn buchstabe(name: &str) -> Option<char> {
 /// kleinste Buchstabe, bei gleicher Kamera der jüngere; Clips ohne Buchstaben nur, wenn keiner mit Buchstaben da ist.
 /// Sein Wert gerundet, ohne Wert leer (`Null`). Ohne Clip ebenfalls leer.
 pub fn soll(clips: &[&Clip]) -> Value {
-    let massgebend = clips.iter().min_by_key(|c| {
-        (buchstabe(&c.name).is_none(), buchstabe(&c.name), std::cmp::Reverse(c.zeit), c.name.to_uppercase())
-    });
-    massgebend.and_then(|c| gerundet(&c.aus_clip)).unwrap_or(Value::Null)
+    clips.iter().min_by_key(|c| rang(c)).and_then(|c| gerundet(&c.aus_clip)).unwrap_or(Value::Null)
+}
+
+/// Reihenfolge der Clips eines Takes, der kleinste ist massgebend (auch für `take.kamera`, `take_aus_clip`).
+pub fn rang(c: &Clip) -> impl Ord {
+    (buchstabe(&c.name).is_none(), buchstabe(&c.name), std::cmp::Reverse(c.zeit), c.name.to_uppercase())
 }
 
 /// Gleich, wenn jeder der vier Werte gleich ist (beide fehlen oder dieselbe Zahl); leer ist gleich leer.

@@ -312,6 +312,12 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
     return { neu: 14, gesendet: 14, offen: 0, abgelehnt: 0, fehler: null };
   },
   ausgang_stand: () => ({ neu: 0, gesendet: 0, offen: 0, abgelehnt: 0, fehler: null }),
+  spalten_lesen: async () => {
+    await warte(300);
+    return null;
+  },
+  spalten_speichern: async () => null,
+  kamera_nachfuehren: async () => 0,
   take_wiederherstellen: async () => {
     await warte(600);
     return null;

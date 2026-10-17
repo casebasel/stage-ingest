@@ -1,11 +1,12 @@
 // Spalten der Take-Tabellen (Marlon, 08.10.2026): alles, was es zu einem Take gibt, als Spalte wählbar, gemerkt pro
-// Rechner. Quellen: Plate Assistant (Take, Plate, Kamerawerte von Hand/CAP), Kopie des Clips (Container und
+// Rechner und am Konto, damit alle Ingest-Rechner dieselben zeigen (17.10.2026). Quellen: Plate Assistant (Take, Plate, Kamerawerte von Hand/CAP), Kopie des Clips (Container und
 // Metadaten, eigener Leser) und ART CMD (CSV in 05_METADATEN). Namen wie im Stage-CSV für Resolve (`export.ts`),
 // damit Konsole und Ingest dasselbe sagen. Technische Werte werden erst gelesen, wenn eine solche Spalte sichtbar ist.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Columns3 } from "lucide-react";
 import { gemerkt, merken, useEinstellungen } from "../einstellungen";
+import { useKonto, type Zugang } from "../konto";
 
 export type TakeMitWerten = {
   id: string;
@@ -282,10 +283,83 @@ function weitere(takes: TakeMitWerten[], technik: Record<string, Technik>): Spal
 
 const STANDARD = ["art", "clip", "karte", "stand"];
 
-// Gewählte Spalten (gemerkt) und der Katalog samt Grundspalten der Tabelle.
+// Eine Wahl für alle Take-Tabellen: gemerkt auf diesem Rechner (ohne Netz) und am Konto (`user_metadata.stage_ingest`,
+// mit dem Plate Assistant abgestimmt), damit alle Ingest-Rechner dieselben Spalten zeigen (Marlon, 17.10.2026). Beim
+// Öffnen der Projektseite gilt die Wahl des Kontos (höchstens jede Minute gefragt), jede Änderung geht dorthin.
+let spaltenWahl: string[] = gemerkt("takeSpalten", STANDARD);
+const spaltenHoerer = new Set<(an: string[]) => void>();
+// `ausstehend`: hier geändert und noch nicht am Konto. Solange gilt die Wahl von hier, nie die ältere des Kontos.
+const konto = { schluessel: "", bereit: false, bekannt: "", gelesenUm: 0, ausstehend: false, warten: 0 };
+
+function spaltenSetzen(an: string[]) {
+  spaltenWahl = an;
+  merken("takeSpalten", an);
+  spaltenHoerer.forEach((h) => h(an));
+}
+
+function amKontoLesen(zugang: Zugang) {
+  const schluessel = `${zugang.adresse}|${zugang.email}`;
+  if (konto.schluessel === schluessel && Date.now() - konto.gelesenUm < 50_000) return;
+  if (konto.schluessel !== schluessel) Object.assign(konto, { schluessel, bereit: false, bekannt: "" });
+  konto.gelesenUm = Date.now();
+  invoke<string[] | null>("spalten_lesen", { zugang })
+    .then((s) => {
+      if (konto.schluessel !== schluessel) return;
+      konto.bereit = true;
+      if (s?.length) konto.bekannt = JSON.stringify(s);
+      // Hier geändert: Das gilt und geht ans Konto. Sonst gilt die Wahl des Kontos; hat es keine, die von hier.
+      if (konto.ausstehend || !s?.length) amKontoSchreiben(zugang);
+      else if (konto.bekannt !== JSON.stringify(spaltenWahl)) spaltenSetzen(s);
+    })
+    .catch(() => {
+      // Ohne Antwort nichts schreiben (sonst überschriebe eine alte Wahl die des Kontos); nächster Versuch beim Öffnen.
+      if (konto.schluessel === schluessel) konto.gelesenUm = 0;
+    });
+}
+
+function amKontoSchreiben(zugang: Zugang) {
+  window.clearTimeout(konto.warten);
+  konto.warten = window.setTimeout(() => {
+    const an = spaltenWahl;
+    const text = JSON.stringify(an);
+    if (!konto.bereit) return;
+    if (text === konto.bekannt) {
+      konto.ausstehend = false;
+      return;
+    }
+    // Klein halten (steht im Token jedes Geräts des Kontos); zu viele Spalten bleiben nur hier.
+    if (text.length > 1800) return;
+    invoke("spalten_speichern", { zugang, spalten: an })
+      .then(() => {
+        konto.bekannt = text;
+        if (spaltenWahl === an) konto.ausstehend = false;
+      })
+      .catch(() => {});
+  }, 1500);
+}
+
+// Gewählte Spalten und der Katalog samt Grundspalten der Tabelle.
 export function useTakeSpalten(grund: Spalte[], takes: TakeMitWerten[]) {
-  const [an, setAn] = useState<string[]>(() => gemerkt("takeSpalten", STANDARD));
-  useEffect(() => merken("takeSpalten", an), [an]);
+  const [an, setAnHier] = useState<string[]>(spaltenWahl);
+  useEffect(() => {
+    spaltenHoerer.add(setAnHier);
+    setAnHier(spaltenWahl);
+    return () => void spaltenHoerer.delete(setAnHier);
+  }, []);
+  const k = useKonto();
+  const zugang = k.verbindung === "verbunden" ? k.zugang : null;
+  // Beim Öffnen und solange die Tabelle offen ist: was ein anderer Rechner gewählt hat, kommt innert einer Minute.
+  useEffect(() => {
+    if (!zugang) return;
+    amKontoLesen(zugang);
+    const t = window.setInterval(() => amKontoLesen(zugang), 60_000);
+    return () => window.clearInterval(t);
+  }, [zugang]);
+  const setAn = (neu: string[]) => {
+    konto.ausstehend = true;
+    spaltenSetzen(neu);
+    if (zugang) amKontoSchreiben(zugang);
+  };
   const [menueOffen, setMenueOffen] = useState(false);
   // Technik laden, wenn eine sichtbare Spalte sie braucht oder das Menü offen ist (dann zeigt es auch die rohen Felder).
   const brauchtTechnik =

@@ -28,25 +28,28 @@ pub struct Anfrage {
     pub aufnehmen: Option<String>,
 }
 
-/// Kamerawerte der Spalten (`technik`) → Schlüssel von `take.kamera` (Vertrag mit der Stage).
+/// Spalte (`technik`) → Schlüssel von `take.kamera` (Vertrag mit der Stage), als Zahl oder Text.
+const KAMERA: [(&str, &str, bool); 12] = [
+    ("kameramodell", "modell", false),
+    ("seriennummer", "seriennummer", false),
+    ("shutter", "shutter", false),
+    ("nd", "nd", false),
+    ("look", "look", false),
+    ("fokus", "fokus", false),
+    ("blende", "blende", false),
+    ("sensorFps", "sensorFps", true),
+    ("ei", "iso", true),
+    ("weissK", "weissK", true),
+    ("tint", "tint", true),
+    // Nur mit echten Objektivdaten (ART CMD liefert die Brennweite nur dann).
+    ("brennweite", "brennweiteMm", true),
+];
+
+/// Kamerawerte der Spalten (`technik`) → `take.kamera`.
 fn kamera(w: &std::collections::BTreeMap<String, String>) -> Value {
     let mut k = Map::new();
     let zahl = |s: &str| s.replace(',', ".").trim().parse::<f64>().ok().map(|f| json!(f));
-    for (von, nach, als_zahl) in [
-        ("kameramodell", "modell", false),
-        ("seriennummer", "seriennummer", false),
-        ("shutter", "shutter", false),
-        ("nd", "nd", false),
-        ("look", "look", false),
-        ("fokus", "fokus", false),
-        ("blende", "blende", false),
-        ("sensorFps", "sensorFps", true),
-        ("ei", "iso", true),
-        ("weissK", "weissK", true),
-        ("tint", "tint", true),
-        // Nur mit echten Objektivdaten (ART CMD liefert die Brennweite nur dann).
-        ("brennweite", "brennweiteMm", true),
-    ] {
+    for (von, nach, als_zahl) in KAMERA {
         if let Some(v) = w.get(von).map(|v| v.trim()).filter(|v| !v.is_empty() && !v.contains('…')) {
             let wert = if als_zahl { zahl(v) } else { Some(json!(v)) };
             if let Some(wert) = wert {
@@ -58,6 +61,82 @@ fn kamera(w: &std::collections::BTreeMap<String, String>) -> Value {
     // Timecode des Clips, keine Klappe des iPhones (Simulation 17.10.2026, siehe `plate::aus_clip_angelegt`).
     k.insert("quelle".into(), json!("ale"));
     Value::Object(k)
+}
+
+/// Blende oder Fokus von 0: kein Wert (ohne Objektivdaten schrieben frühere Versionen den rohen Encoderwert „0“).
+fn objektiv_null(schluessel: &str, w: &Value) -> bool {
+    matches!(schluessel, "blende" | "fokus")
+        && match w {
+            Value::Number(n) => n.as_f64() == Some(0.0),
+            Value::String(t) => ingest_kern::artcmd::zahl(t) == Some(0.0),
+            _ => false,
+        }
+}
+
+/// Darf der Ingest `take.kamera.<schluessel>` so schreiben (Sperre in `plate.rs`)? Nur die Schlüssel, die er beim Anlegen
+/// aus dem Clip schreibt, nie `quelle`; Text oder Zahl, Blende und Fokus nie 0, `null` nur für sie (entfernt eine alte
+/// „0“; Plate Assistant, 17.10.2026).
+pub fn kamera_wert_gueltig(schluessel: &str, w: &Value) -> bool {
+    KAMERA.iter().any(|(_, nach, _)| *nach == schluessel)
+        && match w {
+            Value::Null => matches!(schluessel, "blende" | "fokus"),
+            Value::String(t) => !t.trim().is_empty() && !objektiv_null(schluessel, w),
+            Value::Number(_) => !objektiv_null(schluessel, w),
+            _ => false,
+        }
+}
+
+/// Kamerawerte an Takes aus Clips (`kamera.quelle` „ale“) nachführen (Marlon, 17.10.2026; Regeln vom Plate Assistant,
+/// Systemkarte ENTSCHEIDUNGEN „Kamerawerte aus der Datei“). Je Take zählt der massgebende Clip wie bei `aus_clip`, seine
+/// Werte aus `clip.technik` wie beim Anlegen. Geschrieben wird je Schlüssel, nur was der Clip liefert und was abweicht,
+/// nie `quelle`; eine Blende oder ein Fokus von 0 aus früheren Versionen wird entfernt (`null`). Gelöschte Takes und
+/// Takes mit anderer Quelle bleiben, wie sie sind. `takes`: Zeilen mit `id`, `kamera`, `geloescht`; `clips`: Zeilen mit
+/// `take_id`, `name`, `technik`, `geaendert_am`, `felder_zeit`. Ergebnis: (Take, Feld `kamera.<schlüssel>`, Wert).
+pub fn kamera_abweichungen(takes: &[Value], clips: &[Value]) -> Vec<(String, String, Value)> {
+    let gleich = |a: &Value, b: &Value| match (a.as_f64(), b.as_f64()) {
+        (Some(x), Some(y)) => (x - y).abs() < 1e-9,
+        _ => a == b,
+    };
+    let mut aus = Vec::new();
+    for t in takes.iter().filter(|t| t["kamera"]["quelle"] == "ale" && t["geloescht"] != true) {
+        let id = t["id"].as_str().unwrap_or_default();
+        let massgebend = clips
+            .iter()
+            .filter(|c| c["take_id"] == id)
+            .map(|c| (crate::aus_clip::Clip::aus_zeile(c), &c["technik"]))
+            .min_by(|(a, _), (b, _)| crate::aus_clip::rang(a).cmp(&crate::aus_clip::rang(b)));
+        let Some(technik) = massgebend.and_then(|(_, t)| t.as_object()) else { continue };
+        let werte: std::collections::BTreeMap<String, String> =
+            technik.iter().filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_owned()))).collect();
+        let soll = kamera(&werte);
+        let ist = &t["kamera"];
+        for (k, v) in soll.as_object().into_iter().flatten().filter(|(k, _)| k.as_str() != "quelle") {
+            if !gleich(&ist[k], v) && kamera_wert_gueltig(k, v) {
+                aus.push((id.to_owned(), format!("kamera.{k}"), v.clone()));
+            }
+        }
+        for k in ["blende", "fokus"] {
+            if soll.get(k).is_none() && objektiv_null(k, &ist[k]) {
+                aus.push((id.to_owned(), format!("kamera.{k}"), Value::Null));
+            }
+        }
+    }
+    aus
+}
+
+/// Die Änderungen dazu für `aenderungen_anwenden`.
+pub fn kamera_aenderungen(
+    liste: &[(String, String, Value)],
+    jetzt: chrono::DateTime<Utc>,
+    mut neue_id: impl FnMut() -> String,
+) -> Vec<Value> {
+    liste
+        .iter()
+        .map(|(t, feld, w)| {
+            json!({ "id": neue_id(), "tabelle": "take", "datensatz": t, "feld": feld, "wert": w,
+                    "zeit": jetzt.timestamp_micros() })
+        })
+        .collect()
 }
 
 /// Clipname, wie der Ingest ihn an einen Take schreibt: ohne Endung, gross, ohne Leerzeichen, höchstens 100 Zeichen.
@@ -207,5 +286,58 @@ mod tests {
             assert!(t.get(leer).is_none(), "{leer} nicht senden");
         }
         crate::plate::aenderungen_pruefen(&json!({ "p_aenderungen": [v] })).unwrap();
+    }
+
+    /// Wie Predigerhof Plate 6 Take 7 (17.10.2026, Seriennummer erfunden): Take aus einem Clip mit Blende „0“ und ND als
+    /// Kommazahl aus einer früheren Version.
+    #[test]
+    fn kamerawerte_an_takes_aus_clips_nachfuehren() {
+        let alt = json!({ "nd": "1.2000000476837158", "iso": 800.0, "tint": 0.0, "blende": "0", "modell": "ARRI ALEXA Mini",
+                          "quelle": "ale", "weissK": 5600.0, "brennweiteMm": 35.0, "seriennummer": "12345" });
+        let technik = json!({ "kameramodell": "ARRI ALEXA Mini", "seriennummer": "12345", "shutter": "180.0",
+                              "nd": "ND 1.2", "look": "ARRI 709", "sensorFps": "25", "ei": "800", "weissK": "5600",
+                              "tint": "0", "brennweite": "35", "gamma": "LogC3", "kamerawerte": { "iso": 800 },
+                              "artcmd:filter/ndFilterDensity": "1.2000000476837158" });
+        let takes = vec![
+            json!({ "id": "T7", "kamera": alt }),
+            // CAP und von Hand bleiben, gelöschte auch.
+            json!({ "id": "CAP", "kamera": { "quelle": "cap", "blende": "0" } }),
+            json!({ "id": "WEG", "kamera": { "quelle": "ale", "blende": "0" }, "geloescht": true }),
+            // Eine Blende von Hand am Take aus einem Clip bleibt stehen.
+            json!({ "id": "HAND", "kamera": { "quelle": "ale", "blende": "T2.8", "nd": "ND 1.2" } }),
+        ];
+        let clip = |take: &str, name: &str, t: &Value| json!({ "take_id": take, "name": name, "technik": t, "geaendert_am": "2026-10-17T20:00:00Z" });
+        let b_kamera = json!({ "nd": "ND 2.1", "shutter": "172.8" });
+        let clips = vec![
+            clip("T7", "B003C001_120101_R1AB", &b_kamera),
+            clip("T7", "A010C027_120101_R132", &technik),
+            clip("CAP", "A010C001_120101_R132", &technik),
+            clip("WEG", "A010C002_120101_R132", &technik),
+            clip("HAND", "A010C003_120101_R132", &json!({ "nd": "ND 1.2" })),
+        ];
+        let mut a = kamera_abweichungen(&takes, &clips);
+        a.sort_by(|x, y| (&x.0, &x.1).cmp(&(&y.0, &y.1)));
+        let erwartet = vec![
+            ("T7".to_owned(), "kamera.blende".to_owned(), Value::Null),
+            ("T7".into(), "kamera.look".into(), json!("ARRI 709")),
+            ("T7".into(), "kamera.nd".into(), json!("ND 1.2")),
+            ("T7".into(), "kamera.sensorFps".into(), json!(25.0)),
+            ("T7".into(), "kamera.shutter".into(), json!("180.0")),
+        ];
+        assert_eq!(a, erwartet, "A-Kamera massgebend, nur Abweichungen, nie quelle, 800 = 800.0");
+        let body = json!({ "p_aenderungen": kamera_aenderungen(&a, Utc::now(), || "X".into()) });
+        crate::plate::aenderungen_pruefen(&body).unwrap();
+        // Nie `quelle`, nie eine Blende von 0, `null` nur für Blende und Fokus, nur bekannte Schlüssel.
+        for (feld, wert) in [
+            ("kamera.quelle", json!("ale")),
+            ("kamera.blende", json!("0")),
+            ("kamera.fokus", json!(0)),
+            ("kamera.iso", Value::Null),
+            ("kamera.gamma", json!("LogC3")),
+            ("kamera", json!({ "nd": "ND 1.2" })),
+        ] {
+            let a = json!({ "p_aenderungen": [{ "id": "X", "tabelle": "take", "datensatz": "T7", "feld": feld, "wert": wert }] });
+            assert!(crate::plate::aenderungen_pruefen(&a).is_err(), "{feld} = {wert}");
+        }
     }
 }
