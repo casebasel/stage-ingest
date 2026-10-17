@@ -151,6 +151,97 @@ export type VerlaufEintrag = {
 };
 export const verlauf = () => invoke<VerlaufEintrag[]>("verlauf");
 
+/** Generation der ASC-MHL-Historie einer Kopie (`transfer` = eingelesen, `in-place` = nachgeprüft). */
+export type MhlGeneration = {
+  nr: number;
+  datei: string;
+  zeit: string;
+  rechner: string;
+  werkzeug: string;
+  version: string;
+  prozess: string;
+  dateien: number;
+};
+export type ProtokollKopie = {
+  ordner: string;
+  ablage: string | null;
+  erreichbar: boolean;
+  /** Urteil beim Einlesen, wenn dieser Rechner eingelesen hat. */
+  gut: boolean | null;
+  bericht: string | null;
+  dateien: number | null;
+  bytes: number | null;
+  zuletzt: MhlGeneration | null;
+};
+export type ProtokollKarte = {
+  karte: string;
+  projekt: string | null;
+  drehOrdner: string | null;
+  beginn: string;
+  dateien: number;
+  bytes: number;
+  sicher: boolean;
+  grund: string;
+  unabhaengigeKopien: number;
+  kopien: ProtokollKopie[];
+};
+export type DateiStand =
+  | "geprueft"
+  | "fehlt"
+  | "anders"
+  | "fehlgeschlagen"
+  | "nichtMehrDa"
+  | "ungeprueft"
+  | "geloescht"
+  | "unbekannt";
+/** Von Hand gelöscht: Clip, Zeit (RFC 3339) und „Benutzer auf Rechner“ aus dem Löschprotokoll. */
+export type Loeschvermerk = { clip: string; zeit: string; benutzer: string };
+export type DateiZeile = {
+  pfad: string;
+  groesse: number;
+  /** Änderungszeit auf der Karte (`lastmodificationdate`), sonst leer. */
+  geaendert: string;
+  xxh128: string | null;
+  jeKopie: DateiStand[];
+  geloescht: Loeschvermerk | null;
+};
+export type KopieDetail = {
+  ordner: string;
+  erreichbar: boolean;
+  generationen: MhlGeneration[];
+  fehler: string | null;
+  /** Die Historie nennt diese von Hand gelöschten Dateien noch (16.10.2026: zwei Löschläufe gleichzeitig). */
+  nenntGeloeschte: string[];
+  /** Generationsdateien ausserhalb der Kette. */
+  ausserhalb: string[];
+};
+export type VorgangArt = "eingelesen" | "nachgeprueft" | "geloescht" | "bereinigt";
+export type Vorgang = {
+  zeit: string;
+  art: VorgangArt;
+  rechner: string;
+  benutzer: string;
+  werkzeug: string;
+  dateien: number | null;
+  clip: string | null;
+  historieNeu: boolean;
+  kopie: number;
+};
+export type ProtokollDetail = { kopien: KopieDetail[]; dateien: DateiZeile[]; verlauf: Vorgang[] };
+export type Bereinigt = {
+  geloeschte: string[];
+  ausserhalb: string[];
+  ablage: string | null;
+  generation: string | null;
+  protokoll: string | null;
+};
+/** Protokoll: alle eingelesenen Karten auf den Zielen (dazu die Ablagen) und im Verlauf dieses Rechners. */
+export const protokollListe = (basis: string[]) => invoke<ProtokollKarte[]>("protokoll_liste", { basis });
+/** Je Datei und Kopie der Stand laut ASC-MHL-Historie und Ordner, dazu der Verlauf. */
+export const protokollKarte = (ordner: string[]) => invoke<ProtokollDetail>("protokoll_karte", { ordner });
+/** ASC-MHL-Historie einer Kopie nach einem Löschen in Ordnung bringen (nichts wird gelöscht). */
+export const historieBereinigen = (ordner: string) => invoke<Bereinigt>("historie_bereinigen", { ordner });
+
 export type Nachpruefung = { ordner: string; generation: string; geprueft: number; abweichungen: Abweichung[] };
 export const zielNachpruefen = (ordner: string) => invoke<Nachpruefung>("ziel_nachpruefen", { ordner });
 

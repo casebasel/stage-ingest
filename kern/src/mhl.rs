@@ -449,6 +449,154 @@ fn historie_lesen(ordner: &Path) -> io::Result<Historie> {
     Ok(h)
 }
 
+/// Eine Generation der ASC-MHL-Historie, für das Protokoll.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Generation {
+    pub nr: usize,
+    pub datei: String,
+    /// `creationdate` (RFC 3339).
+    pub zeit: String,
+    pub rechner: String,
+    pub werkzeug: String,
+    pub version: String,
+    /// `transfer` (Dateien geschrieben) oder `in-place` (nur nachgeprüft).
+    pub prozess: String,
+    pub dateien: usize,
+}
+
+/// Eine Datei laut Historie: der neueste Eintrag.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MhlDatei {
+    pub pfad: String,
+    pub groesse: u64,
+    pub xxh128: Option<String>,
+    pub md5: Option<String>,
+    /// `original`, `verified` oder `failed` (ASC MHL).
+    pub aktion: String,
+    pub zeit: String,
+    pub generation: usize,
+    /// Änderungszeit der Datei auf der Karte (`lastmodificationdate`).
+    pub geaendert: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MhlProtokoll {
+    pub generationen: Vec<Generation>,
+    pub dateien: Vec<MhlDatei>,
+}
+
+/// Liest die ASC-MHL-Historie einer Kopie für das Protokoll (Marlon, 17.10.2026: „eine Protokollseite … ein sicheres
+/// Gefühl“): jede Generation (wann, auf welchem Rechner, womit, geschrieben oder nachgeprüft) und je Datei der neueste
+/// Eintrag (Grösse, Prüfsummen, Aktion). Liest nur die Historie, nicht die Dateien.
+pub fn protokoll(ziel: &Path) -> io::Result<MhlProtokoll> {
+    let mut generationen = Vec::new();
+    let mut dateien: BTreeMap<String, MhlDatei> = BTreeMap::new();
+    for (g, eintraege) in generationen_lesen(ziel)? {
+        generationen.push(g);
+        for e in eintraege {
+            dateien.insert(e.pfad.clone(), e);
+        }
+    }
+    Ok(MhlProtokoll { generationen, dateien: dateien.into_values().collect() })
+}
+
+/// Jede Generation der Kette mit allen ihren Einträgen, älteste zuerst.
+pub fn generationen_lesen(ziel: &Path) -> io::Result<Vec<(Generation, Vec<MhlDatei>)>> {
+    let ordner = ziel.join(ORDNER);
+    let h = historie_lesen(&ordner)?;
+    h.kette.iter().map(|(nr, datei, _)| generation_lesen(&ordner.join(datei), *nr, datei)).collect()
+}
+
+fn generation_lesen(datei: &Path, nr: usize, name: &str) -> io::Result<(Generation, Vec<MhlDatei>)> {
+    use quick_xml::events::Event;
+    let fehler = |e: quick_xml::Error| io::Error::new(io::ErrorKind::InvalidData, e.to_string());
+    let attribut = |e: &quick_xml::events::BytesStart, n: &[u8]| {
+        e.attributes()
+            .flatten()
+            .find(|a| a.key.local_name().as_ref() == n)
+            .map(|a| String::from_utf8_lossy(&a.value).into_owned())
+    };
+    let mut g = Generation {
+        nr,
+        datei: name.into(),
+        zeit: String::new(),
+        rechner: String::new(),
+        werkzeug: String::new(),
+        version: String::new(),
+        prozess: String::new(),
+        dateien: 0,
+    };
+    let mut aus = Vec::new();
+    let mut r = quick_xml::Reader::from_file(datei).map_err(fehler)?;
+    let mut puffer = Vec::new();
+    let (mut feld, mut in_hash) = (String::new(), false);
+    let mut d = MhlDatei {
+        pfad: String::new(),
+        groesse: 0,
+        xxh128: None,
+        md5: None,
+        aktion: String::new(),
+        zeit: String::new(),
+        generation: nr,
+        geaendert: String::new(),
+    };
+    loop {
+        match r.read_event_into(&mut puffer).map_err(fehler)? {
+            Event::Start(e) => {
+                feld = String::from_utf8_lossy(e.local_name().as_ref()).into_owned();
+                match feld.as_str() {
+                    "hash" => {
+                        in_hash = true;
+                        d = MhlDatei { pfad: String::new(), xxh128: None, md5: None, aktion: String::new(), ..d };
+                    }
+                    "path" if in_hash => {
+                        d.groesse = attribut(&e, b"size").and_then(|s| s.parse().ok()).unwrap_or(0);
+                        d.geaendert = attribut(&e, b"lastmodificationdate").unwrap_or_default();
+                    }
+                    "xxh128" | "md5" if in_hash => {
+                        // Eine fehlgeschlagene Prüfung gewinnt über eine gelungene desselben Eintrags.
+                        if d.aktion != "failed" {
+                            d.aktion = attribut(&e, b"action").unwrap_or_default();
+                        }
+                        d.zeit = attribut(&e, b"hashdate").unwrap_or_default();
+                    }
+                    "tool" => g.version = attribut(&e, b"version").unwrap_or_default(),
+                    _ => {}
+                }
+            }
+            Event::Text(t) => {
+                let text = t.unescape().map_err(fehler)?.into_owned();
+                match (in_hash, feld.as_str()) {
+                    (true, "path") => d.pfad = text,
+                    (true, "xxh128") => d.xxh128 = Some(text),
+                    (true, "md5") => d.md5 = Some(text),
+                    (false, "creationdate") => g.zeit = text,
+                    (false, "hostname") => g.rechner = text,
+                    (false, "tool") => g.werkzeug = text,
+                    (false, "process") => g.prozess = text,
+                    _ => {}
+                }
+            }
+            Event::End(e) if e.local_name().as_ref() == b"hash" => {
+                in_hash = false;
+                if !d.pfad.is_empty() {
+                    aus.push(d.clone());
+                }
+                feld.clear();
+            }
+            Event::End(_) => feld.clear(),
+            Event::Eof => break,
+            _ => {}
+        }
+        puffer.clear();
+    }
+    g.dateien = aus.len();
+    Ok((g, aus))
+}
+
 /// Dateihashes aller Generationen der Kette, ältere zuerst; spätere überschreiben.
 fn hashes_lesen(ordner: &Path, h: &mut Historie) -> io::Result<()> {
     use quick_xml::events::Event;
@@ -496,6 +644,24 @@ fn generationen_ohne_kette(ordner: &Path) -> io::Result<Vec<(usize, String, Stri
         };
         aus.push((nr, name, c4(&std::fs::read(e.path())?)));
     }
+    aus.sort();
+    Ok(aus)
+}
+
+/// Generationsdateien in `ascmhl/`, die die Kette nicht nennt, nach Namen. Die Referenz liest jede `.mhl` im Ordner, nicht
+/// nur die der Kette; zwei Löschläufe gleichzeitig hinterliessen am 16.10.2026 zwei „0001“ (A007R132). Ohne Kette leer
+/// (dann leitet [`kette_reparieren`] sie aus den Dateien ab).
+pub fn ausserhalb_der_kette(ziel: &Path) -> io::Result<Vec<String>> {
+    let ordner = ziel.join(ORDNER);
+    if !ordner.join(KETTE).exists() {
+        return Ok(vec![]);
+    }
+    let h = historie_lesen(&ordner)?;
+    let mut aus: Vec<String> = std::fs::read_dir(&ordner)?
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.ends_with(".mhl") && !n.starts_with("._") && !h.kette.iter().any(|k| &k.1 == n))
+        .collect();
     aus.sort();
     Ok(aus)
 }
@@ -576,6 +742,45 @@ mod tests {
             c4(b"abc"),
             "c45S4rnaTNWonxss1u8LzsaJdEph1AJhWUF4sh2waXKMsutyfAxg4ybUeuXVWS9HdNcEypmeXn8FZGonD4w1rj9DZp"
         );
+    }
+
+    #[test]
+    fn protokoll_liest_generationen_und_dateien() {
+        let t = tempfile::tempdir().unwrap();
+        let kopie = Kopie {
+            quelle: "karte".into(),
+            dateien: vec![datei("A001R132/A001C001.mxf", b"clip eins"), datei("A001R132/A001R132.ale", b"ale")],
+            ordner: vec!["A001R132".into()],
+            ausgelassen: vec![],
+            ziele: vec![],
+            beginn: Utc::now(),
+            ende: Utc::now(),
+        };
+        let angaben =
+            Angaben { werkzeug: "Stage Ingest".into(), version: "0.1.55".into(), zeit: Utc::now(), nur_pruefen: false };
+        schreiben(t.path(), &kopie, &angaben).unwrap();
+        schreiben(t.path(), &kopie, &Angaben { nur_pruefen: true, ..angaben }).unwrap();
+        let p = protokoll(t.path()).unwrap();
+        assert_eq!(p.generationen.len(), 2);
+        assert_eq!((p.generationen[0].prozess.as_str(), p.generationen[1].prozess.as_str()), ("transfer", "in-place"));
+        assert_eq!(
+            (p.generationen[0].werkzeug.as_str(), p.generationen[0].version.as_str()),
+            ("Stage Ingest", "0.1.55")
+        );
+        assert!(!p.generationen[0].rechner.is_empty() && !p.generationen[0].zeit.is_empty());
+        assert_eq!(p.dateien.len(), 2);
+        let clip = &p.dateien[0];
+        assert_eq!((clip.pfad.as_str(), clip.groesse, clip.aktion.as_str()), ("A001R132/A001C001.mxf", 9, "verified"));
+        assert_eq!(clip.generation, 2);
+        assert_eq!(clip.xxh128.as_deref(), Some(format!("{:032x}", xxh3_128(b"clip eins")).as_str()));
+        assert!(clip.geaendert.contains('T'), "{}", clip.geaendert);
+
+        // Ein zweiter Lauf schrieb dieselbe Nummer daneben (16.10.2026): nicht in der Kette.
+        assert!(ausserhalb_der_kette(t.path()).unwrap().is_empty());
+        let erste = t.path().join(ORDNER).join(&p.generationen[0].datei);
+        std::fs::copy(erste, t.path().join(ORDNER).join("0001_x_2026-10-15_230525Z.mhl")).unwrap();
+        assert_eq!(ausserhalb_der_kette(t.path()).unwrap(), ["0001_x_2026-10-15_230525Z.mhl"]);
+        assert_eq!(protokoll(t.path()).unwrap().generationen.len(), 2, "das Protokoll folgt der Kette");
     }
 
     fn datei(pfad: &str, inhalt: &[u8]) -> Datei {

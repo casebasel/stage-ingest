@@ -14,6 +14,7 @@ import {
   FileText,
   FolderOpen,
   HardDrive,
+  ListChecks,
   MemoryStick,
   Network,
   Plus,
@@ -40,7 +41,15 @@ import { Pfad, Status, dauerText, name, zahl, type Ton } from "../teile";
 
 const ALLE_MS = 3000;
 
-export function Einlesen({ pflicht, zurEinrichtung }: { pflicht: boolean; zurEinrichtung: () => void }) {
+export function Einlesen({
+  pflicht,
+  zurEinrichtung,
+  zumProtokoll,
+}: {
+  pflicht: boolean;
+  zurEinrichtung: () => void;
+  zumProtokoll: () => void;
+}) {
   const lauf = useLauf();
   const e = useEinstellungen();
 
@@ -91,7 +100,7 @@ export function Einlesen({ pflicht, zurEinrichtung }: { pflicht: boolean; zurEin
         {lauf.laeuft && lauf.phase !== "nachpruefen" ? (
           <Fortschritt />
         ) : lauf.ergebnis && !lauf.quelle ? (
-          <Urteil ergebnis={lauf.ergebnis} laufwerke={laufwerke} />
+          <Urteil ergebnis={lauf.ergebnis} laufwerke={laufwerke} zumProtokoll={zumProtokoll} />
         ) : (
           <Auftrag pflicht={pflicht} zurEinrichtung={zurEinrichtung} laufwerke={laufwerke} />
         )}
@@ -1020,7 +1029,15 @@ function Fortschritt() {
 
 type Reiter = "ziele" | "abgleich" | "dateien" | "metadaten";
 
-function Urteil({ ergebnis, laufwerke }: { ergebnis: KartenErgebnis; laufwerke: Laufwerk[] }) {
+function Urteil({
+  ergebnis,
+  laufwerke,
+  zumProtokoll,
+}: {
+  ergebnis: KartenErgebnis;
+  laufwerke: Laufwerk[];
+  zumProtokoll: () => void;
+}) {
   const lauf = useLauf();
   const { freigabe, urteile, kennungen, abgleich } = ergebnis;
   const fehlerhaft = urteile.some((u) => u.kopierfehler || u.abweichungen.length > 0);
@@ -1183,6 +1200,10 @@ function Urteil({ ergebnis, laufwerke }: { ergebnis: KartenErgebnis; laufwerke: 
               <FileText size={16} strokeWidth={1.75} aria-hidden /> Bericht öffnen
             </button>
           )}
+          {/* Jede Datei der Karte mit ihrem Haken je Kopie (Marlon, 17.10.2026: „ein sicheres Gefühl“). */}
+          <button className="knopf" onClick={zumProtokoll}>
+            <ListChecks size={16} strokeWidth={1.75} aria-hidden /> Im Protokoll ansehen
+          </button>
         </div>
       </section>
 

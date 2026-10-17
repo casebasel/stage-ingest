@@ -17,6 +17,10 @@ import { ExportDialog } from "./Export";
 import { Abspieler, type AbspielEintrag } from "./Abspieler";
 import { ClipMitBild, vorschauLaden, SpaltenKopf, SpaltenMenue, SpaltenZellen, useTakeSpalten, type Spalte, type TakeMitWerten } from "./TakeSpalten";
 
+// Ein Löschen nach dem anderen: Am 16.10.2026 liefen zwei gleichzeitig auf derselben Kopie, und die ASC-MHL-Historie
+// nannte danach einen gelöschten Clip noch. Die App lehnt ein zweites ab, solange eines läuft; hier wartet es in der Reihe.
+let loeschReihe: Promise<unknown> = Promise.resolve();
+
 type TakeStand = TakeMitWerten;
 type FotoStand = { id: string; art: string; pfad: string; takeId?: string | null; quelle?: string };
 type HdriStand = {
@@ -1403,9 +1407,14 @@ function ZuKlaeren({
       { title: "Clip endgültig löschen", kind: "warning", okLabel: "Endgültig löschen", cancelLabel: "Abbrechen" },
     );
     if (!ja) return;
-    setStand((s) => ({ ...s, [schluessel]: { ton: "laeuft", text: "Löscht …" } }));
+    setStand((s) => ({ ...s, [schluessel]: { ton: "laeuft", text: "Wartet, bis das Löschen davor fertig ist …" } }));
+    const auftrag = loeschReihe.then(() => {
+      setStand((s) => ({ ...s, [schluessel]: { ton: "laeuft", text: "Löscht …" } }));
+      return invoke("clip_loeschen", { zugang, dateien: c.dateien, clip: c.clip });
+    });
+    loeschReihe = auftrag.catch(() => undefined);
     try {
-      await invoke("clip_loeschen", { zugang, dateien: c.dateien, clip: c.clip });
+      await auftrag;
       gespeichert();
     } catch (e) {
       setStand((s) => ({ ...s, [schluessel]: { ton: "fehler", text: String(e) } }));

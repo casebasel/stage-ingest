@@ -2352,3 +2352,258 @@ input[type="checkbox"][role="switch"]:checked::before {
   font-family: var(--schrift);
   white-space: normal;
 }
+
+/* --- Protokoll: eingelesene Karten, ihre Kopien und je Datei der Beweis ------------------------------------------ */
+
+.protokoll {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  min-height: 0;
+  height: 100%;
+}
+@media (max-width: 1240px) {
+  .protokoll {
+    grid-template-columns: 250px minmax(0, 1fr);
+  }
+}
+.protokoll-suche {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 2px 10px;
+}
+.protokoll-suche .suche {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+.protokoll-liste ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.protokoll-karte-oben {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.protokoll-zeichen {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  vertical-align: middle;
+}
+.protokoll-zeichen > svg {
+  flex: none;
+}
+.protokoll-detail {
+  padding-bottom: 32px;
+}
+.protokoll-urteil {
+  display: grid;
+  gap: 4px;
+  margin: 14px 16px 6px;
+  padding: 12px 14px;
+  background: var(--panel-2);
+  border: 1px solid var(--linie);
+  border-radius: var(--rund);
+}
+.protokoll-urteil-ok {
+  background: var(--ok-grund);
+  border-color: var(--ok);
+}
+.protokoll-urteil-rot {
+  background: var(--rot-grund);
+  border-color: var(--rot);
+}
+.protokoll-urteil-warn {
+  background: var(--warn-grund);
+  border-color: var(--warn);
+}
+.protokoll-urteil .status {
+  font-size: 14px;
+}
+.protokoll-abschnitt {
+  margin: 18px 16px 0;
+  background: var(--panel);
+  border: 1px solid var(--linie);
+  border-radius: var(--rund);
+  overflow: hidden;
+}
+.protokoll-abschnitt > h3 {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--linie);
+  font-size: 13px;
+  font-weight: 650;
+}
+.protokoll-abschnitt .tabelle th {
+  position: static;
+}
+/* Dateien wie im Finder (Marlon, 17.10.2026): Liste mit Dreieck zum Aufklappen, neutralen Zeichen je Art, Zebrastreifen
+   statt Linien, Spalten Name · Geändert · Grösse · Art und je Kopie der Stand mit Zeichen und Wort. */
+.finder-knoepfe {
+  display: inline-flex;
+  align-self: center;
+  gap: 2px;
+  margin: -6px -6px -6px auto;
+}
+.finder-rahmen {
+  overflow-x: auto;
+}
+.finder {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.finder th {
+  padding: 0;
+  background: var(--panel);
+  border-bottom: 1px solid var(--linie);
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+}
+.finder th + th {
+  border-left: 1px solid var(--linie);
+}
+.finder-kopf,
+.finder-kopf-text {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 5px 10px;
+  text-align: inherit;
+}
+.finder-kopf {
+  cursor: default;
+}
+.finder-kopf:hover {
+  color: var(--text);
+}
+.finder-kopf:focus-visible {
+  outline-offset: -2px;
+}
+th.finder-zahl .finder-kopf {
+  justify-content: flex-end;
+}
+th.finder-name .finder-kopf {
+  padding-left: 25px;
+}
+.finder td {
+  height: 24px;
+  padding: 0 10px;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.finder tbody tr:nth-child(even) {
+  background: color-mix(in oklch, var(--panel-2) 55%, var(--panel));
+}
+.finder tbody tr:hover {
+  background: var(--hover);
+}
+.finder td.finder-name {
+  width: 55%;
+  max-width: 0;
+  padding-left: 0;
+}
+.finder-auf,
+.finder-datei {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  height: 24px;
+  padding-right: 4px;
+  color: var(--text);
+  text-align: left;
+}
+.finder-auf {
+  cursor: default;
+}
+.finder-auf:focus-visible {
+  outline-offset: -2px;
+  border-radius: var(--rund-klein);
+}
+.finder-dreieck {
+  flex: none;
+  width: 9px;
+  color: var(--text-3);
+  transition: transform 140ms var(--ease);
+}
+.finder-auf[aria-expanded="true"] .finder-dreieck {
+  transform: rotate(90deg);
+}
+.finder-auf:hover .finder-dreieck {
+  color: var(--text);
+}
+.finder-symbol {
+  flex: none;
+  color: var(--text-3);
+}
+.finder-symbol-ordner {
+  color: var(--text-2);
+  fill: color-mix(in oklch, var(--text-3) 28%, transparent);
+}
+.finder-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.finder-zahl {
+  width: 1%;
+  text-align: right;
+  color: var(--text-2);
+}
+.finder-art {
+  width: 1%;
+  color: var(--text-2);
+}
+.finder-stand-zelle {
+  width: 1%;
+}
+.finder-stand {
+  font-size: 12px;
+}
+.finder-weg .finder-text {
+  color: var(--text-3);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in oklch, var(--text-3) 60%, transparent);
+}
+.finder-weg .finder-symbol,
+.finder-weg .finder-zahl,
+.finder-weg .finder-art {
+  color: var(--text-aus);
+}
+@media (prefers-reduced-motion: reduce) {
+  .finder-dreieck {
+    transition: none;
+  }
+}
+.protokoll-erklaerung {
+  margin: 0;
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--linie);
+  font-size: 12px;
+}
+.protokoll-erklaerung > span {
+  display: block;
+  max-width: 90ch;
+}
+.protokoll-abschnitt td > .zahl {
+  white-space: nowrap;
+}
+/* Pfad der Kopie: schrumpft und kürzt von links, damit Stand, Zeit und Knöpfe Platz haben. */
+.protokoll-kopie {
+  width: 40%;
+  max-width: 0;
+}

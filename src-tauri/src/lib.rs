@@ -8,6 +8,7 @@ mod mittelbild;
 mod plate;
 mod plates;
 mod projekt;
+mod protokoll;
 mod qr;
 #[cfg(test)]
 mod simulation;
@@ -39,6 +40,25 @@ use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 struct Laufend {
     aktiv: Arc<AtomicBool>,
     abbruch: Arc<AtomicBool>,
+}
+
+/// Belegt [`Laufend::aktiv`] für einen Vorgang ohne Fortschritt (Löschen, Bereinigen) und gibt es am Ende frei, auch bei
+/// einem Fehler. Solange ist kein Kopieren, Prüfen oder zweites Löschen möglich und das Fenster bleibt offen.
+struct Belegt(Arc<AtomicBool>);
+
+impl Drop for Belegt {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
+fn belegen(laufend: &Laufend, nicht: &str) -> Result<Belegt, String> {
+    if laufend.aktiv.swap(true, Ordering::SeqCst) {
+        return Err(format!(
+            "Gerade läuft ein anderer Vorgang (Kopieren, Prüfen oder Löschen); {nicht}. Danach nochmals."
+        ));
+    }
+    Ok(Belegt(Arc::clone(&laufend.aktiv)))
 }
 
 #[derive(Debug, Deserialize)]
@@ -502,32 +522,32 @@ fn ohne_null(v: &mut serde_json::Value) {
 /// liegt in MHL und Bericht auf den Zielen.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct VerlaufEintrag {
-    beginn: String,
-    ende: String,
-    karte: String,
-    quelle: PathBuf,
-    dateien: usize,
-    bytes: u64,
-    sicher: bool,
-    grund: String,
-    ziele: Vec<VerlaufZiel>,
+pub(crate) struct VerlaufEintrag {
+    pub(crate) beginn: String,
+    pub(crate) ende: String,
+    pub(crate) karte: String,
+    pub(crate) quelle: PathBuf,
+    pub(crate) dateien: usize,
+    pub(crate) bytes: u64,
+    pub(crate) sicher: bool,
+    pub(crate) grund: String,
+    pub(crate) ziele: Vec<VerlaufZiel>,
     /// Kartengedächtnis (ab 0.1.18): Abdruck aller Dateien und die Clips, siehe `ingest_kern::gedaechtnis`.
     #[serde(default)]
-    fingerabdruck: String,
+    pub(crate) fingerabdruck: String,
     #[serde(default)]
-    clips: Vec<String>,
+    pub(crate) clips: Vec<String>,
     /// Probleme nach dem Bericht (siehe `KartenErgebnis::nachtraege`).
     #[serde(default)]
-    nachtraege: Vec<String>,
+    pub(crate) nachtraege: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct VerlaufZiel {
-    ordner: PathBuf,
-    gut: bool,
-    bericht: Option<PathBuf>,
+pub(crate) struct VerlaufZiel {
+    pub(crate) ordner: PathBuf,
+    pub(crate) gut: bool,
+    pub(crate) bericht: Option<PathBuf>,
 }
 
 fn verlauf_pfad(app: &AppHandle) -> Result<PathBuf, String> {
@@ -589,6 +609,46 @@ async fn karte_wiedererkennen(
                 sicher: e.sicher,
             }),
         ))
+    })
+    .await
+}
+
+/// Protokoll: alle eingelesenen Karten auf den eingetragenen Zielen, den Ablagen und im Verlauf dieses Rechners, mit
+/// ihren Kopien (siehe `protokoll`).
+#[tauri::command]
+async fn protokoll_liste(app: AppHandle, basis: Vec<PathBuf>) -> Result<Vec<protokoll::ProtokollKarte>, String> {
+    let pfad = verlauf_pfad(&app)?;
+    im_hintergrund(move || {
+        let text = std::fs::read_to_string(pfad).unwrap_or_default();
+        let verlauf: Vec<VerlaufEintrag> = text.lines().filter_map(|z| serde_json::from_str(z).ok()).collect();
+        Ok(protokoll::liste(&basis, &verlauf))
+    })
+    .await
+}
+
+/// Protokoll einer Karte: je Datei und Kopie der Stand laut ASC-MHL-Historie und Ordner.
+#[tauri::command]
+async fn protokoll_karte(ordner: Vec<PathBuf>) -> Result<protokoll::ProtokollDetail, String> {
+    im_hintergrund(move || Ok(protokoll::detail(&ordner))).await
+}
+
+/// Protokoll: die ASC-MHL-Historie einer Kopie nach einem Löschen in Ordnung bringen (`ingest_kern::loeschen::
+/// historie_bereinigen`). Nie während eines anderen Vorgangs.
+#[tauri::command]
+async fn historie_bereinigen(
+    app: AppHandle,
+    laufend: State<'_, Laufend>,
+    ordner: PathBuf,
+) -> Result<ingest_kern::loeschen::Bereinigt, String> {
+    let belegt = belegen(&laufend, "die Historie bleibt, wie sie ist")?;
+    let version = app.package_info().version.to_string();
+    im_hintergrund(move || {
+        let _belegt = belegt;
+        // Derselbe Zeitpunkt für Generation und Protokoll: Daran erkennt das Protokoll, dass die Generation dazugehört.
+        let jetzt = chrono::Utc::now();
+        let angaben = mhl::Angaben { werkzeug: "Stage Ingest".into(), version, zeit: jetzt, nur_pruefen: false };
+        ingest_kern::loeschen::historie_bereinigen(&ordner, &angaben, jetzt.with_timezone(&chrono::Local))
+            .map_err(|e| e.to_string())
     })
     .await
 }
@@ -1746,17 +1806,18 @@ async fn clip_loeschen(
     dateien: Vec<PathBuf>,
     clip: String,
 ) -> Result<ClipGeloescht, String> {
-    if laufend.aktiv.load(Ordering::SeqCst) {
-        return Err("Während des Kopierens wird nichts gelöscht. Danach nochmals versuchen.".into());
-    }
+    // Ein Löschen zur Zeit (16.10.2026: zwei gleichzeitig auf derselben Kopie, siehe `ingest_kern::loeschen`).
+    let belegt = belegen(&laufend, "gelöscht wird nichts")?;
     let version = app.package_info().version.to_string();
     let p = Arc::clone(&plate);
     im_hintergrund(move || {
+        let _belegt = belegt;
         let mut karte_id = None;
         let stamm = soll::ohne_endung(&clip).to_owned();
-        let angaben =
-            mhl::Angaben { werkzeug: "Stage Ingest".into(), version, zeit: chrono::Utc::now(), nur_pruefen: false };
-        let lokal = chrono::Local::now();
+        // Derselbe Zeitpunkt für Generation und Protokoll: Daran erkennt das Protokoll, dass die Generation dazugehört.
+        let jetzt = chrono::Utc::now();
+        let angaben = mhl::Angaben { werkzeug: "Stage Ingest".into(), version, zeit: jetzt, nur_pruefen: false };
+        let lokal = jetzt.with_timezone(&chrono::Local);
         let mut aus = ClipGeloescht { kopien: 0, dateien: 0, bytes: 0, protokolle: vec![] };
         let mut fehler: Vec<String> = Vec::new();
         for d in &dateien {
@@ -2413,6 +2474,9 @@ pub fn run() {
             take_loeschen,
             ohne_aufnahme_bestaetigen,
             stimmt_so,
+            protokoll_liste,
+            protokoll_karte,
+            historie_bereinigen,
             take_aus_clip,
             stage_projekt,
             projekt_uebersicht,

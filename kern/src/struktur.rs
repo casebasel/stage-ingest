@@ -8,6 +8,7 @@
 //!   03_TON/
 //!   04_BERICHTE/            PDF-Berichte
 //!   05_METADATEN/           ALE, Bewegungsdaten pro Clip (Phase 2)
+//!   07_RENDER/              Renders aus Unreal; gehört der Stage (Plugin 0.18.0, 17.10.2026), der Ingest schreibt nie hinein
 //! ```
 
 use std::path::{Path, PathBuf};

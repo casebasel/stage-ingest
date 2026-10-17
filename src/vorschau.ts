@@ -177,6 +177,84 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
     { beginn: "2026-10-28T09:45:00Z", ende: "", karte: "A001R131", quelle: "", dateien: 22, bytes: 41_200_000_000, sicher: true, grund: "2 unabhängige Kopien geprüft", ziele: [{ ordner: "", gut: true, bericht: "/x.pdf" }] },
     { beginn: "2026-10-27T16:10:00Z", ende: "", karte: "A001R130", quelle: "", dateien: 9, bytes: 12_800_000_000, sicher: false, grund: "nur 1 von 2 Kopien", ziele: [{ ordner: "", gut: true, bericht: null }] },
   ],
+  protokoll_liste: () => {
+    const gen = (zeit: string, rechner: string, prozess: string, dateien: number) => ({ nr: 1, datei: "0001.mhl", zeit, rechner, werkzeug: "Stage Ingest", version: "0.1.55", prozess, dateien });
+    const kopie = (ordner: string, ablage: string | null, erreichbar: boolean, dateien: number, zeit: string) => ({
+      ordner, ablage, erreichbar, gut: true, bericht: erreichbar ? "/x.pdf" : null, dateien: erreichbar ? dateien : null,
+      bytes: erreichbar ? dateien * 3.2e9 : null, zuletzt: erreichbar ? gen(zeit, "WIN-EDIT", "transfer", dateien) : null,
+    });
+    return [
+      { karte: "A001R132", projekt: "HAPPY_END", drehOrdner: "2026-10-28_RHEINUFER", beginn: "2026-10-28T13:55:00Z", dateien: 56, bytes: 64.3e9, sicher: true, grund: "2 unabhängige Kopien geprüft", unabhaengigeKopien: 2,
+        kopien: [kopie("/Volumes/NAS/Footage/HAPPY_END/2026-10-28_RHEINUFER/01_KAMERA/A001R132", "NAS Footage", true, 56, "2026-10-28T13:55:00Z"),
+                 kopie("/Volumes/SAMSUNG T7/Footage/HAPPY_END/2026-10-28_RHEINUFER/01_KAMERA/A001R132", "Samsung T7", true, 56, "2026-10-28T13:55:00Z")] },
+      { karte: "A001R131", projekt: "HAPPY_END", drehOrdner: "2026-10-28_RHEINUFER", beginn: "2026-10-28T09:45:00Z", dateien: 56, bytes: 41.2e9, sicher: true, grund: "2 unabhängige Kopien geprüft", unabhaengigeKopien: 2,
+        kopien: [kopie("/Volumes/NAS/Footage/HAPPY_END/2026-10-28_RHEINUFER/01_KAMERA/A001R131", "NAS Footage", true, 56, "2026-10-28T09:45:00Z"),
+                 kopie("E:\\Footage\\HAPPY_END\\2026-10-28_RHEINUFER\\01_KAMERA\\A001R131", null, false, 56, "2026-10-28T09:45:00Z")] },
+      { karte: "A001R130", projekt: "HAPPY_END", drehOrdner: "2026-10-27_MUENSTER", beginn: "2026-10-27T16:10:00Z", dateien: 56, bytes: 12.8e9, sicher: false, grund: "nur 1 von 2 unabhängigen Kopien", unabhaengigeKopien: 1,
+        kopien: [kopie("/Volumes/NAS/Footage/HAPPY_END/2026-10-27_MUENSTER/01_KAMERA/A001R130", "NAS Footage", true, 56, "2026-10-27T16:10:00Z")] },
+    ];
+  },
+  protokoll_karte: (a) => {
+    const ordner = a.ordner as string[];
+    const karte = ordner[0].split(/[\\/]/).pop() ?? "A001R132";
+    const reel = karte;
+    const n = karte.slice(1, 4);
+    const r = karte.slice(4);
+    const zeit = (min: number) => new Date(Date.UTC(2026, 9, 28, 8, 2) + min * 60_000).toISOString();
+    const pfade: [string, number, string][] = [
+      [`${reel}/${reel}_AVID.ale`, 18_400, zeit(190)],
+      [`${reel}/${reel}.xml`, 2_310, zeit(190)],
+      ...[1, 2, 3, 4].map((c): [string, number, string] => [`${reel}/A${n}C00${c}_261028_${r}.mxf`, 3.1e9 + c * 4.2e8, zeit(c * 23)]),
+      ...Array.from({ length: 50 }, (_, b): [string, number, string] => [
+        `${reel}/A${n}C005_261028_${r}/A${n}C005_261028_${r}.${String(b).padStart(7, "0")}.ari`,
+        1.12e7,
+        zeit(120),
+      ]),
+    ];
+    // A001R131: C002 von Hand gelöscht, die Historie des NAS nennt ihn noch (wie A008R56E am 16.10.2026).
+    const weg = karte === "A001R131" ? `A${n}C002_261028_${r}` : null;
+    const loesch = weg ? { clip: weg, zeit: "2026-10-28T19:40:12+01:00", benutzer: "marlon auf MAC-STUDIO" } : null;
+    const da = (o: string) => o.startsWith("/");
+    const generationen = [
+      { nr: 1, datei: "0001.mhl", zeit: "2026-10-28T13:55:00Z", rechner: "WIN-EDIT", werkzeug: "Stage Ingest", version: "0.1.55", prozess: "transfer", dateien: pfade.length },
+      { nr: 2, datei: "0002.mhl", zeit: "2026-10-29T08:12:00Z", rechner: "MAC-STUDIO", werkzeug: "Stage Ingest", version: "0.1.55", prozess: "in-place", dateien: pfade.length },
+    ];
+    const vorgang = (zeit: string, art: string, rechner: string, kopie: number, mehr: object = {}) => ({
+      zeit, art, rechner, benutzer: "", werkzeug: "Stage Ingest 0.1.55", dateien: pfade.length, clip: null, historieNeu: false, kopie, ...mehr,
+    });
+    return {
+      kopien: ordner.map((o, i) => ({
+        ordner: o,
+        erreichbar: da(o),
+        generationen: da(o) ? generationen : [],
+        fehler: null,
+        nenntGeloeschte: weg && i === 0 ? [`${reel}/${weg}.mxf`] : [],
+        ausserhalb: [],
+      })),
+      dateien: pfade.map(([pfad, groesse, geaendert], i) => {
+        const geloescht = weg !== null && pfad.includes(weg);
+        return {
+          pfad,
+          groesse,
+          geaendert,
+          xxh128: "9f2c4e1a7b3d5f6e8a0c2e4f6a8c0e2f",
+          geloescht: geloescht ? loesch : null,
+          jeKopie: ordner.map((o) =>
+            !da(o) ? "unbekannt" : geloescht ? "geloescht" : karte === "A001R130" && i === 3 ? "nichtMehrDa" : karte === "A001R130" && i === 5 ? "ungeprueft" : "geprueft",
+          ),
+        };
+      }),
+      verlauf: [
+        ...ordner.flatMap((o, i) => (da(o) && i === 0 ? [vorgang("2026-10-29T08:12:00Z", "nachgeprueft", "MAC-STUDIO", i)] : [])),
+        ...(loesch ? [vorgang(loesch.zeit, "geloescht", "MAC-STUDIO", 0, { benutzer: "marlon", dateien: null, clip: weg })] : []),
+        ...ordner.flatMap((o, i) => (da(o) ? [vorgang("2026-10-28T13:55:00Z", "eingelesen", "WIN-EDIT", i)] : [])),
+      ],
+    };
+  },
+  historie_bereinigen: async () => {
+    await warte(600);
+    return { geloeschte: ["A001R131/A001C002_261028_R131.mxf"], ausserhalb: [], ablage: "/x/frueher", generation: "/x/ascmhl/0001.mhl", protokoll: "/x/04_BERICHTE/x.txt" };
+  },
   soll_von_stage: () => [],
   stage_projekt: () => null,
   plate_anmelden: () => {

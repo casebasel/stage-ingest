@@ -1,19 +1,18 @@
-// Prüfen: eine bestehende Kopie jederzeit gegen ihr ASC MHL nachprüfen, und der Verlauf aller Karten dieses Rechners.
+// Prüfen: eine bestehende Kopie jederzeit gegen ihr ASC MHL nachprüfen, und eine fehlende Kopie aus einer Kopie
+// erstellen. Der Verlauf der eingelesenen Karten steht unter „Protokoll“.
 import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { CopyPlus, FileText, FolderOpen, ShieldCheck } from "lucide-react";
-import { bytesText, verlauf, type VerlaufEintrag } from "../kern";
+
 import { useLauf } from "../lauf";
-import { Pfad, Status, datumZeit } from "../teile";
+import { Pfad, Status } from "../teile";
 import { abweichungText } from "./Einlesen";
 
-export function Pruefen() {
+export function Pruefen({ vorschlag }: { vorschlag: { ordner: string } | null }) {
   const lauf = useLauf();
   const n = lauf.nachpruefung;
   const pruefend = lauf.phase === "nachpruefen" && !lauf.kaskadeLaeuft;
-  const [liste, setListe] = useState<VerlaufEintrag[] | null>(null);
-  const [suche, setSuche] = useState("");
   // Kopie aus Kopie: vorhandene, geprüfte Kopie und Ziel (Ordner auf einer anderen Platte).
   const [quelleKopie, setQuelleKopie] = useState<string | null>(null);
   const [zielBasis, setZielBasis] = useState<string | null>(null);
@@ -27,16 +26,18 @@ export function Pruefen() {
     if (typeof o === "string") setZielBasis(o);
   }
 
+  // Aus dem Protokoll: „Kopie ergänzen“ mit der vorhandenen Kopie als Quelle.
   useEffect(() => {
-    verlauf().then(setListe).catch(() => setListe([]));
-  }, [lauf.ergebnis]);
+    if (!vorschlag) return;
+    setQuelleKopie(vorschlag.ordner);
+    document.getElementById("t-kaskade")?.scrollIntoView({ behavior: "smooth" });
+  }, [vorschlag]);
 
   async function waehlen() {
     const ordner = await open({ directory: true, title: "Kopie mit ascmhl-Ordner wählen (z. B. A001R132)" });
     if (typeof ordner === "string") lauf.nachpruefen(ordner);
   }
 
-  const gefiltert = (liste ?? []).filter((e) => !suche || e.karte.toLowerCase().includes(suche.toLowerCase()));
 
   return (
     <div className="pruefen">
@@ -152,78 +153,6 @@ export function Pruefen() {
         )}
       </section>
 
-      <section className="block block-fuellend" aria-labelledby="t-verlauf">
-        <div className="block-kopf">
-          <h2 id="t-verlauf">Verlauf</h2>
-          <span className="leise">Alle Karten, die auf diesem Rechner eingelesen wurden</span>
-          <input
-            type="search"
-            className="suche"
-            aria-label="Karte suchen"
-            placeholder="z. B. A001R132"
-            value={suche}
-            onChange={(ev) => setSuche(ev.target.value)}
-          />
-        </div>
-        {liste === null ? null : gefiltert.length === 0 ? (
-          <p className="leer-zeile">{liste.length ? "Keine Karte passt zur Suche." : "Noch keine Karte eingelesen."}</p>
-        ) : (
-          <table className="tabelle">
-            <thead>
-              <tr>
-                <th>Karte</th>
-                <th>Eingelesen</th>
-                <th className="rechts">Dateien</th>
-                <th className="rechts">Grösse</th>
-                <th>Ziele</th>
-                <th>Urteil</th>
-                <th>Bericht</th>
-              </tr>
-            </thead>
-            <tbody>
-              {gefiltert.map((e) => {
-                const bericht = e.ziele.find((z) => z.bericht)?.bericht;
-                return (
-                  <tr key={e.beginn + e.karte}>
-                    <td className="zahl">{e.karte}</td>
-                    <td className="zahl">{datumZeit(e.beginn)}</td>
-                    <td className="rechts zahl">{e.dateien}</td>
-                    <td className="rechts zahl">{bytesText(e.bytes)}</td>
-                    <td className="zahl">
-                      {e.ziele.filter((z) => z.gut).length} von {e.ziele.length} gut
-                    </td>
-                    <td>
-                      <Status ton={e.sicher ? "ok" : "rot"} title={e.grund}>
-                        {e.sicher ? "Sicher" : "Nicht freigegeben"}
-                      </Status>
-                      {!e.sicher && e.ziele.some((z) => z.gut) && (
-                        <button
-                          className="verweis unterzeile"
-                          onClick={() => {
-                            setQuelleKopie(e.ziele.find((z) => z.gut)!.ordner);
-                            document.getElementById("t-kaskade")?.scrollIntoView({ behavior: "smooth" });
-                          }}
-                        >
-                          Kopie ergänzen
-                        </button>
-                      )}
-                    </td>
-                    <td>
-                      {bericht ? (
-                        <button className="knopf knopf-klein" onClick={() => openPath(bericht)}>
-                          <FileText size={14} strokeWidth={1.75} aria-hidden /> Öffnen
-                        </button>
-                      ) : (
-                        <span className="leise">–</span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-      </section>
     </div>
   );
 }

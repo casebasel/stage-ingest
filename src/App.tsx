@@ -1,7 +1,8 @@
-// Gerüst: Kopfleiste mit den vier Seiten (Einlesen · Projekt · Prüfen · Einrichtung) und dem Stand der Verbindungen.
+// Gerüst: Kopfleiste mit den Seiten (Einlesen · Protokoll · Projekt · Prüfen · Einrichtung) und dem Stand der
+// Verbindungen.
 // Der laufende Vorgang liegt über den Seiten (lauf.tsx): ein Seitenwechsel unterbricht nie eine Kopie.
 import { useEffect, useState } from "react";
-import { FolderKanban, HardDriveDownload, Moon, Settings, ShieldCheck, Sun, SunMoon } from "lucide-react";
+import { FolderKanban, HardDriveDownload, ListChecks, Moon, Settings, ShieldCheck, Sun, SunMoon } from "lucide-react";
 import { anwenden, gemerkteWahl, type Wahl } from "./thema";
 import { Aktualisierung, useAktualisierung } from "./Aktualisierung";
 import { EinstellungenGeben, useEinstellungen } from "./einstellungen";
@@ -9,14 +10,16 @@ import { KontoGeben, useKonto } from "./konto";
 import { LaufGeben, useLauf } from "./lauf";
 import { Status, zahl } from "./teile";
 import { Einlesen } from "./seiten/Einlesen";
+import { Protokoll } from "./seiten/Protokoll";
 import { Projekt } from "./seiten/Projekt";
 import { Pruefen } from "./seiten/Pruefen";
 import { Einrichtung } from "./seiten/Einrichtung";
 
-type Seite = "einlesen" | "projekt" | "pruefen" | "einrichtung";
+type Seite = "einlesen" | "protokoll" | "projekt" | "pruefen" | "einrichtung";
 
 const SEITEN: { id: Seite; text: string; Zeichen: typeof Settings }[] = [
   { id: "einlesen", text: "Einlesen", Zeichen: HardDriveDownload },
+  { id: "protokoll", text: "Protokoll", Zeichen: ListChecks },
   { id: "projekt", text: "Projekt", Zeichen: FolderKanban },
   { id: "pruefen", text: "Prüfen", Zeichen: ShieldCheck },
   { id: "einrichtung", text: "Einrichtung", Zeichen: Settings },
@@ -42,6 +45,8 @@ const WAHLEN: { wahl: Wahl; wort: string; Zeichen: typeof Sun }[] = [
 
 function Gerust() {
   const [seite, setSeite] = useState<Seite>("einlesen");
+  // „Kopie ergänzen“ aus dem Protokoll: die vorhandene Kopie unter „Prüfen“ vorwählen.
+  const [kaskadeQuelle, setKaskadeQuelle] = useState<{ ordner: string } | null>(null);
   const [wahl, setWahl] = useState<Wahl>(gemerkteWahl);
   useEffect(() => anwenden(wahl), [wahl]);
   const { update, pflicht, version } = useAktualisierung();
@@ -107,9 +112,19 @@ function Gerust() {
       </header>
       <Aktualisierung update={update} pflicht={pflicht} laeuft={lauf.laeuft} />
       <div className="inhalt">
-        {seite === "einlesen" && <Einlesen pflicht={pflicht} zurEinrichtung={zurEinrichtung} />}
+        {seite === "einlesen" && (
+          <Einlesen pflicht={pflicht} zurEinrichtung={zurEinrichtung} zumProtokoll={() => setSeite("protokoll")} />
+        )}
+        {seite === "protokoll" && (
+          <Protokoll
+            kopieErgaenzen={(ordner) => {
+              setKaskadeQuelle({ ordner });
+              setSeite("pruefen");
+            }}
+          />
+        )}
         {seite === "projekt" && <Projekt zurEinrichtung={zurEinrichtung} />}
-        {seite === "pruefen" && <Pruefen />}
+        {seite === "pruefen" && <Pruefen vorschlag={kaskadeQuelle} />}
         {seite === "einrichtung" && <Einrichtung wahl={wahl} setWahl={setWahl} />}
       </div>
     </div>
