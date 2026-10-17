@@ -40,6 +40,7 @@ rqrr = { version = "0.11", default-features = false }
 [dev-dependencies]
 tempfile = "3"
 qrcode = { version = "0.14", default-features = false }
+chrono-tz = "0.10"
 
 # Passwort des Plate-Assistant-Zugangs im Schlüsselbund des Systems, nie in Dateien.
 [target.'cfg(target_os = "macos")'.dependencies]

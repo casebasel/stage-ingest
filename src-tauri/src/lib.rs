@@ -9,6 +9,8 @@ mod plate;
 mod plates;
 mod projekt;
 mod qr;
+#[cfg(test)]
+mod simulation;
 mod stage;
 mod take_aus_clip;
 mod technik;
@@ -928,25 +930,7 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
         })
         .collect();
     // Take je Clip (ohne Endung) aus dem Abgleich, mit der Art der Zuordnung.
-    let mut take_von: std::collections::HashMap<String, (String, &str)> = std::collections::HashMap::new();
-    if let Some(a) = &abgleich {
-        for (s, p) in &a.gefunden {
-            take_von.insert(soll::ohne_endung(p).to_owned(), (s.take_id.clone(), "clipname"));
-        }
-        for (s, p) in &a.ueber_qr {
-            // `qr` ist seit Migration 0029 erlaubt (live 14.10.2026, von aussen bestätigt).
-            take_von.insert(soll::ohne_endung(p).to_owned(), (s.take_id.clone(), "qr"));
-        }
-        for (s, p) in &a.ueber_kennung {
-            take_von.insert(soll::ohne_endung(p).to_owned(), (s.take_id.clone(), "info1"));
-        }
-        for (s, p) in &a.ueber_timecode {
-            take_von.insert(soll::ohne_endung(p).to_owned(), (s.take_id.clone(), "timecode"));
-        }
-        for (s, p) in &a.ueber_zeitfenster {
-            take_von.insert(soll::ohne_endung(p).to_owned(), (s.take_id.clone(), "zeitfenster"));
-        }
-    }
+    let take_von = abgleich.as_ref().map(take_je_clip).unwrap_or_default();
 
     // Ab hier steht nichts mehr im PDF: Probleme gehen in die Nachträge.
     let mut nachtraege: Vec<String> = Vec::new();
@@ -1023,7 +1007,7 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
 
     // Zusammenfassung der Karte neben den Bericht, auf jedes gute Ziel (für die Projektübersicht).
     {
-        use ingest_kern::uebersicht::{self, ClipEintrag, KartenZusammenfassung};
+        use ingest_kern::uebersicht::{self, KartenZusammenfassung};
         let mut z = KartenZusammenfassung {
             format: uebersicht::FORMAT,
             karte: geraet::kartenname(&auftrag.quelle),
@@ -1036,27 +1020,8 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
             karte_id: datenbank.as_ref().and_then(|d| d.as_ref().ok()).cloned(),
             einsortiert: None,
             geloescht: vec![],
-            clips: clips
-                .iter()
-                .map(|c| {
-                    let name = soll::ohne_endung(&c.pfad).to_owned();
-                    let (take, art) = take_von.get(&name).cloned().unwrap_or_default();
-                    let studio =
-                        auftrag.soll.iter().any(|s| s.quelle == "studio" && !take.is_empty() && s.take_id == take);
-                    ClipEintrag {
-                        start_tc: c.angaben.as_ref().and_then(|a| a.start_tc.clone()),
-                        end_tc: c.angaben.as_ref().and_then(|a| a.end_tc.clone()),
-                        take_id: Some(take).filter(|t| !t.is_empty()),
-                        zuordnung: art.to_string(),
-                        pfad: c.pfad.clone(),
-                        abweichungen: abweichend.get(&name).cloned().unwrap_or_default(),
-                        dreh_id: None, // nur von Hand gesetzt; sonst stünde der Clip nicht mehr unter „Zu klären“
-                        studio,
-                        ohne_pruefung: false,
-                        name,
-                    }
-                })
-                .collect(),
+            ohne_aufnahme: vec![],
+            clips: clip_eintraege(&clips, &take_von, &auftrag.soll, &abweichend),
         };
         // Ergänzte Karte: Hand-Zuordnungen und Datenbank-ID der früheren Zusammenfassung bleiben.
         if let Some(alt) = urteile
@@ -1793,6 +1758,61 @@ async fn clip_loeschen(
     .await
 }
 
+/// Take je Clip (Name ohne Endung) aus dem Abgleich, mit der Art der Zuordnung (`clip.zuordnung`). Eigene Funktion,
+/// damit die Simulation (`simulation.rs`) genau diesen Weg prüft.
+pub(crate) fn take_je_clip(a: &Abgleich) -> std::collections::HashMap<String, (String, &'static str)> {
+    let mut take_von = std::collections::HashMap::new();
+    for (s, p) in &a.gefunden {
+        take_von.insert(soll::ohne_endung(p).to_owned(), (s.take_id.clone(), "clipname"));
+    }
+    for (s, p) in &a.ueber_qr {
+        // `qr` ist seit Migration 0029 erlaubt (live 14.10.2026, von aussen bestätigt).
+        take_von.insert(soll::ohne_endung(p).to_owned(), (s.take_id.clone(), "qr"));
+    }
+    for (s, p) in &a.ueber_kennung {
+        take_von.insert(soll::ohne_endung(p).to_owned(), (s.take_id.clone(), "info1"));
+    }
+    for (s, p) in &a.ueber_timecode {
+        take_von.insert(soll::ohne_endung(p).to_owned(), (s.take_id.clone(), "timecode"));
+    }
+    for (s, p) in &a.ueber_zeitfenster {
+        take_von.insert(soll::ohne_endung(p).to_owned(), (s.take_id.clone(), "zeitfenster"));
+    }
+    take_von
+}
+
+/// Einträge der Zusammenfassung (`*_ingest.json`) aus den Clips und ihrer Zuordnung.
+pub(crate) fn clip_eintraege(
+    clips: &[ClipZeile],
+    take_von: &std::collections::HashMap<String, (String, &'static str)>,
+    soll: &[SollClip],
+    abweichend: &std::collections::HashMap<String, Vec<String>>,
+) -> Vec<ingest_kern::uebersicht::ClipEintrag> {
+    clips
+        .iter()
+        .map(|c| {
+            let name = soll::ohne_endung(&c.pfad).to_owned();
+            let (take, art) = take_von.get(&name).cloned().unwrap_or_default();
+            let studio = soll.iter().any(|s| s.quelle == "studio" && !take.is_empty() && s.take_id == take);
+            ingest_kern::uebersicht::ClipEintrag {
+                start_tc: c.angaben.as_ref().and_then(|a| a.start_tc.clone()),
+                end_tc: c.angaben.as_ref().and_then(|a| a.end_tc.clone()),
+                take_id: Some(take).filter(|t| !t.is_empty()),
+                zuordnung: art.to_string(),
+                pfad: c.pfad.clone(),
+                abweichungen: abweichend.get(&name).cloned().unwrap_or_default(),
+                dreh_id: None, // nur von Hand gesetzt; sonst stünde der Clip nicht mehr unter „Zu klären“
+                studio,
+                ohne_pruefung: false,
+                info1: c.kennung.clone(),
+                qr: c.qr.clone(),
+                fps: c.angaben.as_ref().and_then(|a| a.fps),
+                name,
+            }
+        })
+        .collect()
+}
+
 /// Clip aus einem abgebrochenen Einlesen aufnehmen (Marlon, 17.10.2026): in jede Zusammenfassung mit Vermerk
 /// `ohne_pruefung` und, wenn die Karte in der Datenbank steht, als Zeile `clip`. Danach wird wie sonst zugeordnet.
 fn aufnehmen_ueberall(
@@ -1815,6 +1835,9 @@ fn aufnehmen_ueberall(
         abweichungen: vec![],
         studio: false,
         ohne_pruefung: true,
+        info1: None,
+        qr: vec![],
+        fps: angaben.as_ref().and_then(|a| a.fps),
     };
     let mut karte = None;
     for d in dateien {

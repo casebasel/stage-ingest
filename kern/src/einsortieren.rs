@@ -198,6 +198,7 @@ mod tests {
             karte_id: None,
             einsortiert: None,
             geloescht: vec![],
+            ohne_aufnahme: vec![],
         };
         uebersicht::schreiben(&dreh.join(BERICHTE), &z).unwrap()
     }

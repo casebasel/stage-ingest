@@ -54,9 +54,8 @@ fn kamera(w: &std::collections::BTreeMap<String, String>) -> Value {
             }
         }
     }
-    if k.is_empty() {
-        return Value::Null;
-    }
+    // Immer mit `quelle`, auch ohne Werte: Daran erkennt der Abgleich einen Take aus einem Clip; seine Startzeit ist der
+    // Timecode des Clips, keine Klappe des iPhones (Simulation 17.10.2026, siehe `plate::aus_clip_angelegt`).
     k.insert("quelle".into(), json!("ale"));
     Value::Object(k)
 }
@@ -106,10 +105,7 @@ pub fn take_aenderung(
     if let (Some(tc), Some(b)) = (&start_tc, angaben.and_then(|c| c.bilder)) {
         wert.insert("clip".into(), json!({ "name": name, "startTc": tc, "bilder": b }));
     }
-    let k = kamera(werte);
-    if !k.is_null() {
-        wert.insert("kamera".into(), k);
-    }
+    wert.insert("kamera".into(), kamera(werte));
     if let Some(b) = aus_clip.filter(|b| !b.is_null()) {
         wert.insert("aus_clip".into(), b);
     }

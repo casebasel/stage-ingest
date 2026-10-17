@@ -192,6 +192,7 @@ mod tests {
             karte_id: None,
             einsortiert: None,
             geloescht: vec![],
+            ohne_aufnahme: vec![],
             clips: vec![
                 ClipEintrag {
                     name: "A001C003_261028_R1AB".into(),
@@ -203,6 +204,9 @@ mod tests {
                     abweichungen: vec![],
                     studio: false,
                     ohne_pruefung: false,
+                    info1: None,
+                    qr: vec![],
+                    fps: None,
                     dreh_id: None,
                 },
                 ClipEintrag {
@@ -215,6 +219,9 @@ mod tests {
                     abweichungen: vec![],
                     studio: false,
                     ohne_pruefung: false,
+                    info1: None,
+                    qr: vec![],
+                    fps: None,
                     dreh_id: None,
                 },
             ],

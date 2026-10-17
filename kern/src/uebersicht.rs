@@ -37,6 +37,9 @@ pub struct KartenZusammenfassung {
     /// Endgültig gelöschte Clips (Name), mit Löschprotokoll in `04_BERICHTE/` (siehe `loeschen`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub geloescht: Vec<String>,
+    /// Takes ohne Clip auf dieser Karte, als „ohne Aufnahme“ bestätigt.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ohne_aufnahme: Vec<OhneAufnahme>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -67,6 +70,24 @@ pub struct ClipEintrag {
     /// nicht gegen die Karte geprüft. Von Marlon in „Zu klären“ aufgenommen.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ohne_pruefung: bool,
+    /// Belege aus dem Clip für spätere Abgleiche auf der Projektseite (17.10.2026): Take-ID in Info 1, QR der Klappe,
+    /// Bildrate des Timecodes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub info1: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub qr: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fps: Option<f64>,
+}
+
+/// Ein Take ohne Clip auf dieser Karte, den Marlon als „ohne Aufnahme“ bestätigt hat (Klappe ohne REC): Der Take
+/// bleibt im Plate Assistant, er steht nur nicht mehr in „Zu klären“ (17.10.2026: „Ich möchte immer alles behalten“).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct OhneAufnahme {
+    pub take_id: String,
+    pub zeit: String,
+    pub rechner: String,
 }
 
 /// Eine gefundene Karte mit Ort.
@@ -131,6 +152,17 @@ pub fn aufnehmen(
         crate::sicher_schreiben(datei, &text)?;
     }
     Ok((z.karte_id, z.projekt))
+}
+
+/// Bestätigt einen Take als „ohne Aufnahme“ auf dieser Karte (in jede Kopie der Zusammenfassung). Doppelt schadet nicht.
+pub fn ohne_aufnahme_bestaetigen(datei: &Path, take_id: &str, zeit: &str, rechner: &str) -> std::io::Result<()> {
+    let mut z: KartenZusammenfassung = serde_json::from_slice(&std::fs::read(datei)?).map_err(std::io::Error::other)?;
+    if !z.ohne_aufnahme.iter().any(|o| o.take_id == take_id) {
+        z.ohne_aufnahme.push(OhneAufnahme { take_id: take_id.into(), zeit: zeit.into(), rechner: rechner.into() });
+        let text = serde_json::to_vec_pretty(&z).map_err(std::io::Error::other)?;
+        crate::sicher_schreiben(datei, &text)?;
+    }
+    Ok(())
 }
 
 /// Liest eine Zusammenfassung aus ihrer Datei (`None`, wenn unlesbar).
@@ -233,6 +265,7 @@ mod tests {
             karte_id: None,
             einsortiert: None,
             geloescht: vec![],
+            ohne_aufnahme: vec![],
             clips: vec![ClipEintrag {
                 name: "A001C003_261028_R1AB".into(),
                 pfad: "A001C003_261028_R1AB.mov".into(),
@@ -243,6 +276,9 @@ mod tests {
                 abweichungen: vec![],
                 studio: false,
                 ohne_pruefung: false,
+                info1: None,
+                qr: vec![],
+                fps: None,
                 dreh_id: None,
             }],
         };
@@ -270,6 +306,9 @@ mod tests {
             abweichungen: vec![],
             studio: false,
             ohne_pruefung: false,
+            info1: None,
+            qr: vec![],
+            fps: None,
             dreh_id: None,
         };
         let karte = |clips| KartenZusammenfassung {
@@ -284,6 +323,7 @@ mod tests {
             karte_id: None,
             einsortiert: None,
             geloescht: vec![],
+            ohne_aufnahme: vec![],
             clips,
         };
         let mut alt = karte(vec![clip("A007C001", Some("T7"), "hand"), clip("A007C002", Some("T2"), "zeitfenster")]);

@@ -41,10 +41,16 @@ pub struct SollClip {
     /// geschätzt. Dann gilt auch das Zeitfenster der Klappe (Marlon, 17.10.2026: „im Timecode seht ihr die Zeit“).
     #[serde(default)]
     pub name_geschaetzt: bool,
+    /// Die Kamera hat die Aufnahme dieses Takes bestätigt (`take.clip` nach dem Stopp oder `take.kamera.quelle = cap`
+    /// beim REC): Der Slate (Info 1) wurde für diesen Take geschrieben, nicht vom vorigen übernommen.
+    #[serde(default)]
+    pub rec_bestaetigt: bool,
+    /// Clips, die diesem Take schon zugeordnet sind (gemeinsame Datenbank, andere Karten): Hat er seinen Clip derselben
+    /// Kamera schon auf einer anderen Karte, bekommt er hier keinen über Info 1 oder die Zeit (Simulation 17.10.2026).
+    #[serde(default)]
+    pub vergeben: Vec<String>,
 }
 
-/// Spielraum zwischen iPhone-Uhr und Kamera-Timecode (laut Plate Assistant „um Sekunden“).
-const UHR_SPIEL_S: i64 = 20;
 /// Längstes Fenster einer Klappe (auch ohne nächste Klappe).
 const FENSTER_OFFEN_S: i64 = 30 * 60;
 
@@ -75,6 +81,17 @@ pub struct Abgleich {
     /// auch wenn der Clip über den QR zugeordnet ist).
     #[serde(default)]
     pub pruefen: Vec<(String, String)>,
+    /// Eingegrenzter Versatz Timecode minus iPhone-Uhr in Millisekunden `[von, bis]` (aus den sicheren Paaren); ohne
+    /// keine Zuordnung über die Zeit.
+    #[serde(default)]
+    pub zeitversatz_ms: Option<(i64, i64)>,
+    /// Offene Clips (ohne Take) und die Takes, in deren Abschnitt ihre Aufnahme beginnen könnte: (Take-ID, Pfad). Nur
+    /// mit eingegrenztem Versatz; ein Take ohne Eintrag hier hat keinen offenen Clip, der zu ihm gehören könnte.
+    #[serde(default)]
+    pub offen_moeglich: Vec<(String, String)>,
+    /// Offene Clips, die sicher im Abschnitt genau dieses Takes beginnen (nach beiden Seiten): (Take-ID, Pfad).
+    #[serde(default)]
+    pub offen_sicher: Vec<(String, String)>,
 }
 
 /// Timecode `HH:MM:SS:FF` (auch `;`) → Bildnummer bei `fps`.
@@ -133,9 +150,20 @@ pub fn ohne_endung(name: &str) -> &str {
     }
 }
 
-/// Gleicht die Kopie mit der Soll-Liste ab. Erst exakt über den Clipnamen; Takes ohne Clipnamen über die
-/// grösste Timecode-Überlappung mit den Clips der Karte, die noch keinem Take gehören (`clips` aus
-/// [`crate::ale::clips_lesen`]). Gleich gute Kandidaten sind mehrdeutig und werden nicht geraten.
+/// Gleicht die Kopie mit der Soll-Liste ab (Marlon, 17.10.2026: „da darf kein Fehler passieren“; Simulation in
+/// `src-tauri/src/simulation.rs`). Automatisch nur, was sicher ist; alles andere bleibt für „Zu klären“:
+///
+/// 1. **QR der Klappe im Bild:** die Take-ID, die das iPhone bei der Aufnahme zeigte.
+/// 2. **Bestätigter Clipname:** von der Kamera nach dem Stopp gemeldet (`take.clip`, nicht der Vorschlag der App).
+/// 3. **Take-ID in Info 1:** nur der erste Clip mit dieser ID je Kamera, und nur wenn die Kamera die Aufnahme dieses
+///    Takes bestätigt hat (`rec_bestaetigt`); sonst kann der Slate vom vorigen Take stammen (ohne Verbindung).
+/// 4. **Timecode-Überlappung** mit dem Timecode, den der Take selbst trägt (Stage, CAP).
+/// 5. **Zeitfenster der Klappe:** Aus den sicheren Paaren wird der Versatz zwischen Timecode und Uhr des iPhones
+///    eingegrenzt (Aufnahme beginnt nach der Klappe, endet vor der nächsten). Ein Clip gehört über die Zeit nur dann zu
+///    einem Take, wenn er bei jedem möglichen Versatz ganz zwischen dessen Klappe und der nächsten Klappe liegt, und
+///    das eindeutig in beide Richtungen. Ohne sichere Paare oder bei Widerspruch: keine Zuordnung über die Zeit.
+///
+/// Geschätzte Namen (Vorschlag der App) ordnen nie zu: Mit gestellter Kamerauhr gleichen sie zufällig echten Clips.
 pub fn abgleichen(kopie: &Kopie, soll: &[SollClip], clips: &[crate::ale::ClipZeile]) -> Abgleich {
     // Clips auf der Karte: Stammname → Pfad (nur Dateien mit ARRI-Clipnamen; Begleitdateien zählen nicht).
     let mut auf_karte: BTreeMap<String, String> = BTreeMap::new();
@@ -146,274 +174,525 @@ pub fn abgleichen(kopie: &Kopie, soll: &[SollClip], clips: &[crate::ale::ClipZei
         }
     }
     let reels: BTreeSet<(String, String)> = auf_karte.keys().filter_map(|n| arri_reel(n)).collect();
+    let zeile: BTreeMap<String, &crate::ale::ClipZeile> =
+        clips.iter().map(|c| (ohne_endung(&c.pfad).to_owned(), c)).collect();
+    let pfad_von = |stamm: &str| -> String {
+        auf_karte.get(stamm).cloned().or_else(|| zeile.get(stamm).map(|c| c.pfad.clone())).unwrap_or_default()
+    };
+    let nur_id = |k: &str| k.split_once(':').map(|(_, id)| id.to_ascii_uppercase());
+    let take_der_id = |id: &str| soll.iter().position(|s| !s.take_id.is_empty() && s.take_id.eq_ignore_ascii_case(id));
 
     let mut a = Abgleich::default();
-    let mut bekannt = BTreeSet::new();
-    // Takes, die über Info 1 schon entschieden sind (zugeordnet oder nach „Zu klären“), nach Index in `soll`.
-    let mut erledigt: BTreeSet<usize> = BTreeSet::new();
-
-    // Erste Wahl: Take-ID aus dem QR-Code der Klappe, sonst aus User Info 1. Info 1 kann vom vorigen Take stammen,
-    // wenn das Schreiben per CAP scheiterte; deshalb zwei Clips derselben Kamera mit derselben ID → „Zu klären“, und
-    // jeder Widerspruch zum Clipnamen ebenso. Widersprechen sich QR und Info 1, gilt der QR, der Clip kommt zusätzlich
-    // in die Klärungsliste. Zwei verschiedene QR in einem Clip: keine ID, nie automatisch.
-    let nur_id = |k: &str| k.split_once(':').map(|(_, id)| id.to_ascii_uppercase());
-    let id_von = |c: &crate::ale::ClipZeile| match &c.qr[..] {
-        [q] => nur_id(q),
-        [] => c.kennung.as_deref().and_then(nur_id),
-        _ => None,
-    };
-    let mut ueber_qr: BTreeSet<String> = BTreeSet::new();
+    // Sichere Zuordnungen: Clip → (Take-Index, Art).
+    let mut zu: BTreeMap<String, (usize, Art)> = BTreeMap::new();
+    // Clips, die nie automatisch zugeordnet werden (Widerspruch, ID eines fremden Takes).
     let mut gesperrt: BTreeSet<String> = BTreeSet::new();
-    let mut mit_id: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    // Takes, die nach „Zu klären“ gehören (Widerspruch); sie bekommen nichts mehr automatisch.
+    let mut strittig: BTreeSet<usize> = BTreeSet::new();
+    let hat = |zu: &BTreeMap<String, (usize, Art)>, i: usize, kam: &str| {
+        zu.iter().find(|(c, (j, _))| *j == i && kamera(c) == kam).map(|(c, _)| c.clone())
+    };
+    // Der Take hat seinen Clip dieser Kamera schon auf einer anderen Karte (Datenbank).
+    let anderswo = |i: usize, stamm: &str| {
+        soll[i]
+            .vergeben
+            .iter()
+            .any(|v| kamera(v) == kamera(stamm) && arri_reel(v) != arri_reel(stamm) && !v.eq_ignore_ascii_case(stamm))
+    };
+
+    // 1. QR der Klappe.
+    let mut qr_je: BTreeMap<(usize, String), Vec<String>> = BTreeMap::new();
     for c in clips {
-        let info1 = c.kennung.as_deref().and_then(nur_id);
-        match &c.qr[..] {
-            [q] => {
-                ueber_qr.insert(c.pfad.clone());
-                if info1.as_ref().is_some_and(|i| Some(i) != nur_id(q).as_ref()) {
+        let stamm = ohne_endung(&c.pfad).to_owned();
+        let ids: BTreeSet<String> = c.qr.iter().filter_map(|q| nur_id(q)).collect();
+        match ids.len() {
+            0 => {}
+            1 => {
+                let id = ids.into_iter().next().unwrap_or_default();
+                match take_der_id(&id) {
+                    Some(i) => qr_je.entry((i, kamera(&stamm))).or_default().push(stamm.clone()),
+                    None => {
+                        gesperrt.insert(stamm.clone());
+                    }
+                }
+                if let Some(i1) = c.kennung.as_deref().and_then(nur_id).filter(|i1| *i1 != id) {
                     a.pruefen.push((
                         c.pfad.clone(),
-                        format!(
-                            "QR ({q}) und Info 1 ({}) nennen verschiedene Takes; zugeordnet nach dem QR",
-                            c.kennung.as_deref().unwrap_or_default()
-                        ),
+                        format!("QR (PA:{id}) und Info 1 ({i1}) nennen verschiedene Takes; zugeordnet nach dem QR"),
                     ));
                 }
             }
-            [] => {}
-            mehrere => {
-                gesperrt.insert(ohne_endung(&c.pfad).to_owned());
-                a.pruefen.push((c.pfad.clone(), format!("Verschiedene QR-Codes im Clip: {}", mehrere.join(", "))));
+            _ => {
+                gesperrt.insert(stamm.clone());
+                a.pruefen.push((c.pfad.clone(), format!("Verschiedene QR-Codes im Clip: {}", c.qr.join(", "))));
             }
-        }
-        if let Some(id) = id_von(c) {
-            mit_id.entry(id).or_default().push(c.pfad.clone());
         }
     }
-    // Dieselbe ID in mehreren Clips derselben Kamera: Die Kamera behält den Slate, bis die App einen neuen schreibt
-    // (ohne Verbindung keiner). Die ID gilt nur für den ersten Clip (kleinster Zähler); die folgenden sind ohne neuen
-    // Slate gedreht und kommen mit Begründung nach „Zu klären“ (Marlon, 16.10.2026; Treppenhaus C010–C012). Das deckt
-    // auch Info 1 vom vorigen Take ab.
-    let mut folgende: BTreeSet<String> = BTreeSet::new();
-    for (id, pfade) in mit_id.iter_mut() {
-        let mut je_kamera: BTreeMap<String, Vec<String>> = BTreeMap::new();
-        for p in pfade.drain(..) {
-            je_kamera.entry(kamera(ohne_endung(&p))).or_default().push(p);
-        }
-        for (_, mut liste) in je_kamera {
-            liste.sort_by_key(|p| (ohne_datum(p).map_or(u32::MAX, |k| k.1), p.clone()));
-            let erster = liste.remove(0);
-            for p in liste {
-                a.pruefen.push((
-                    p.clone(),
-                    format!(
-                        "Take-ID {id} schon in {} (ohne neuen Slate gedreht, z. B. Kamera ohne Verbindung)",
-                        ohne_endung(&erster)
-                    ),
-                ));
-                folgende.insert(ohne_endung(&p).to_owned());
-            }
-            pfade.push(erster);
-        }
-    }
-    let take_der_id = |id: &str| soll.iter().position(|s| !s.take_id.is_empty() && s.take_id.eq_ignore_ascii_case(id));
-    // Clips, deren Info 1 einen anderen Take nennt als ihr Clipname (Widerspruch); die folgenden zählen nicht.
-    let clip_id: BTreeMap<String, String> = clips
-        .iter()
-        .filter(|c| !folgende.contains(ohne_endung(&c.pfad)))
-        .filter_map(|c| Some((ohne_endung(&c.pfad).to_owned(), id_von(c)?)))
-        .collect();
-    for (i, s) in soll.iter().enumerate() {
-        if s.take_id.is_empty() {
-            continue;
-        }
-        let kandidaten: Vec<String> = mit_id.get(&s.take_id.to_ascii_uppercase()).cloned().unwrap_or_default();
-        let benannt = Some(ohne_endung(&s.clip)).filter(|n| !n.is_empty()).and_then(|n| auf_karte.get(n)).cloned();
-        let fremd = benannt
-            .as_ref()
-            .is_some_and(|p| clip_id.get(ohne_endung(p)).is_some_and(|id| take_der_id(id).is_some_and(|j| j != i)));
-        if kandidaten.is_empty() && !fremd {
-            continue;
-        }
-        let mut kameras = BTreeSet::new();
-        let je_kamera_einer = kandidaten.iter().all(|p| kameras.insert(kamera(ohne_endung(p))));
-        // Widerspruch: der Clip mit dem Clipnamen nennt einen anderen Take, oder dieselbe Kamera hat einen anderen
-        // Clip mit dieser ID. Ein Clip ohne Info 1 (z. B. die B-Kamera ohne CAP) widerspricht nicht.
-        let widerspruch = fremd
-            || benannt
-                .as_ref()
-                .is_some_and(|b| kandidaten.iter().any(|p| p != b && kamera(ohne_endung(p)) == kamera(ohne_endung(b))));
-        erledigt.insert(i);
-        if je_kamera_einer && !widerspruch {
-            if let Some(b) = benannt.filter(|b| !kandidaten.contains(b)) {
-                bekannt.insert(ohne_endung(&b).to_owned());
-                a.gefunden.push((s.clone(), b));
-            }
-            for p in kandidaten {
-                bekannt.insert(ohne_endung(&p).to_owned());
-                if ueber_qr.contains(&p) {
-                    a.ueber_qr.push((s.clone(), p));
-                } else {
-                    a.ueber_kennung.push((s.clone(), p));
-                }
-            }
+    for ((i, _), liste) in qr_je {
+        if liste.len() == 1 {
+            zu.insert(liste[0].clone(), (i, Art::Qr));
         } else {
-            let mut alle = kandidaten;
-            alle.extend(benannt.filter(|b| !alle.contains(b)));
-            bekannt.extend(alle.iter().map(|p| ohne_endung(p).to_owned()));
-            a.mehrdeutig.push((s.clone(), alle));
+            // Derselbe QR in mehreren Clips einer Kamera: welcher ist der Take? Nie raten.
+            strittig.insert(i);
+            gesperrt.extend(liste.iter().cloned());
+            a.mehrdeutig.push((soll[i].clone(), liste.iter().map(|s| pfad_von(s)).collect()));
         }
     }
-    // Clips mit einer ID, die zu keinem Take dieser Liste gehört: nie über Timecode oder Zeitfenster einem anderen
-    // Take geben (sie bleiben „ohne Take“).
-    let fremde_id: BTreeSet<String> = mit_id
-        .iter()
-        .filter(|(id, _)| take_der_id(id).is_none())
-        .flat_map(|(_, ps)| ps.iter().map(|p| ohne_endung(p).to_owned()))
-        .chain(gesperrt)
-        .collect();
-    // Folgende Clips gleicher ID: nie über Timecode oder Zeitfenster (das Zeitfenster der Klappe ist das des ersten);
-    // über den Namen ohne Datum dürfen sie zugeordnet werden.
-    let nicht_raten: BTreeSet<String> = fremde_id.iter().cloned().chain(folgende.iter().cloned()).collect();
 
+    // 2. Bestätigter Clipname (von der Kamera nach dem Stopp).
     for (i, s) in soll.iter().enumerate() {
-        if erledigt.contains(&i) {
+        if s.name_geschaetzt || strittig.contains(&i) {
             continue;
         }
-        let stamm = ohne_endung(&s.clip).to_owned();
-        let Some(reel) = arri_reel(&stamm) else { continue }; // ohne Clipnamen: unten über den Timecode
+        let stamm = ohne_endung(&s.clip).to_uppercase();
+        let Some(reel) = arri_reel(&stamm) else { continue };
         if !reels.contains(&reel) {
             continue; // gehört zu einer anderen Karte
         }
-        bekannt.insert(stamm.clone());
-        match auf_karte.get(&stamm) {
-            Some(pfad) => a.gefunden.push((s.clone(), pfad.clone())),
-            None => a.fehlt.push(s.clone()),
-        }
-    }
-
-    // Name ohne Datum: Magazin, Zähler und Kennung gleich, das Datum anders (geschätzter Name des Plate Assistant,
-    // falsch gestellte Kamerauhr). Nur wenn der Zähler in die Reihe der sicheren Takes derselben Szene passt und
-    // eindeutig ist, in beide Richtungen.
-    {
-        let ordnung = |s: &SollClip| s.take.trim().parse::<i64>().ok();
-        // Reihe = Plate: Cleanplate und Kugeln tragen „<Szene> · Cleanplate“.
-        let reihe = |s: &SollClip| s.szene.split(" · ").next().unwrap_or_default().to_owned();
-        let sicher: Vec<(String, i64, (String, u32, String))> = a
-            .gefunden
-            .iter()
-            .chain(&a.ueber_kennung)
-            .chain(&a.ueber_qr)
-            .filter_map(|(s, p)| Some((reihe(s), ordnung(s)?, ohne_datum(p)?)))
-            .collect();
-        let frei: BTreeMap<(String, u32, String), String> = auf_karte
-            .iter()
-            .filter(|(n, _)| !bekannt.contains(*n) && !fremde_id.contains(*n))
-            .filter_map(|(n, p)| Some((ohne_datum(n)?, p.clone())))
-            .collect();
-        let mut vorschlaege: Vec<(usize, String)> = Vec::new();
-        for (i, s) in a.fehlt.iter().enumerate() {
-            let (Some(k), Some(o)) = (ohne_datum(&s.clip), ordnung(s)) else { continue };
-            let Some(p) = frei.get(&k) else { continue };
-            let feste: Vec<(i64, u32)> = sicher
-                .iter()
-                .filter(|(sz, _, kk)| *sz == reihe(s) && kk.0 == k.0 && kk.2 == k.2)
-                .map(|(_, o, kk)| (*o, kk.1))
-                .collect();
-            if passt_in_reihe(&feste, o, k.1) {
-                vorschlaege.push((i, p.clone()));
+        let Some(echt) = auf_karte.keys().find(|k| k.eq_ignore_ascii_case(&stamm)).cloned() else {
+            a.fehlt.push(s.clone());
+            continue;
+        };
+        match zu.get(&echt).copied() {
+            Some((j, _)) if j == i => {}
+            Some((j, _)) => {
+                // QR sagt Take j, die Kamera meldete diesen Namen für Take i: Widerspruch.
+                zu.remove(&echt);
+                gesperrt.insert(echt.clone());
+                strittig.extend([i, j]);
+                a.pruefen.push((
+                    pfad_von(&echt),
+                    format!("QR und bestätigter Clipname nennen verschiedene Takes ({} / {})", soll[j].take, s.take),
+                ));
+                a.mehrdeutig.push((s.clone(), vec![pfad_von(&echt)]));
             }
-        }
-        let mut je_clip: BTreeMap<&String, usize> = BTreeMap::new();
-        for (_, p) in &vorschlaege {
-            *je_clip.entry(p).or_default() += 1;
-        }
-        let eindeutig: BTreeMap<usize, String> =
-            vorschlaege.iter().filter(|(_, p)| je_clip[p] == 1).map(|(i, p)| (*i, p.clone())).collect();
-        let fehlt = std::mem::take(&mut a.fehlt);
-        for (i, s) in fehlt.into_iter().enumerate() {
-            match eindeutig.get(&i) {
-                Some(p) => {
-                    bekannt.insert(ohne_endung(p).to_owned());
-                    a.gefunden.push((s, p.clone()));
+            None if gesperrt.contains(&echt) => {}
+            None => match hat(&zu, i, &kamera(&echt)) {
+                Some(anderer) => {
+                    strittig.insert(i);
+                    a.pruefen.push((
+                        pfad_von(&echt),
+                        format!("Take {} hat schon {anderer} (QR), die Kamera meldete aber diesen Clip", s.take),
+                    ));
+                    a.mehrdeutig.push((s.clone(), vec![pfad_von(&anderer), pfad_von(&echt)]));
                 }
-                None => a.fehlt.push(s),
+                None => {
+                    zu.insert(echt, (i, Art::Clipname));
+                }
+            },
+        }
+    }
+
+    // 3. Take-ID in Info 1: nur der erste Clip je Kamera, nur mit bestätigter Aufnahme. Zur Gegenprobe der Versatz aus den
+    // Paaren bis hier (QR, bestätigter Name): Beginnt der Clip sicher nicht im Abschnitt des Takes, ist der Slate alt
+    // (z. B. Kartenwechsel: der Take wurde noch auf der vorigen Karte aufgenommen, Simulation 17.10.2026).
+    let (v_lo, v_hi) = versatz_aus(&zu, soll, &|c: &str| clip_zeiten(kopie, zeile.get(c).copied(), soll));
+    let unmoeglich = |c: &str, i: usize| -> bool {
+        let (Some((c0, _, true)), Some(k)) =
+            (clip_zeiten(kopie, zeile.get(c).copied(), soll), zeit_von(&soll[i].start_zeit))
+        else {
+            return false;
+        };
+        let n = zeit_von(&soll[i].fenster_bis)
+            .unwrap_or(k + chrono::Duration::seconds(FENSTER_OFFEN_S))
+            .min(k + chrono::Duration::seconds(FENSTER_OFFEN_S));
+        let (nach, vor) = ((c0 - k).num_milliseconds(), (c0 - n).num_milliseconds());
+        // Möglich nur mit einem Versatz o in (vor, nach]; jede bekannte Grenze kann das ausschliessen.
+        v_lo.is_some_and(|l| l > nach)
+            || v_hi.is_some_and(|h| h <= vor)
+            || v_lo.unwrap_or(i64::MIN) > v_hi.unwrap_or(i64::MAX)
+    };
+    let mut mit_id: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for c in clips {
+        let stamm = ohne_endung(&c.pfad).to_owned();
+        if let Some(id) = c.kennung.as_deref().and_then(nur_id) {
+            mit_id.entry(id).or_default().push(stamm);
+        }
+    }
+    // Clips mit Info 1 eines Takes, dessen Aufnahme nicht bestätigt ist: nur über die Zeit (unten), mit Hinweis.
+    let mut info1_offen: BTreeMap<String, usize> = BTreeMap::new();
+    for (id, liste) in &mit_id {
+        let Some(i) = take_der_id(id) else {
+            // ID eines Takes, der nicht in dieser Liste steht (anderer Drehort, gelöscht): nie über die Zeit raten.
+            gesperrt.extend(liste.iter().cloned());
+            continue;
+        };
+        let mut je_kamera: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for c in liste {
+            je_kamera.entry(kamera(c)).or_default().push(c.clone());
+        }
+        for (kam, mut l) in je_kamera {
+            l.sort_by_key(|p| (ohne_datum(p).map_or(u32::MAX, |k| k.1), p.clone()));
+            let erster = l.remove(0);
+            for f in &l {
+                a.pruefen.push((
+                    pfad_von(f),
+                    format!("Take-ID {id} schon in {erster} (ohne neuen Slate gedreht, z. B. Kamera ohne Verbindung)"),
+                ));
+            }
+            if zu.contains_key(&erster) || gesperrt.contains(&erster) || strittig.contains(&i) {
+                continue;
+            }
+            // Der Slate muss auf dieser Karte wechseln: Ist der erste Clip mit der ID zugleich der erste der Kamera auf der
+            // Karte, kann die ID von der vorigen Karte stammen (ohne Verbindung behält die Kamera den Slate über den
+            // Kartenwechsel; Simulation 17.10.2026, 100 000 Drehtage). Dann entscheidet nur die Zeit.
+            let vorgaenger = ohne_datum(&erster).is_some_and(|(_, z, _)| {
+                clips.iter().any(|c| {
+                    let st = ohne_endung(&c.pfad);
+                    arri_reel(st) == arri_reel(&erster) && ohne_datum(st).is_some_and(|k| k.1 < z)
+                })
+            });
+            if !vorgaenger {
+                a.pruefen.push((
+                    pfad_von(&erster),
+                    format!("Take-ID {id} im ersten Clip der Karte: der Slate kann von der vorigen Karte stammen"),
+                ));
+                info1_offen.insert(erster, i);
+                continue;
+            }
+            if let Some(anderer) = hat(&zu, i, &kam) {
+                // Der Take hat seinen Clip schon (QR, Name): dieser trägt die ID nur noch weiter.
+                a.pruefen.push((pfad_von(&erster), format!("Take-ID {id} gehört schon zu {anderer}")));
+                continue;
+            }
+            // Hat die Kamera für diesen Take einen Clip auf einer anderen Karte bestätigt, trägt dieser die ID nur weiter.
+            let andere_karte = (!soll[i].name_geschaetzt
+                && arri_reel(&soll[i].clip).is_some_and(|r| Some(r) != arri_reel(&erster)))
+                || anderswo(i, &erster);
+            if andere_karte || unmoeglich(&erster, i) {
+                a.pruefen.push((
+                    pfad_von(&erster),
+                    format!("Take-ID {id} im Clip, aber der Take wurde nicht hier aufgenommen (alter Slate)"),
+                ));
+                continue;
+            }
+            if soll[i].rec_bestaetigt {
+                zu.insert(erster, (i, Art::Info1));
+            } else {
+                info1_offen.insert(erster, i);
             }
         }
     }
 
-    // Rückfall: Takes ohne Clipnamen über den Timecode, nur gegen Clips, die noch keinem Take gehören.
-    let frei: Vec<(&String, (i64, i64), f64)> = clips
-        .iter()
-        .filter(|c| !bekannt.contains(ohne_endung(&c.pfad)) && !nicht_raten.contains(ohne_endung(&c.pfad)))
-        .filter_map(|c| {
-            let a = c.angaben.as_ref()?;
-            let fps = a.fps?;
-            Some((&c.pfad, (tc_bilder(a.start_tc.as_deref()?, fps)?, tc_bilder(a.end_tc.as_deref()?, fps)?), fps))
-        })
-        .collect();
-    let mut vorschlaege = Vec::new();
-    for (_, s) in soll.iter().enumerate().filter(|(i, s)| s.clip.trim().is_empty() && !erledigt.contains(i)) {
-        let mut beste: Vec<(&String, i64)> = Vec::new();
-        for (pfad, bereich, fps) in &frei {
-            let (Some(t0), Some(t1)) = (tc_bilder(&s.start_tc, *fps), tc_bilder(&s.end_tc, *fps)) else { continue };
-            let u = ueberlappung((t0, t1), *bereich, (*fps).round() as i64 * 86_400);
+    // 4. Timecode-Überlappung mit dem Timecode des Takes (Takes ohne Clipnamen, z. B. Stage-CSV).
+    let frei = |zu: &BTreeMap<String, (usize, Art)>, c: &str| !zu.contains_key(c) && !gesperrt.contains(c);
+    let mut vorschlaege: Vec<(usize, Vec<String>)> = Vec::new();
+    for (i, s) in soll.iter().enumerate().filter(|(i, s)| s.clip.trim().is_empty() && !strittig.contains(i)) {
+        if zu.values().any(|(j, _)| *j == i) {
+            continue;
+        }
+        let mut beste: Vec<(String, i64)> = Vec::new();
+        for c in clips {
+            let stamm = ohne_endung(&c.pfad).to_owned();
+            if !frei(&zu, &stamm) {
+                continue;
+            }
+            let Some(an) = c.angaben.as_ref() else { continue };
+            let Some(fps) = an.fps else { continue };
+            let (Some(t0), Some(t1)) = (tc_bilder(&s.start_tc, fps), tc_bilder(&s.end_tc, fps)) else { continue };
+            let (Some(c0), Some(c1)) = (
+                an.start_tc.as_deref().and_then(|t| tc_bilder(t, fps)),
+                an.end_tc.as_deref().and_then(|t| tc_bilder(t, fps)),
+            ) else {
+                continue;
+            };
+            let u = ueberlappung((t0, t1), (c0, c1), fps.round() as i64 * 86_400);
             if u > 0 {
-                beste.push((pfad, u));
+                beste.push((stamm, u));
             }
         }
         let max = beste.iter().map(|b| b.1).max();
-        vorschlaege.push((s.clone(), beste.iter().filter(|b| Some(b.1) == max).map(|b| b.0.clone()).collect()));
+        let kandidaten: Vec<String> = beste.into_iter().filter(|b| Some(b.1) == max).map(|b| b.0).collect();
+        if !kandidaten.is_empty() {
+            vorschlaege.push((i, kandidaten));
+        }
     }
-    verteilen(vorschlaege, &mut bekannt, &mut a.ueber_timecode, &mut a.mehrdeutig);
+    eindeutig_verteilen(vorschlaege, Art::Timecode, &mut zu, &mut a, soll, &pfad_von);
 
-    // Letzter Rückfall (Plate Assistant): Zeitfenster der Klappe. Der Timecode der Kamera ist Tageszeit in
-    // Ortszeit (Europe/Zurich), die Klappenzeit UTC vom iPhone.
-    let zugeordnet: BTreeSet<String> = a
-        .ueber_timecode
+    // 5. Zeitfenster der Klappe. Versatz o = Timecode minus iPhone-Uhr; jedes sichere Paar grenzt ihn ein: die Aufnahme
+    // beginnt nach der Klappe (o ≤ Beginn − Klappe) und endet vor der nächsten (o ≥ Ende − nächste Klappe). Die Uhr der
+    // Kamera kann mitten im Tag springen (von Hand neu gestellt, Simulation 17.10.2026): darum gilt die Zeit für einen
+    // Clip nur zwischen zwei sicheren Clips derselben Rolle, und er muss nach den Bezugspunkten beider Seiten sicher in
+    // denselben Abschnitt fallen. Springt die Uhr einmal, stimmt eine Seite. Zusätzlich die Reihenfolge der Aufnahmen:
+    // ein Clip liegt zeitlich zwischen seinen sicheren Nachbarn, unabhängig von jeder Uhr.
+    let zeiten = |stamm: &str| clip_zeiten(kopie, zeile.get(stamm).copied(), soll);
+    let rolle_von = |stamm: &str| ohne_datum(stamm).map(|(m, n, k)| ((m, k), n));
+    type Grenzen = (Option<i64>, Option<i64>);
+    let schneiden = |a: Grenzen, b: Grenzen| -> Grenzen {
+        (
+            match (a.0, b.0) {
+                (Some(x), Some(y)) => Some(x.max(y)),
+                (x, y) => x.or(y),
+            },
+            match (a.1, b.1) {
+                (Some(x), Some(y)) => Some(x.min(y)),
+                (x, y) => x.or(y),
+            },
+        )
+    };
+    let leer = |g: Grenzen| matches!(g, (Some(l), Some(h)) if l > h);
+    // Sichere Paare je Rolle: (Zähler, Grenzen, Klappe des Takes, Ende seines Abschnitts) — Zeiten des iPhones.
+    type Anker = (u32, Grenzen, chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>);
+    let mut anker: BTreeMap<(String, String), Vec<Anker>> = BTreeMap::new();
+    let mut global: Grenzen = (None, None);
+    for (c, (i, _)) in &zu {
+        let s = &soll[*i];
+        let (Some((c0, c1, true)), Some(klappe), Some((rolle, n))) = (zeiten(c), zeit_von(&s.start_zeit), rolle_von(c))
+        else {
+            continue;
+        };
+        let g = (
+            zeit_von(&s.fenster_bis).map(|nx| (c1 - nx).num_milliseconds() - EPS_MS),
+            Some((c0 - klappe).num_milliseconds() + EPS_MS),
+        );
+        global = schneiden(global, g);
+        let ende = zeit_von(&s.fenster_bis)
+            .unwrap_or(klappe + chrono::Duration::seconds(FENSTER_OFFEN_S))
+            .min(klappe + chrono::Duration::seconds(FENSTER_OFFEN_S));
+        anker.entry(rolle).or_default().push((n, g, klappe, ende));
+    }
+    for l in anker.values_mut() {
+        l.sort_by_key(|a| a.0);
+    }
+    if leer(global) {
+        a.pruefen.push((
+            String::new(),
+            "Timecode der Kamera und Klappen des iPhones passen nicht durchgehend zusammen (Uhr verstellt?): über die Zeit nur noch zwischen sicheren Clips mit gleichem Versatz".into(),
+        ));
+    }
+    a.zeitversatz_ms = match global {
+        (Some(l), Some(h)) if l <= h => Some((l, h)),
+        _ => None,
+    };
+    // Grenzen einer Seite: vom nächsten sicheren Clip weg, solange die Grenzen zusammenpassen.
+    let seite = |liste: &[Anker]| -> Grenzen {
+        let mut acc: Grenzen = (None, None);
+        for (_, g, _, _) in liste {
+            let neu = schneiden(acc, *g);
+            if leer(neu) {
+                break;
+            }
+            acc = neu;
+        }
+        acc
+    };
+    // Abschnitte aller Takes: Klappe bis nächste Klappe (höchstens 30 min).
+    let abschnitte: Vec<(usize, chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>)> = soll
         .iter()
-        .map(|(s, _)| s.take_id.clone())
-        .chain(a.mehrdeutig.iter().map(|(s, _)| s.take_id.clone()))
+        .enumerate()
+        .filter_map(|(i, s)| {
+            let k = zeit_von(&s.start_zeit)?;
+            let n = zeit_von(&s.fenster_bis)
+                .unwrap_or(k + chrono::Duration::seconds(FENSTER_OFFEN_S))
+                .min(k + chrono::Duration::seconds(FENSTER_OFFEN_S));
+            Some((i, k, n))
+        })
         .collect();
-    let mut vorschlaege = Vec::new();
-    for (_, s) in soll.iter().enumerate().filter(|(i, s)| {
-        let offen = s.clip.trim().is_empty()
-            || (s.name_geschaetzt && a.fehlt.iter().any(|f| f.take_id == s.take_id && !f.take_id.is_empty()));
-        offen && !s.start_zeit.is_empty() && !erledigt.contains(i)
-    }) {
-        if !s.take_id.is_empty() && zugeordnet.contains(&s.take_id) {
+    // Für alle noch offenen Clips, auch gesperrte (ID eines gelöschten oder fremden Takes): Sie werden nie automatisch
+    // zugeordnet, könnten aber zu einem Take gehören und zählen darum als Mitbewerber (Simulation 17.10.2026: sonst galt
+    // ein Take fälschlich als „ohne Aufnahme“).
+    let mut moeglich: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+    let mut sicher: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+    for c in clips {
+        let stamm = ohne_endung(&c.pfad).to_owned();
+        if zu.contains_key(&stamm) {
             continue;
         }
-        let Some((von, bis)) = fenster(s) else { continue };
-        let treffer: Vec<String> = clips
-            .iter()
-            .filter(|c| !bekannt.contains(ohne_endung(&c.pfad)) && !nicht_raten.contains(ohne_endung(&c.pfad)))
-            .filter(|c| {
-                c.angaben
-                    .as_ref()
-                    .and_then(|a| Some((a.start_tc.as_deref()?, a.fps?)))
-                    .and_then(|(tc, fps)| tc_als_zeit(&s.drehtag, tc, fps))
-                    // Ohne Timecode (iPhone, Fotoapparat): Dateizeit = Ende der Aufnahme, minus Dauer = Beginn.
-                    .or_else(|| start_aus_dateizeit(kopie, c))
-                    .is_some_and(|t| t >= von && t < bis)
-            })
-            .map(|c| c.pfad.clone())
-            .collect();
-        vorschlaege.push((s.clone(), treffer));
+        let Some((c0, _, tc)) = zeiten(&stamm) else { continue };
+        if !tc {
+            // Ohne Timecode (iPhone, Fotoapparat): Uhr des Geräts, ±EPS.
+            for (i, k, n) in &abschnitte {
+                let (nach, vor) = ((c0 - *k).num_milliseconds(), (c0 - *n).num_milliseconds());
+                if (-EPS_MS).max(vor + 1) <= EPS_MS.min(nach) {
+                    moeglich.entry(stamm.clone()).or_default().push(*i);
+                    if nach >= EPS_MS && vor < -EPS_MS {
+                        sicher.entry(stamm.clone()).or_default().push(*i);
+                    }
+                }
+            }
+            continue;
+        }
+        let Some((rolle, nr)) = rolle_von(&stamm) else { continue };
+        let leer_liste = Vec::new();
+        let liste = anker.get(&rolle).unwrap_or(&leer_liste);
+        let davor: Vec<_> = liste.iter().filter(|a| a.0 < nr).rev().cloned().collect();
+        let danach: Vec<_> = liste.iter().filter(|a| a.0 > nr).cloned().collect();
+        // Reihenfolge (ohne Uhr der Kamera): Die Aufnahme begann nach der Klappe des sicheren Takes davor und vor dem
+        // Ende des Abschnitts des sicheren Takes danach.
+        let frueheste = davor.first().map(|a| a.2);
+        let spaeteste = danach.first().map(|a| a.3);
+        let (g_vor, g_nach) = (seite(&davor), seite(&danach));
+        // Mögliche Grenzen: was eine der beiden Seiten zulässt (die wahre liegt in mindestens einer).
+        let huelle: Grenzen = match (davor.is_empty(), danach.is_empty()) {
+            (false, false) => {
+                (g_vor.0.zip(g_nach.0).map(|(x, y)| x.min(y)), g_vor.1.zip(g_nach.1).map(|(x, y)| x.max(y)))
+            }
+            _ => (None, None),
+        };
+        for (i, k, n) in &abschnitte {
+            if frueheste.is_some_and(|f| *n <= f) || spaeteste.is_some_and(|s| *k >= s) {
+                continue;
+            }
+            if anderswo(*i, &stamm) {
+                continue;
+            }
+            let (nach, vor) = ((c0 - *k).num_milliseconds(), (c0 - *n).num_milliseconds());
+            // Möglich, wenn ein Versatz in der Hülle passt (ohne Hülle: jeder).
+            let lo = huelle.0.unwrap_or(i64::MIN / 4);
+            let hi = huelle.1.unwrap_or(i64::MAX / 4);
+            if lo.max(vor.saturating_add(1)) > hi.min(nach) {
+                continue;
+            }
+            moeglich.entry(stamm.clone()).or_default().push(*i);
+            // Sicher nach beiden Seiten (beide Grenzen bekannt).
+            let sicher_mit = |g: Grenzen| matches!(g, (Some(l), Some(h)) if nach >= h && vor < l);
+            if !davor.is_empty() && !danach.is_empty() && sicher_mit(g_vor) && sicher_mit(g_nach) {
+                sicher.entry(stamm.clone()).or_default().push(*i);
+            }
+        }
     }
-    verteilen(vorschlaege, &mut bekannt, &mut a.ueber_zeitfenster, &mut a.mehrdeutig);
-    // Über das Zeitfenster gefunden: nicht mehr „fehlt“.
-    let im_fenster: BTreeSet<String> = a.ueber_zeitfenster.iter().map(|(s, _)| s.take_id.clone()).collect();
-    a.fehlt.retain(|s| s.take_id.is_empty() || !im_fenster.contains(&s.take_id));
+    let mut je_take: BTreeMap<usize, Vec<String>> = BTreeMap::new();
+    for (c, takes) in &moeglich {
+        for i in takes {
+            je_take.entry(*i).or_default().push(c.clone());
+        }
+    }
+    for (c, takes) in &moeglich {
+        let [i] = takes[..] else { continue };
+        if gesperrt.contains(c)
+            || sicher.get(c).is_none_or(|s| s[..] != [i])
+            || strittig.contains(&i)
+            || hat(&zu, i, &kamera(c)).is_some()
+        {
+            continue;
+        }
+        let gleiche_kamera = |x: &String| kamera(x) == kamera(c);
+        if je_take.get(&i).is_some_and(|l| l.iter().filter(|x| gleiche_kamera(x)).count() == 1) {
+            zu.insert(c.clone(), (i, Art::Zeitfenster));
+        }
+    }
+    // Mehrere offene Clips für einen Abschnitt: alle nach „Zu klären“ (Liste für den Bericht).
+    for (i, l) in &je_take {
+        let offen: Vec<String> = l.iter().filter(|c| !zu.contains_key(*c)).map(|c| pfad_von(c)).collect();
+        if offen.len() > 1 && !strittig.contains(i) && zu.values().all(|(j, _)| j != i) {
+            a.mehrdeutig.push((soll[*i].clone(), offen));
+        }
+    }
+    for (c, takes) in &moeglich {
+        if !zu.contains_key(c) {
+            a.offen_moeglich.extend(takes.iter().map(|i| (soll[*i].take_id.clone(), pfad_von(c))));
+            if let (Some([i]), [j]) = (sicher.get(c).map(Vec::as_slice), &takes[..]) {
+                if i == j {
+                    a.offen_sicher.push((soll[*i].take_id.clone(), pfad_von(c)));
+                }
+            }
+        }
+    }
+    for (c, i) in &info1_offen {
+        if let Some((j, Art::Zeitfenster)) = zu.get(c) {
+            if j != i {
+                a.pruefen.push((
+                    pfad_von(c),
+                    format!(
+                        "Info 1 nennt Take {}, die Zeit Take {}: Slate ohne Verbindung, zugeordnet nach der Zeit",
+                        soll[*i].take, soll[*j].take
+                    ),
+                ));
+            }
+        }
+    }
 
-    a.unerwartet = auf_karte.into_iter().filter(|(n, _)| !bekannt.contains(n)).map(|(_, p)| p).collect();
+    // Ergebnis in die bisherigen Listen.
+    for (c, (i, art)) in &zu {
+        let paar = (soll[*i].clone(), pfad_von(c));
+        match art {
+            Art::Qr => a.ueber_qr.push(paar),
+            Art::Clipname => a.gefunden.push(paar),
+            Art::Info1 => a.ueber_kennung.push(paar),
+            Art::Timecode => a.ueber_timecode.push(paar),
+            Art::Zeitfenster => a.ueber_zeitfenster.push(paar),
+        }
+    }
+    let in_klaerung: BTreeSet<String> =
+        a.mehrdeutig.iter().flat_map(|(_, l)| l.iter().map(|p| ohne_endung(p).to_owned())).collect();
+    a.unerwartet = auf_karte
+        .iter()
+        .filter(|(n, _)| !zu.contains_key(*n) && !in_klaerung.contains(*n))
+        .map(|(_, p)| p.clone())
+        .collect();
     a
+}
+
+/// Beginn und Ende eines Clips (Zeit) und ob sie aus dem Timecode stammen.
+type ClipZeit = (chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>, bool);
+
+/// Grenzen des Versatzes Timecode minus iPhone-Uhr aus sicheren Paaren (alle zusammen; `None` = unbekannt). Nur zur
+/// Gegenprobe (eine Ablehnung ist nie gefährlich), nicht zum Zuordnen.
+fn versatz_aus(
+    zu: &BTreeMap<String, (usize, Art)>,
+    soll: &[SollClip],
+    zeiten: &dyn Fn(&str) -> Option<ClipZeit>,
+) -> (Option<i64>, Option<i64>) {
+    let (mut lo, mut hi): (Option<i64>, Option<i64>) = (None, None);
+    for (c, (i, _)) in zu {
+        let s = &soll[*i];
+        let (Some((c0, c1, true)), Some(k)) = (zeiten(c), zeit_von(&s.start_zeit)) else { continue };
+        let h = (c0 - k).num_milliseconds() + EPS_MS;
+        hi = Some(hi.map_or(h, |x| x.min(h)));
+        if let Some(n) = zeit_von(&s.fenster_bis) {
+            let l = (c1 - n).num_milliseconds() - EPS_MS;
+            lo = Some(lo.map_or(l, |x| x.max(l)));
+        }
+    }
+    (lo, hi)
+}
+
+/// Spielraum für Rundung und Uhren innerhalb einer Sekunde (Bilder, iPhone-Zeit in Millisekunden).
+const EPS_MS: i64 = 2_000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Art {
+    Qr,
+    Clipname,
+    Info1,
+    Timecode,
+    Zeitfenster,
+}
+
+fn zeit_von(t: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    chrono::DateTime::parse_from_rfc3339(t).ok().map(|z| z.to_utc())
+}
+
+/// Beginn und Ende eines Clips in UTC und ob sie aus dem Timecode der Kamera stammen. Timecode = Tageszeit am Drehtag
+/// (Europe/Zurich; über Mitternacht weitergezählt). Ohne Timecode: Dateizeit (Ende der Aufnahme) minus Dauer.
+fn clip_zeiten(kopie: &Kopie, c: Option<&crate::ale::ClipZeile>, soll: &[SollClip]) -> Option<ClipZeit> {
+    let c = c?;
+    let an = c.angaben.as_ref();
+    let drehtag = soll.iter().map(|s| s.drehtag.as_str()).find(|d| !d.is_empty())?;
+    if let Some((start, ende, fps)) = an.and_then(|a| Some((a.start_tc.as_deref()?, a.end_tc.as_deref(), a.fps?))) {
+        let s = tc_als_zeit(drehtag, start, fps)?;
+        let mut e = match ende {
+            Some(e) => tc_als_zeit(drehtag, e, fps)?,
+            None => {
+                s + chrono::Duration::milliseconds(
+                    (an.and_then(|a| a.bilder).unwrap_or(0) as f64 / fps * 1000.0) as i64,
+                )
+            }
+        };
+        if e < s {
+            e += chrono::Duration::days(1);
+        }
+        return Some((s, e, true));
+    }
+    let ende = kopie.dateien.iter().find(|d| d.pfad == c.pfad)?.geaendert;
+    let dauer = an.and_then(|a| Some(a.bilder? as f64 / a.fps.filter(|f| *f > 0.0)?)).unwrap_or(0.0);
+    Some((ende - chrono::Duration::milliseconds((dauer * 1000.0) as i64), ende, false))
 }
 
 /// Kamera eines Clips: bei ARRI-Namen der Kamerabuchstabe vorne (`A001C003…` → `A`), sonst unbekannt (alle gleich).
 fn kamera(stamm: &str) -> String {
     if arri_reel(stamm).is_some() {
-        stamm[..1].to_ascii_uppercase()
+        ohne_endung(stamm)[..1].to_ascii_uppercase()
     } else {
         String::new()
     }
@@ -421,51 +700,28 @@ fn kamera(stamm: &str) -> String {
 
 /// Ordnet zu, was eindeutig ist, in beide Richtungen: ein Take mit genau einem Kandidaten, und dieser Clip ist von
 /// keinem anderen Take beansprucht. Sonst kommen alle Beteiligten nach „Zu klären“, statt still beim ersten oder
-/// letzten Take zu landen (Entscheid „Datenfluss“, 10.10.2026). Etwa ein Clip, der wegen des Uhren-Spielraums in die
-/// Fenster zweier Klappen fällt.
-fn verteilen(
-    vorschlaege: Vec<(SollClip, Vec<String>)>,
-    bekannt: &mut BTreeSet<String>,
-    eindeutig: &mut Vec<(SollClip, String)>,
-    mehrdeutig: &mut Vec<(SollClip, Vec<String>)>,
+/// letzten Take zu landen (Entscheid „Datenfluss“, 10.10.2026).
+fn eindeutig_verteilen(
+    vorschlaege: Vec<(usize, Vec<String>)>,
+    art: Art,
+    zu: &mut BTreeMap<String, (usize, Art)>,
+    a: &mut Abgleich,
+    soll: &[SollClip],
+    pfad_von: &dyn Fn(&str) -> String,
 ) {
     let mut beansprucht: BTreeMap<String, usize> = BTreeMap::new();
     for p in vorschlaege.iter().flat_map(|(_, k)| k) {
         *beansprucht.entry(p.clone()).or_default() += 1;
     }
-    for (s, kandidaten) in vorschlaege {
+    for (i, kandidaten) in vorschlaege {
         match &kandidaten[..] {
             [] => {}
             [einer] if beansprucht[einer] == 1 => {
-                bekannt.insert(ohne_endung(einer).to_owned());
-                eindeutig.push((s, einer.clone()));
+                zu.insert(einer.clone(), (i, art));
             }
-            _ => mehrdeutig.push((s, kandidaten)),
+            _ => a.mehrdeutig.push((soll[i].clone(), kandidaten.iter().map(|k| pfad_von(k)).collect())),
         }
     }
-    // Umstrittene Clips gehören keinem Take; sie stehen nicht zusätzlich unter „unerwartet“.
-    for (p, n) in beansprucht {
-        if n > 1 {
-            bekannt.insert(ohne_endung(&p).to_owned());
-        }
-    }
-}
-
-/// Beginn eines Clips ohne Timecode aus der Dateizeit (die Kamera schreibt die Datei zum Ende der Aufnahme fertig).
-fn start_aus_dateizeit(kopie: &Kopie, c: &crate::ale::ClipZeile) -> Option<chrono::DateTime<chrono::Utc>> {
-    let ende = kopie.dateien.iter().find(|d| d.pfad == c.pfad)?.geaendert;
-    let dauer = c.angaben.as_ref().and_then(|a| Some(a.bilder? as f64 / a.fps.filter(|f| *f > 0.0)?)).unwrap_or(0.0);
-    Some(ende - chrono::Duration::milliseconds((dauer * 1000.0) as i64))
-}
-
-/// Fenster eines Takes in UTC: Klappe minus Spielraum bis zur nächsten Klappe, höchstens 30 min. Der Clip beginnt
-/// kurz nach der Klappe; ohne Obergrenze reichte das Fenster des letzten Takes bis zur ersten Klappe des Folgetags.
-fn fenster(s: &SollClip) -> Option<(chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>)> {
-    let von = chrono::DateTime::parse_from_rfc3339(&s.start_zeit).ok()?.to_utc();
-    let laengstens = von + chrono::Duration::seconds(FENSTER_OFFEN_S);
-    let bis =
-        chrono::DateTime::parse_from_rfc3339(&s.fenster_bis).map(|b| b.to_utc().min(laengstens)).unwrap_or(laengstens);
-    Some((von - chrono::Duration::seconds(UHR_SPIEL_S), bis))
 }
 
 /// Ortsdatum (Europe/Zurich, `JJJJ-MM-TT`) eines Zeitpunkts in RFC 3339, z. B. der Klappe eines Studio-Takes.
@@ -522,6 +778,8 @@ pub fn stage_csv(text: &str) -> Result<Vec<SollClip>, String> {
             fenster_bis: String::new(),
             drehtag: String::new(),
             name_geschaetzt: false,
+            rec_bestaetigt: !clip.is_empty(),
+            vergeben: vec![],
         });
     }
     Ok(aus)
@@ -612,6 +870,8 @@ mod tests {
             fenster_bis: String::new(),
             drehtag: String::new(),
             name_geschaetzt: false,
+            rec_bestaetigt: false,
+            vergeben: vec![],
         };
         let soll = vec![
             take("1", "A009C008_120101_R132"),
@@ -630,14 +890,10 @@ mod tests {
         let mut paare: Vec<(String, String)> =
             a.gefunden.iter().map(|(s, p)| (s.take.clone(), ohne_endung(p)[5..8].to_owned())).collect();
         paare.sort();
-        assert_eq!(
-            paare,
-            [("1", "008"), ("5", "009"), ("6", "010"), ("7", "011"), ("8", "012"), ("9", "013")]
-                .map(|(a, b)| (a.to_owned(), b.to_owned()))
-        );
-        let ohne: Vec<&str> = a.fehlt.iter().map(|s| s.take.as_str()).collect();
-        assert_eq!(ohne, ["2", "3", "4"]);
-        assert!(a.unerwartet.is_empty());
+        // Ohne Zeitangaben ordnen nur die echten Namen zu; C010–C012 kommen nach „Zu klären“ (17.10.2026: der Name der
+        // App ist nur geschätzt, mit gestellter Kamerauhr gliche er sonst zufällig einem fremden Clip).
+        assert_eq!(paare, [("1", "008"), ("5", "009"), ("9", "013")].map(|(a, b)| (a.to_owned(), b.to_owned())));
+        assert_eq!(a.unerwartet.len(), 3);
     }
 
     /// Dasselbe mit Info 1 wie auf der echten Karte: C010–C012 tragen alle die ID von Take 6.
@@ -648,6 +904,10 @@ mod tests {
             szene: "TREPPENHAUS-01".into(),
             take: nr.into(),
             take_id: format!("01TAKE{nr:0>20}"),
+            // Verbunden: Take 5 und 9 hat die Kamera bestätigt (Name von der Kamera); 6–8 nur Vorschlag der App.
+            rec_bestaetigt: !clip.contains("261015"),
+            vergeben: vec![],
+            name_geschaetzt: clip.contains("261015"),
             ..SollClip::default()
         };
         let soll = vec![
@@ -682,13 +942,11 @@ mod tests {
             .map(|(s, p)| (s.take.clone(), ohne_endung(p)[5..8].to_owned()))
             .collect();
         paare.sort();
-        assert_eq!(
-            paare,
-            [("5", "009"), ("6", "010"), ("7", "011"), ("8", "012"), ("9", "013")]
-                .map(|(a, b)| (a.to_owned(), b.to_owned()))
-        );
+        // Take 6 hat seine Aufnahme nicht bestätigt (keine Verbindung beim REC): Info 1 allein reicht nicht, und ohne
+        // Zeitangaben bleiben C010–C012 für „Zu klären“; C011 und C012 tragen die ID nur weiter (Hinweis).
+        assert_eq!(paare, [("5", "009"), ("9", "013")].map(|(a, b)| (a.to_owned(), b.to_owned())));
         assert_eq!(a.pruefen.len(), 2, "C011 und C012 mit Hinweis");
-        assert!(a.mehrdeutig.is_empty() && a.unerwartet.is_empty());
+        assert_eq!(a.unerwartet.len(), 3);
     }
 }
 
@@ -732,6 +990,8 @@ mod timecode_tests {
             fenster_bis: String::new(),
             drehtag: String::new(),
             name_geschaetzt: false,
+            rec_bestaetigt: false,
+            vergeben: vec![],
         }
     }
 
@@ -818,10 +1078,9 @@ mod timecode_tests {
             ],
             &clips,
         );
-        assert!(a.ueber_zeitfenster.is_empty());
-        let ids: Vec<&str> = a.mehrdeutig.iter().map(|(s, _)| s.take_id.as_str()).collect();
-        assert_eq!(ids, ["T1", "T2"]);
-        assert!(a.unerwartet.is_empty());
+        // Ohne sicheres Paar ist der Versatz unbekannt: keine Zuordnung über die Zeit, der Clip kommt nach „Zu klären“.
+        assert!(a.ueber_zeitfenster.is_empty() && a.zeitversatz_ms.is_none());
+        assert_eq!(a.unerwartet, ["A001C003_261028_R1AB.mov"]);
     }
 
     #[test]
@@ -875,22 +1134,56 @@ mod timecode_tests {
     const T1: &str = "01JA2B3C4D5E6F7G8H9JKMNPQR";
     const T2: &str = "01JA2B3C4D5E6F7G8H9JKMNPQS";
 
+    /// Clip davor auf derselben Karte, ohne Slate: der Slate wechselt auf der Karte.
+    fn davor(pfad: &str) -> ClipZeile {
+        zeile(pfad, "09:00:00:00", "09:00:10:00")
+    }
+
     #[test]
     fn info1_ist_erste_wahl_auch_fuer_a_und_b() {
-        let k = kopie(&["A001C003_261028_R1AB.mov", "B001C007_261028_R2CD.mov"]);
-        let clips = [mit_id("A001C003_261028_R1AB.mov", T1), mit_id("B001C007_261028_R2CD.mov", T1)];
-        let a = abgleichen(&k, &[take_mit_id(T1, "")], &clips);
+        let k = kopie(&[
+            "A001C002_261028_R1AB.mov",
+            "A001C003_261028_R1AB.mov",
+            "B001C006_261028_R2CD.mov",
+            "B001C007_261028_R2CD.mov",
+        ]);
+        let clips = [
+            davor("A001C002_261028_R1AB.mov"),
+            mit_id("A001C003_261028_R1AB.mov", T1),
+            davor("B001C006_261028_R2CD.mov"),
+            mit_id("B001C007_261028_R2CD.mov", T1),
+        ];
+        let a = abgleichen(&k, &[SollClip { rec_bestaetigt: true, ..take_mit_id(T1, "") }], &clips);
         let p: Vec<&str> = a.ueber_kennung.iter().map(|(_, p)| p.as_str()).collect();
         assert_eq!(p, ["A001C003_261028_R1AB.mov", "B001C007_261028_R2CD.mov"]);
-        assert!(a.mehrdeutig.is_empty() && a.unerwartet.is_empty());
+        // Ohne bestätigte Aufnahme kann der Slate vom vorigen Take stammen: dann nicht automatisch.
+        let b = abgleichen(&k, &[take_mit_id(T1, "")], &clips);
+        assert!(b.ueber_kennung.is_empty() && b.unerwartet.len() == 4);
+        assert!(a.mehrdeutig.is_empty() && a.unerwartet.len() == 2);
+    }
+
+    #[test]
+    fn info1_im_ersten_clip_der_karte_nicht_automatisch() {
+        // Kartenwechsel ohne Verbindung: Die Kamera behält den Slate von Take 1, dessen Aufnahme auf der vorigen Karte
+        // liegt. Der erste Clip der neuen Karte trägt seine ID (Simulation 17.10.2026, Nr. 8404).
+        let k = kopie(&["A010C001_261028_R9QX.mov", "A010C002_261028_R9QX.mov"]);
+        let clips = [mit_id("A010C001_261028_R9QX.mov", T1), mit_id("A010C002_261028_R9QX.mov", T1)];
+        let a = abgleichen(&k, &[SollClip { rec_bestaetigt: true, ..take_mit_id(T1, "") }], &clips);
+        assert!(a.ueber_kennung.is_empty());
+        assert!(a.pruefen.iter().any(|(c, g)| c == "A010C001_261028_R9QX.mov" && g.contains("vorigen Karte")));
     }
 
     #[test]
     fn info1_vom_vorigen_take_ist_zu_klaeren() {
         // Das Schreiben von Info 1 scheiterte vor Take 2: sein Clip trägt noch die ID von Take 1.
-        let k = kopie(&["A001C003_261028_R1AB.mov", "A001C004_261028_R1AB.mov"]);
-        let clips = [mit_id("A001C003_261028_R1AB.mov", T1), mit_id("A001C004_261028_R1AB.mov", T1)];
-        let a = abgleichen(&k, &[take_mit_id(T1, ""), take_mit_id(T2, "A001C004_261028_R1AB")], &clips);
+        let k = kopie(&["A001C002_261028_R1AB.mov", "A001C003_261028_R1AB.mov", "A001C004_261028_R1AB.mov"]);
+        let clips = [
+            davor("A001C002_261028_R1AB.mov"),
+            mit_id("A001C003_261028_R1AB.mov", T1),
+            mit_id("A001C004_261028_R1AB.mov", T1),
+        ];
+        let t1 = SollClip { rec_bestaetigt: true, ..take_mit_id(T1, "") };
+        let a = abgleichen(&k, &[t1, take_mit_id(T2, "A001C004_261028_R1AB")], &clips);
         // Die ID gilt nur für den ersten Clip; C004 gehört über seinen Namen zu Take 2 (Marlon, 16.10.2026).
         let p: Vec<(&str, &str)> = a.ueber_kennung.iter().map(|(s, p)| (s.take_id.as_str(), p.as_str())).collect();
         assert_eq!(p, [(T1, "A001C003_261028_R1AB.mov")]);
@@ -907,8 +1200,13 @@ mod timecode_tests {
             [mit_id("A001C003_261028_R1AB.mov", T1), zeile("A001C004_261028_R1AB.mov", "11:00:00:00", "11:00:05:00")];
         // Take 1 nennt per CAP den Clip C004, Info 1 steht aber in C003.
         let a = abgleichen(&k, &[take_mit_id(T1, "A001C004_261028_R1AB")], &clips);
-        assert!(a.ueber_kennung.is_empty() && a.gefunden.is_empty());
-        assert_eq!(a.mehrdeutig[0].1, ["A001C003_261028_R1AB.mov", "A001C004_261028_R1AB.mov"]);
+        // Der Name kommt von der Kamera (nach dem Stopp): er gilt. C003 trägt nur die ID (ohne neuen Slate gedreht)
+        // und kommt mit Hinweis nach „Zu klären“.
+        let g: Vec<&str> = a.gefunden.iter().map(|(_, p)| p.as_str()).collect();
+        assert_eq!(g, ["A001C004_261028_R1AB.mov"]);
+        assert!(a.ueber_kennung.is_empty());
+        assert_eq!(a.unerwartet, ["A001C003_261028_R1AB.mov"]);
+        assert_eq!(a.pruefen.len(), 1);
     }
 
     #[test]
@@ -924,10 +1222,19 @@ mod timecode_tests {
     fn take_ohne_clipnamen_und_tc_ueber_das_zeitfenster() {
         // Drehtag 28.10.2026 (Winterzeit, UTC+1). Klappe Take 1 um 09:44:55 UTC, Take 2 um 09:50:00 UTC.
         // Clip 1 beginnt 10:45:10 Ortszeit = 09:45:10 UTC → Take 1; Clip 2 um 10:50:30 Ortszeit → Take 2.
-        let k = kopie(&["A001C003_261028_R1AB.mov", "A001C004_261028_R1AB.mov"]);
+        // Take 0 ist sicher (QR, Aufnahme 2 s nach der Klappe, Ende 5 s vor Take 1): Versatz Timecode/iPhone eingegrenzt.
+        // Take 3 ist ebenfalls sicher (QR): die offenen Clips liegen zwischen zwei sicheren.
+        let k = kopie(&[
+            "A001C002_261028_R1AB.mov",
+            "A001C003_261028_R1AB.mov",
+            "A001C004_261028_R1AB.mov",
+            "A001C005_261028_R1AB.mov",
+        ]);
         let clips = [
+            ClipZeile { qr: vec!["PA:T0".into()], ..zeile("A001C002_261028_R1AB.mov", "10:40:02:00", "10:44:50:00") },
             zeile("A001C003_261028_R1AB.mov", "10:45:10:00", "10:46:00:00"),
             zeile("A001C004_261028_R1AB.mov", "10:50:30:00", "10:51:00:00"),
+            ClipZeile { qr: vec!["PA:T3".into()], ..zeile("A001C005_261028_R1AB.mov", "10:55:02:00", "10:55:30:00") },
         ];
         let take = |id: &str, von: &str, bis: &str| SollClip {
             take_id: id.into(),
@@ -938,44 +1245,69 @@ mod timecode_tests {
             end_tc: String::new(),
             ..soll("", "")
         };
-        let a = abgleichen(
-            &k,
-            &[
-                take("T1", "2026-10-28T09:44:55+00:00", "2026-10-28T09:50:00+00:00"),
-                take("T2", "2026-10-28T09:50:00.5+00:00", ""),
-            ],
-            &clips,
-        );
+        let soll_liste = [
+            take("T0", "2026-10-28T09:40:00+00:00", "2026-10-28T09:44:55+00:00"),
+            take("T1", "2026-10-28T09:44:55+00:00", "2026-10-28T09:50:00+00:00"),
+            take("T2", "2026-10-28T09:50:00.5+00:00", "2026-10-28T09:55:00+00:00"),
+            take("T3", "2026-10-28T09:55:00+00:00", "2026-10-28T09:55:35+00:00"),
+        ];
+        let a = abgleichen(&k, &soll_liste, &clips);
         let paare: Vec<(&str, &str)> =
             a.ueber_zeitfenster.iter().map(|(s, p)| (s.take_id.as_str(), p.as_str())).collect();
         assert_eq!(paare, [("T1", "A001C003_261028_R1AB.mov"), ("T2", "A001C004_261028_R1AB.mov")]);
         assert!(a.unerwartet.is_empty() && a.mehrdeutig.is_empty());
+        assert!(a.zeitversatz_ms.is_some());
+        // Nur auf einer Seite ein sicherer Clip: Die Uhr könnte dazwischen verstellt worden sein, keine Zuordnung.
+        let b = abgleichen(&k, &soll_liste[..3], &clips[..3]);
+        assert!(b.ueber_zeitfenster.is_empty());
     }
 
     #[test]
     fn geschaetzter_name_ueber_das_zeitfenster() {
         // Die App schätzte „A001C009_261016“, die Kamera (Uhr auf 2012) schrieb C004_120101; die Klappe passt zur
         // Tageszeit im Timecode (Marlon, 17.10.2026).
-        let k = kopie(&["A001C004_120101_R1AB.mov"]);
-        let clips = [zeile("A001C004_120101_R1AB.mov", "10:50:30:00", "10:51:00:00")];
-        let s = SollClip {
-            take_id: "T2".into(),
-            clip: "A001C009_261016_R1AB".into(),
-            name_geschaetzt: true,
-            start_zeit: "2026-10-28T09:50:00+00:00".into(),
+        let k = kopie(&["A001C003_120101_R1AB.mov", "A001C004_120101_R1AB.mov", "A001C005_120101_R1AB.mov"]);
+        let clips = [
+            ClipZeile { qr: vec!["PA:T1".into()], ..zeile("A001C003_120101_R1AB.mov", "10:45:02:00", "10:49:50:00") },
+            zeile("A001C004_120101_R1AB.mov", "10:50:30:00", "10:51:00:00"),
+            ClipZeile { qr: vec!["PA:T3".into()], ..zeile("A001C005_120101_R1AB.mov", "10:55:03:00", "10:55:20:00") },
+        ];
+        let t3 = SollClip {
+            take_id: "T3".into(),
+            start_zeit: "2026-10-28T09:55:00+00:00".into(),
+            fenster_bis: "2026-10-28T09:55:25+00:00".into(),
             drehtag: "2026-10-28".into(),
             start_tc: String::new(),
             end_tc: String::new(),
             ..soll("", "")
         };
-        let a = abgleichen(&k, std::slice::from_ref(&s), &clips);
+        let t1 = SollClip {
+            take_id: "T1".into(),
+            start_zeit: "2026-10-28T09:45:00+00:00".into(),
+            fenster_bis: "2026-10-28T09:50:00+00:00".into(),
+            drehtag: "2026-10-28".into(),
+            start_tc: String::new(),
+            end_tc: String::new(),
+            ..soll("", "")
+        };
+        let s = SollClip {
+            take_id: "T2".into(),
+            clip: "A001C009_261016_R1AB".into(),
+            name_geschaetzt: true,
+            start_zeit: "2026-10-28T09:50:00+00:00".into(),
+            fenster_bis: "2026-10-28T09:55:00+00:00".into(),
+            drehtag: "2026-10-28".into(),
+            start_tc: String::new(),
+            end_tc: String::new(),
+            ..soll("", "")
+        };
+        let a = abgleichen(&k, &[t1.clone(), s.clone(), t3], &clips);
         let paare: Vec<(&str, &str)> =
             a.ueber_zeitfenster.iter().map(|(s, p)| (s.take_id.as_str(), p.as_str())).collect();
         assert_eq!(paare, [("T2", "A001C004_120101_R1AB.mov")]);
         assert!(a.fehlt.is_empty() && a.unerwartet.is_empty());
-        // Bestätigter Name (nicht geschätzt): kein Zeitfenster, er fehlt.
-        let b = abgleichen(&k, &[SollClip { name_geschaetzt: false, ..s }], &clips);
-        assert!(b.ueber_zeitfenster.is_empty() && b.fehlt.len() == 1);
+        // Der geschätzte Name selbst ordnet nie zu.
+        assert!(a.gefunden.is_empty());
     }
 
     #[test]

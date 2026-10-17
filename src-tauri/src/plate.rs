@@ -339,7 +339,21 @@ impl Plate {
             )?,
             _ => self.lesen(z, &format!("dreh?datum=eq.{}&{auswahl}", url_teil(&datum)))?,
         };
-        Ok(soll_aus(&v, dreh_id))
+        let mut soll = soll_aus(&v, dreh_id);
+        // Clips, die den Takes schon zugeordnet sind (andere Karten): kein zweiter über Info 1 oder die Zeit.
+        if let Some(projekt) = kopf[0]["projekt_id"].as_str() {
+            let db = self.karten_und_clips(z, projekt);
+            let mut je_take: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+            for c in db["clips"].as_array().into_iter().flatten().filter(|c| c["geloescht"] != true) {
+                for t in [&c["take_id"], &c["studio_take_id"]].into_iter().filter_map(Value::as_str) {
+                    je_take.entry(t.to_owned()).or_default().push(text(&c["name"]));
+                }
+            }
+            for s in &mut soll {
+                s.vergeben = je_take.remove(&s.take_id).unwrap_or_default();
+            }
+        }
+        Ok(soll)
     }
 
     /// Ein Drehort mit allen Plates (alle Felder), Fotos und Takes, für `02_PLATES/`.
@@ -931,15 +945,50 @@ fn drehs_aus(v: &Value) -> Vec<DrehKurz> {
 /// Takes → Soll-Liste (nur des Drehorts `dreh_id`). Ein Take zählt nur, wenn Take, Plate und Drehort nicht
 /// gelöscht sind. Clipname: von der Kamera (`clip.name`), sonst von Hand (`clip_name`); ohne Endung, gross.
 /// `v` enthält alle Drehorte des Tages, für das Zeitfenster bis zur nächsten Klappe.
-fn soll_aus(v: &Value, dreh_id: &str) -> Vec<SollClip> {
+/// Take, den der Ingest aus einem Clip angelegt hat (`take_aus_clip`): Seine Startzeit ist der Timecode des Clips als
+/// Tageszeit, keine Klappe des iPhones. Geht die Kamerauhr falsch, verschöbe sie als Klappe die Zeitfenster der Takes
+/// davor (Simulation 17.10.2026, 100 000 Drehtage). Erkennbar an `kamera.quelle = ale` (ab 0.1.52 immer gesetzt), bei
+/// älteren an der Startzeit, die auf die Millisekunde dem Timecode entspricht, und am späteren Anlegen. Das iPhone legt
+/// den Take bei der Klappe an (`erstellt_am` = `start_zeit`, echte Daten 17.10.2026), bestätigte Takes tragen
+/// `quelle = cap`.
+pub(crate) fn aus_clip_angelegt(take: &Value, drehtag: &str) -> bool {
+    if take["kamera"]["quelle"] == "ale" {
+        return true;
+    }
+    if take["kamera"]["quelle"] == "cap" || take["studio"] == true {
+        return false;
+    }
+    let zeit =
+        |f: &str| take[f].as_str().and_then(|z| chrono::DateTime::parse_from_rfc3339(z).ok()).map(|z| z.to_utc());
+    let Some(start) = zeit("start_zeit") else { return false };
+    if zeit("erstellt_am").is_some_and(|e| (e - start).num_seconds().abs() <= 60) {
+        return false;
+    }
+    let tc = text(&take["start_tc"]).or_leer(text(&take["clip"]["startTc"]));
+    !tc.is_empty()
+        && [23.976, 24.0, 25.0, 29.97, 30.0, 47.952, 48.0, 50.0, 59.94, 60.0].iter().any(|fps| {
+            ingest_kern::soll::tc_als_zeit(drehtag, &tc, *fps)
+                .is_some_and(|z| (z - start).num_microseconds().is_some_and(|d| d.abs() < 1000))
+        })
+}
+
+pub(crate) fn soll_aus(v: &Value, dreh_id: &str) -> Vec<SollClip> {
     let gilt = |x: &Value| x["geloescht"] != true;
+    // Grenzen der Zeitfenster: jede Klappe, auch gelöschter Takes (sie hat stattgefunden; sonst reichte das Fenster
+    // des vorigen Takes über ihre Aufnahme hinweg, Simulation 17.10.2026). Takes aus einem Clip haben keine Klappe.
     let mut klappen: Vec<chrono::DateTime<chrono::Utc>> = v
         .as_array()
         .into_iter()
         .flatten()
-        .filter(|d| gilt(d))
-        .flat_map(|d| d["plate"].as_array().into_iter().flatten().filter(|p| gilt(p)))
-        .flat_map(|p| p["take"].as_array().into_iter().flatten().filter(|t| gilt(t)))
+        .flat_map(|d| {
+            let tag = text(&d["datum"]);
+            d["plate"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .flat_map(|p| p["take"].as_array().into_iter().flatten())
+                .filter(move |t| !aus_clip_angelegt(t, &tag))
+        })
         .filter_map(|t| chrono::DateTime::parse_from_rfc3339(t["start_zeit"].as_str()?).ok().map(|z| z.to_utc()))
         .collect();
     klappen.sort();
@@ -963,6 +1012,7 @@ fn soll_aus(v: &Value, dreh_id: &str) -> Vec<SollClip> {
                 format!("Plate {}", plate["nummer"].as_i64().unwrap_or(0))
             };
             for take in plate["take"].as_array().into_iter().flatten().filter(|t| t["geloescht"] != true) {
+                let aus_clip = aus_clip_angelegt(take, &drehtag);
                 let clip = [&take["clip"]["name"], &take["clip_name"]]
                     .into_iter()
                     .map(text)
@@ -990,10 +1040,22 @@ fn soll_aus(v: &Value, dreh_id: &str) -> Vec<SollClip> {
                     bewertung: bewertung.into(),
                     quelle: "plate".into(),
                     take_id: text(&take["id"]),
-                    start_zeit: text(&take["start_zeit"]),
-                    fenster_bis: naechste(&text(&take["start_zeit"])),
+                    // Ohne Klappe: kein Bezugspunkt und kein Abschnitt für die Zeit (der Clip ist ihm schon zugeordnet).
+                    start_zeit: if aus_clip { String::new() } else { text(&take["start_zeit"]) },
+                    fenster_bis: if aus_clip { String::new() } else { naechste(&text(&take["start_zeit"])) },
                     drehtag: drehtag.clone(),
-                    name_geschaetzt: text(&take["clip"]["name"]).is_empty() && !text(&take["clip_name"]).is_empty(),
+                    // Bestätigt ist ein Name nur, wenn die Kamera für diesen Take das REC (`kamera.quelle = cap`) und nach dem
+                    // Stopp den Namen (`clip`) gemeldet hat. Ein Platzhalter (Build 32) trägt den Namen des letzten Clips ohne
+                    // eigenes REC: nur ein Hinweis (Simulation 17.10.2026). Studio-Takes: die Stage trägt den Namen nach der
+                    // Aufnahme ein.
+                    name_geschaetzt: !(take["studio"] == true
+                        || (!text(&take["clip"]["name"]).is_empty() && take["kamera"]["quelle"] == "cap"))
+                        && !text(&take["clip_name"]).is_empty(),
+                    // Die Kamera hat die Aufnahme dieses Takes bestätigt (Plate Assistant 16.10.2026: `kamera` mit
+                    // `quelle = cap` nur beim bestätigten REC). Dann wurde der Slate für diesen Take geschrieben.
+                    rec_bestaetigt: take["kamera"]["quelle"] == "cap"
+                        || (take["studio"] == true && !text(&take["clip_name"]).is_empty()),
+                    vergeben: vec![],
                 });
             }
         }
@@ -1043,7 +1105,10 @@ pub fn studio_soll_aus(v: &Value) -> Vec<SollClip> {
                     .unwrap_or_default(),
                 drehtag: ingest_kern::soll::ortsdatum(&start).unwrap_or_default(),
                 start_zeit: start,
+                // Studio: den Clipnamen trägt die Stage nach der Aufnahme ein (von der Kamera).
                 name_geschaetzt: false,
+                rec_bestaetigt: !text(&t["clip_name"]).is_empty(),
+                vergeben: vec![],
             });
         }
     }
@@ -1108,7 +1173,7 @@ mod tests {
                     { "id": "01T2", "nummer": 2, "art": "graukugel", "clip": {"name": "A001C004_261028_R1AB", "startTc": "10:45:10:12"},
                       "clip_name": null, "start_tc": null, "end_tc": null, "bewertung": null, "geloescht": false },
                     { "id": "01T3", "nummer": 3, "art": "take", "clip": null, "clip_name": null,
-                      "start_zeit": "2026-10-28T09:46:00+00:00",
+                      "start_zeit": "2026-10-28T09:45:58+00:00",
                       "start_tc": "10:46:00:00", "end_tc": "10:46:20:00", "bewertung": "gut", "geloescht": false },
                     { "id": "01T4", "nummer": 4, "art": "take", "clip_name": "A001C009_261028_R1AB", "geloescht": true }
                   ]},
@@ -1147,6 +1212,32 @@ mod tests {
     }
 
     #[test]
+    fn take_aus_clip_hat_keine_klappe() {
+        // Echte Daten 17.10.2026: vom Ingest angelegt (Startzeit = Timecode, einen Tag später angelegt) und vom iPhone.
+        let ingest = json!({ "start_zeit": "2026-10-16T12:52:16.72+00:00", "start_tc": "14:52:16:18",
+            "erstellt_am": "2026-10-17T07:12:22.475+00:00" });
+        let iphone = json!({ "start_zeit": "2026-10-16T13:22:49.266+00:00", "start_tc": "15:22:01:14",
+            "erstellt_am": "2026-10-16T13:22:49.266+00:00" });
+        assert!(aus_clip_angelegt(&ingest, "2026-10-16"));
+        assert!(!aus_clip_angelegt(&iphone, "2026-10-16"));
+        assert!(aus_clip_angelegt(&json!({ "kamera": { "quelle": "ale" } }), "2026-10-16"));
+        // Hätte ein iPhone je den Timecode aus seiner Uhr geschrieben: beim Anlegen = Klappe, also eine Klappe.
+        let gleich = json!({ "start_zeit": "2026-10-16T12:52:16.72+00:00", "start_tc": "14:52:16:18",
+            "erstellt_am": "2026-10-16T12:52:16.72+00:00" });
+        assert!(!aus_clip_angelegt(&gleich, "2026-10-16"));
+        // Ohne Klappe: kein Abschnitt und keine Grenze für den Take davor.
+        let mut v = dreh();
+        v[0]["plate"][0]["take"][2]["start_zeit"] = json!("2026-10-28T09:46:00+00:00");
+        v[0]["plate"][0]["take"][2]["erstellt_am"] = json!("2026-10-29T08:00:00+00:00");
+        let s = soll_aus(&v, "01DREH");
+        assert!(s[2].start_zeit.is_empty() && s[2].fenster_bis.is_empty());
+        assert_eq!(
+            s[0].fenster_bis, "2026-10-28T10:30:00+00:00",
+            "das Fenster von Take 1 reicht bis zur nächsten Klappe"
+        );
+    }
+
+    #[test]
     fn takes_werden_soll_liste() {
         let s = soll_aus(&dreh(), "01DREH");
         assert_eq!(s.len(), 3, "gelöschter Take und Take einer gelöschten Plate fallen weg: {s:?}");
@@ -1156,7 +1247,7 @@ mod tests {
         assert_eq!(s[1].start_tc, "10:45:10:12");
         assert!(s[2].clip.is_empty() && s[2].end_tc == "10:46:20:00", "ohne Clipnamen: Zuordnung über den Timecode");
         assert_eq!(s[2].take_id, "01T3");
-        assert_eq!(s[0].fenster_bis, "2026-10-28T09:46:00+00:00", "nächste Klappe desselben Tages");
+        assert_eq!(s[0].fenster_bis, "2026-10-28T09:45:58+00:00", "nächste Klappe desselben Tages");
         assert_eq!(s[2].fenster_bis, "2026-10-28T10:30:00+00:00", "auch an einem anderen Drehort");
         assert_eq!(s[0].drehtag, "2026-10-28");
     }

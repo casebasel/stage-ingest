@@ -458,6 +458,7 @@ mod tests {
             karte_id: None,
             einsortiert: None,
             geloescht: vec![],
+            ohne_aufnahme: vec![],
         };
         crate::uebersicht::schreiben(&dreh.join("04_BERICHTE"), &z).unwrap();
         assert!(wegwerfen_erlaubt(&alt).is_err(), "nicht freigegeben");
