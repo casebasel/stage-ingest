@@ -2,16 +2,21 @@
 //! gelesen, nie aus der Karte, und nur der Kopf der Datei. Quellen:
 //! - **Container** (MOV/MXF, eigener Leser): Codec, Auflösung, Bildrate, Bilder, Dauer, Timecode, Grösse.
 //! - **Metadaten im MOV** (ARRI `com.arri.camera.*`, iPhone `com.apple.quicktime.*`): Kamerawerte, roh unter `datei:`.
-//! - **ART CMD** (CSV in `05_METADATEN`, falls beim Einlesen eingestellt): Tilt, Roll, Brennweite, alle Spalten roh
-//!   unter `artcmd:`.
+//! - **ART CMD** (CSV in `05_METADATEN`, falls beim Einlesen eingestellt): Tilt, Roll, Brennweite, die Kamerawerte fest
+//!   je Spalte (`artcmd::kamerawerte`, typisiert unter `kamerawerte`), alle Spalten roh unter `artcmd:`.
 //!
-//! Schlüssel der Kamerawerte wie im Plate Assistant (`kamera {…}`) und in der Stage (`export.ts`).
+//! Schlüssel der Kamerawerte wie im Plate Assistant (`kamera {…}`) und in der Stage (`export.ts`). ART CMD geht den
+//! Metadaten im MOV vor: dessen Spalten sind fest zugeordnet und an echten Clips geprüft, die im MOV nur nach Namen.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use ingest_kern::{artcmd, clip};
 use serde::Deserialize;
+use serde_json::{Map, Value};
+
+/// Schlüssel der typisierten Kamerawerte; in der Liste als JSON-Text, in `clip.technik` als Objekt.
+const KAMERAWERTE: &str = "kamerawerte";
 
 #[derive(Debug, Deserialize)]
 pub struct Anfrage {
@@ -19,7 +24,7 @@ pub struct Anfrage {
     pub csv: Option<PathBuf>,
 }
 
-/// Kamerawert, zu dem ein Feldname gehört (Metadaten im MOV oder Spalte von ART CMD); `None` = nur roh zeigen.
+/// Kamerawert, zu dem ein Feldname der Metadaten im MOV gehört; `None` = nur roh zeigen.
 fn kamerawert(feld: &str) -> Option<&'static str> {
     let k: String = feld.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>().to_ascii_lowercase();
     let hat = |t: &str| k.contains(t);
@@ -111,10 +116,11 @@ pub fn lesen(a: &Anfrage) -> BTreeMap<String, String> {
             rein("dauer", Some(format!("{}:{:04.1}", (s / 60.0).floor() as u64, s % 60.0)));
         }
     }
+    let mut aus_datei = Vec::new();
     if let Ok(m) = clip::metadaten(&a.datei) {
         for (k, v) in m {
             if let Some(z) = kamerawert(&k) {
-                w.entry(z.to_owned()).or_insert_with(|| v.clone());
+                aus_datei.push((z, v.clone()));
             }
             w.insert(format!("datei:{k}"), v);
         }
@@ -133,34 +139,83 @@ pub fn lesen(a: &Anfrage) -> BTreeMap<String, String> {
                 w.insert("brennweite".into(), zahl(f, 1));
             }
         }
-        if let Ok(f) = artcmd::felder(&text) {
-            for (k, v) in f {
-                if let Some(z) = kamerawert(&k) {
-                    w.entry(z.to_owned()).or_insert_with(|| v.clone());
-                }
-                w.insert(format!("artcmd:{k}"), v);
+        if let Ok(s) = artcmd::spalten(&text) {
+            let k = artcmd::kamerawerte(&s);
+            w.extend(anzeige(&k).into_iter().map(|(spalte, v)| (spalte.to_owned(), v)));
+            if !k.is_empty() {
+                w.insert(KAMERAWERTE.into(), Value::Object(k).to_string());
             }
+            w.extend(artcmd::felder(&s).into_iter().map(|(feld, v)| (format!("artcmd:{feld}"), v)));
         }
     }
+    for (z, v) in aus_datei {
+        w.entry(z.to_owned()).or_insert(v);
+    }
     w
+}
+
+/// Spaltenwerte aus den typisierten Kamerawerten, damit die Take-Tabelle dasselbe zeigt wie die Datenbank. Shutter wie
+/// CAP und ALE in Grad („180.0“), ND als Dichte, CDL in einer Zeile.
+fn anzeige(k: &Map<String, Value>) -> Vec<(&'static str, String)> {
+    let text = |s: &str| match k.get(s) {
+        Some(Value::String(t)) => Some(t.clone()),
+        Some(Value::Number(n)) => Some(n.to_string()),
+        _ => None,
+    };
+    let mut aus: Vec<(&'static str, String)> = [
+        ("kameramodell", "modell"),
+        ("seriennummer", "seriennummer"),
+        ("objektiv", "objektiv"),
+        ("look", "look"),
+        ("gamma", "gamma"),
+        ("ei", "iso"),
+        ("weissK", "weissK"),
+        ("tint", "tint"),
+        ("nd", "ndDichte"),
+        ("sensorFps", "sensorFps"),
+    ]
+    .into_iter()
+    .filter_map(|(spalte, schluessel)| Some((spalte, text(schluessel)?)))
+    .collect();
+    if let Some(g) = k.get("shutterGrad").and_then(Value::as_f64) {
+        aus.push(("shutter", format!("{g:.1}")));
+    }
+    if let Some(c) = k.get("cdl") {
+        let drei = |t: &str| {
+            c[t].as_array().map(|a| a.iter().map(Value::to_string).collect::<Vec<_>>().join(" ")).unwrap_or_default()
+        };
+        let sat = c["saturation"].to_string();
+        aus.push((
+            "cdl",
+            format!("Slope {} · Offset {} · Power {} · Sat {sat}", drei("slope"), drei("offset"), drei("power")),
+        ));
+    }
+    aus
 }
 
 /// Höchstens so gross darf `clip.technik` sein (Server: 64 KB als Text; etwas Luft).
 const TECHNIK_HOECHSTENS: usize = 60 * 1024;
 
 /// Die Werte eines Clips für `clip.technik` (Marlon, 17.10.2026: „Also alles kommt in die Datenbank“; Migration 0031):
-/// ein Objekt mit allen Werten als Text. Wird es zu gross, fallen zuerst die Rohwerte der CSV (`artcmd:`), dann die der
-/// Datei (`datei:`) weg; die Spaltenwerte bleiben. `None` ohne Werte.
-pub fn fuer_datenbank(w: &BTreeMap<String, String>) -> Option<serde_json::Value> {
-    let mut m: BTreeMap<&str, &str> = w.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+/// ein Objekt mit allen Werten als Text, dazu `kamerawerte` typisiert (Zahlen, siehe `artcmd::kamerawerte`). Wird es zu
+/// gross, fallen zuerst die Rohwerte der CSV (`artcmd:`), dann die der Datei (`datei:`) weg; die Spaltenwerte bleiben.
+/// `None` ohne Werte.
+pub fn fuer_datenbank(w: &BTreeMap<String, String>) -> Option<Value> {
+    let mut m: Map<String, Value> = w
+        .iter()
+        .filter_map(|(k, v)| {
+            let wert = if k == KAMERAWERTE { serde_json::from_str(v).ok()? } else { Value::String(v.clone()) };
+            Some((k.clone(), wert))
+        })
+        .collect();
+    let groesse = |m: &Map<String, Value>| serde_json::to_string(m).map_or(usize::MAX, |t| t.len());
     for weg in ["artcmd:", "datei:"] {
-        if serde_json::to_string(&m).map_or(0, |t| t.len()) <= TECHNIK_HOECHSTENS {
+        if groesse(&m) <= TECHNIK_HOECHSTENS {
             break;
         }
         m.retain(|k, _| !k.starts_with(weg));
     }
-    (!m.is_empty() && serde_json::to_string(&m).map_or(0, |t| t.len()) <= TECHNIK_HOECHSTENS)
-        .then(|| serde_json::to_value(&m).unwrap_or_default())
+    (!m.is_empty() && groesse(&m) <= TECHNIK_HOECHSTENS).then_some(Value::Object(m))
 }
 
 #[cfg(test)]
@@ -174,7 +229,18 @@ mod tests {
         let w = lesen(&Anfrage { datei: PathBuf::from("/gibt/es/nicht.mxf"), csv: Some(PathBuf::from(csv)) });
         let v = fuer_datenbank(&w).expect("Werte");
         let roh = w.keys().filter(|k| k.starts_with("artcmd:")).count();
-        println!("{} Werte ({roh} Rohwerte), {} Bytes; Tilt {:?} Roll {:?}", w.len(), v.to_string().len(), w.get("tilt"), w.get("roll"));
+        println!(
+            "{} Werte ({roh} Rohwerte), {} Bytes; Tilt {:?} Roll {:?}",
+            w.len(),
+            v.to_string().len(),
+            w.get("tilt"),
+            w.get("roll")
+        );
+        if std::env::var("TECHNIK_ALLE").is_ok() {
+            for (k, x) in &w {
+                println!("WERT {k} = {x}");
+            }
+        }
     }
 
     #[test]
@@ -215,5 +281,30 @@ mod tests {
         assert_eq!(w.get("kameramodell").map(String::as_str), Some("ALEXA Mini"));
         assert_eq!(w.get("aufloesung").map(String::as_str), Some("64x36"));
         assert!(w.contains_key("datei:title"));
+    }
+
+    #[test]
+    fn art_cmd_geht_der_datei_vor() {
+        let t = tempfile::tempdir().unwrap();
+        let csv = t.path().join("A006C001.csv");
+        std::fs::write(
+            &csv,
+            "timecode;cameraDevice/cameraModel;sensorState/exposureTime;sensorState/sensorSampleRate;\
+             filter/ndFilterDensity;lensState/lensScaleRawEncoderValueIris;arriVideoParametersGen2/0/blackGamma\n\
+             10:00:00:00;ARRI ALEXA Mini;1/50;25/1;0.6000000238418579;0;0.5\n",
+        )
+        .unwrap();
+        let datei =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../kern/tests/metadaten/A006C001_mit_metadaten.mov");
+        let w = lesen(&Anfrage { datei, csv: Some(csv) });
+        let wert = |k: &str| w.get(k).map(String::as_str);
+        assert_eq!(wert("kameramodell"), Some("ARRI ALEXA Mini"), "ART CMD vor dem MOV („ALEXA Mini“)");
+        assert_eq!(wert("ei"), Some("800"), "was ART CMD nicht hat, kommt aus dem MOV");
+        assert_eq!((wert("shutter"), wert("nd")), (Some("180.0"), Some("0.6")));
+        assert_eq!((wert("blende"), wert("gamma")), (None, None), "kein roher Encoder, kein blackGamma");
+        let db = fuer_datenbank(&w).unwrap();
+        assert_eq!(db["kamerawerte"]["shutterGrad"], serde_json::json!(180));
+        assert_eq!(db["kamerawerte"]["quelle"], "artcmd");
+        assert_eq!(db["shutter"], "180.0");
     }
 }
