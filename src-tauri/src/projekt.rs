@@ -114,6 +114,8 @@ pub struct OffenerClip {
 pub struct Unstimmigkeit {
     /// Schlüssel für „Stimmt so“ (ändert sich mit der Lage).
     pub schluessel: String,
+    /// `zuordnung` (Belege gegen die Zuordnung) oder `entfernt` (Clip zu einem Take, den der Plate Assistant entfernt hat).
+    pub art: String,
     pub clip: String,
     pub karte: String,
     /// Take, dem der Clip zugeordnet ist.
@@ -280,6 +282,8 @@ fn unstimmigkeiten_finden(
     karten: &[GefundeneKarte],
     drehs: &[DrehStand],
     widerspruch: &HashMap<String, Widerspruch>,
+    entfernt: &HashMap<String, (String, String)>,
+    offen: &HashSet<String>,
 ) -> Vec<Unstimmigkeit> {
     let ok: HashSet<&str> = karten.iter().flat_map(|k| &k.inhalt.stimmt_so).map(|s| s.schluessel.as_str()).collect();
     let take_von: HashMap<&str, (&DrehStand, &PlateStand, &TakeStand)> = drehs
@@ -366,6 +370,7 @@ fn unstimmigkeiten_finden(
         }
         aus.push(Unstimmigkeit {
             schluessel,
+            art: "zuordnung".into(),
             clip: clip.clone(),
             karte: karte.clone(),
             take_id: take.clone(),
@@ -397,6 +402,7 @@ fn unstimmigkeiten_finden(
             }
             aus.push(Unstimmigkeit {
                 schluessel,
+                art: "zuordnung".into(),
                 clip: (*clip).clone(),
                 karte: karte.clone(),
                 take_id: take.clone(),
@@ -409,6 +415,64 @@ fn unstimmigkeiten_finden(
                 ),
                 dateien: dateien.clone(),
                 clipdateien: clipdateien.clone(),
+            });
+        }
+    }
+    // Clip, der die ID eines Takes trägt, den der Plate Assistant automatisch entfernt hat (Systemkarte baf868e und
+    // 499a1fc, Marlon: „darf keinen Take entfernen, zu dem es nachweislich eine Datei gibt … nicht still“). In „Zu
+    // klären“ mit „Take wiederherstellen“; Marlon bestätigt. Belege: QR der Klappe im Bild, Take-ID in Info 1 (die
+    // Kamera behält sie bis zur nächsten REC-Klappe, deshalb der Hinweis im Text) oder eine Zuordnung auf den Take.
+    for k in karten {
+        for c in &k.inhalt.clips {
+            let n = c.name.to_uppercase();
+            // Nur Clips ohne Take (wie unter „Clips ohne Take“): Hat der Clip einen Take, der noch steht (z. B. mit
+            // Nachfrage über den Namen), ist er versorgt.
+            let offen = offen.contains(&n);
+            let auf_entfernt = c.take_id.as_deref().filter(|t| entfernt.contains_key(*t));
+            let ueber_qr = c.qr.iter().filter_map(|q| q.strip_prefix("PA:")).find(|id| entfernt.contains_key(*id));
+            let ueber_info1 =
+                c.info1.as_deref().and_then(|i| i.strip_prefix("PA:")).filter(|id| entfernt.contains_key(*id));
+            let (take, beleg) = match (auf_entfernt, ueber_qr, ueber_info1) {
+                (Some(t), _, _) => (t, "Dieser Clip ist ihm aber zugeordnet."),
+                (None, Some(t), _) if offen => (t, "Dieser Clip trägt seine ID im QR der Klappe im Bild."),
+                (None, None, Some(t)) if offen => (
+                    t,
+                    "Dieser Clip trägt seine ID in Info 1. Die Kamera behält sie bis zur nächsten Klappe: prüfen, ob der Clip wirklich dazugehört.",
+                ),
+                _ => continue,
+            };
+            let schluessel = format!("entfernt:{n}:{take}");
+            if ok.contains(schluessel.as_str()) || aus.iter().any(|u: &Unstimmigkeit| u.schluessel == schluessel) {
+                continue;
+            }
+            let kopien: Vec<&GefundeneKarte> =
+                karten.iter().filter(|x| x.inhalt.karte.eq_ignore_ascii_case(&k.inhalt.karte)).collect();
+            let clipdateien = kopien
+                .iter()
+                .filter_map(|x| {
+                    let d = x.datei.parent().and_then(Path::parent)?;
+                    let p = d
+                        .join(ingest_kern::struktur::KAMERA)
+                        .join(ingest_kern::struktur::ordnername(&x.inhalt.karte))
+                        .join(&c.pfad);
+                    (!c.pfad.is_empty() && p.is_file()).then_some(p)
+                })
+                .collect();
+            let (titel, dreh) = &entfernt[take];
+            aus.push(Unstimmigkeit {
+                schluessel,
+                art: "entfernt".into(),
+                clip: c.name.clone(),
+                karte: k.inhalt.karte.clone(),
+                // Zugeordnet ist der Clip nur im ersten Fall; wiederhergestellt wird immer der entfernte Take.
+                take_id: auf_entfernt.unwrap_or_default().to_owned(),
+                vorschlag_take: Some(take.to_owned()),
+                vorschlag_dreh: Some(dreh.clone()),
+                text: format!(
+                    "{titel} wurde automatisch entfernt (die Kamera meldete dem Plate Assistant keine Aufnahme). {beleg}"
+                ),
+                dateien: kopien.iter().map(|x| x.datei.clone()).collect(),
+                clipdateien,
             });
         }
     }
@@ -1606,12 +1670,38 @@ pub fn zusammenfuehren(
             o.vorschlag_grund = Some(grund.clone());
         }
     }
+    // Takes, die der Plate Assistant ab Build 34 selbst entfernt hat: gelöscht, ohne Clipnamen, ohne Clip und ohne
+    // REC-Timecode (Systemkarte 84f9061). Von Hand Gelöschte behalten ihren Namen.
+    let plate_von: HashMap<&String, &PlateStand> = drehs.iter().flat_map(|d| &d.plates).map(|p| (&p.id, p)).collect();
+    let mut entfernt: HashMap<String, (String, String)> = HashMap::new();
+    for d in drehs_json.as_array().into_iter().flatten().filter(|d| gilt(d)) {
+        for p in d["plate"].as_array().into_iter().flatten() {
+            for t in p["take"].as_array().into_iter().flatten() {
+                if t["geloescht"] == true
+                    && text(&t["clip_name"]).is_empty()
+                    && t["clip"].is_null()
+                    && text(&t["start_tc"]).is_empty()
+                {
+                    let einstellung =
+                        plate_von.get(&text(&p["id"])).map(|p| plate_titel(p)).unwrap_or_else(|| "Plate".into());
+                    entfernt.insert(
+                        text(&t["id"]),
+                        (format!("{einstellung} · Take {}", t["nummer"].as_i64().unwrap_or(0)), text(&d["id"])),
+                    );
+                }
+            }
+        }
+    }
     for o in &mut zu_klaeren {
         if o.vorschlag_take.is_none() && o.vorschlag_plate.is_none() {
             o.hinweis = kv.hinweis.get(&o.clip.to_uppercase()).cloned();
         }
     }
-    let unstimmigkeiten = unstimmigkeiten_finden(&karten, &drehs, &kv.widerspruch);
+    let offen: HashSet<String> = zu_klaeren.iter().map(|o| o.clip.to_uppercase()).collect();
+    let unstimmigkeiten = unstimmigkeiten_finden(&karten, &drehs, &kv.widerspruch, &entfernt, &offen);
+    // Ein Clip zu einem entfernten Take steht oben mit „Take wiederherstellen“, nicht zusätzlich unter „Clips ohne Take“
+    // (bis Marlon ihn zur Kenntnis nimmt).
+    zu_klaeren.retain(|o| !unstimmigkeiten.iter().any(|x| x.art == "entfernt" && x.clip.eq_ignore_ascii_case(&o.clip)));
     let mut ohne_aufnahme: Vec<TakeOhneAufnahme> = kv.ohne_clip;
     // Geplanter Name, den in Wirklichkeit ein anderer Take bekam (gleiche Rolle, gleicher Zähler): nicht mehr zeigen
     // (Marlon, 17.10.2026: „Der geplant relativiert sich ja, wenn er gedreht wurde“; Predigerhof P6 T2 hiess geplant
@@ -1950,6 +2040,77 @@ mod tests {
         let mut unklar: Vec<i64> = u.ohne_aufnahme.iter().filter(|t| !t.sicher).map(|t| t.nummer).collect();
         unklar.sort();
         assert_eq!(unklar, [7, 8]);
+    }
+
+    #[test]
+    fn clip_zu_entferntem_take_gemeldet() {
+        // Systemkarte baf868e und 499a1fc (Marlon, 17.10.2026): Trägt ein Clip über QR oder Info 1 die ID eines Takes, den
+        // der Plate Assistant automatisch entfernt hat, steht er oben mit „Take wiederherstellen“, nicht zusätzlich unter
+        // „Clips ohne Take“. Bei Info 1 mit dem Hinweis, dass die Kamera sie bis zur nächsten Klappe behält.
+        let take = |n: i64, zeit: &str, entfernt: bool| {
+            json!({ "id": format!("T{n}"), "nummer": n, "geloescht": entfernt,
+                    "clip_name": if entfernt { Value::Null } else { json!(format!("A009C{n:03}_120101_R132")) },
+                    "start_zeit": format!("2026-10-15T{zeit}+00:00"), "erstellt_am": format!("2026-10-15T{zeit}+00:00") })
+        };
+        let drehs = json!([{ "id": "D1", "name": "Treppenhaus", "datum": "2026-10-15", "geloescht": false,
+            "plate": [{ "id": "P1", "nummer": 1, "geloescht": false,
+                        "take": [take(1, "13:09:00", false), take(2, "13:10:00", true), take(3, "13:12:00", true)] }] }]);
+        let clip = |n: u32, von: &str, take: Option<&str>, info1: Option<&str>, qr: &[&str]| {
+            let name = format!("A009C{n:03}_120101_R132");
+            json!({ "name": name, "pfad": format!("A009R132/{name}.mxf"), "startTc": von, "endTc": von,
+                    "takeId": take, "zuordnung": if take.is_some() { "info1" } else { "" },
+                    "info1": info1, "qr": qr })
+        };
+        let inhalt: KartenZusammenfassung = serde_json::from_value(json!({
+            "format": 1, "karte": "A009R132", "beginn": "", "version": "t", "freigegeben": true,
+            "unabhaengigeKopien": 1, "grund": "",
+            "clips": [clip(1, "15:09:10:00", Some("T1"), Some("PA:T1"), &[]),
+                      clip(2, "15:10:20:00", None, Some("PA:T2"), &["PA:T2"]),
+                      clip(3, "15:12:30:00", None, Some("PA:T3"), &[])]
+        }))
+        .unwrap();
+        let karten = vec![GefundeneKarte {
+            dreh_ordner: "2026-10-15_TREPPENHAUS".into(),
+            datei: PathBuf::from("/x/2026-10-15_TREPPENHAUS/04_BERICHTE/A009R132_ingest.json"),
+            inhalt,
+        }];
+        let p: Projekt =
+            serde_json::from_value(json!({"id": "projekt-x", "name": "X", "kurzname": "X", "aktiv": true})).unwrap();
+        let u = zusammenfuehren(p.clone(), &drehs, &json!([]), karten.clone(), vec![], &Value::Null);
+        let entfernt: Vec<(&str, Option<&str>, &str)> = u
+            .unstimmigkeiten
+            .iter()
+            .filter(|x| x.art == "entfernt")
+            .map(|x| (x.clip.as_str(), x.vorschlag_take.as_deref(), x.take_id.as_str()))
+            .collect();
+        assert_eq!(
+            entfernt,
+            [("A009C002_120101_R132", Some("T2"), ""), ("A009C003_120101_R132", Some("T3"), "")],
+            "{:?}",
+            u.unstimmigkeiten
+        );
+        let (c2, c3) = (&u.unstimmigkeiten[0], &u.unstimmigkeiten[1]);
+        assert!(
+            c2.text.starts_with("Plate 1 · Take 2 wurde automatisch entfernt") && c2.text.contains("QR"),
+            "{}",
+            c2.text
+        );
+        assert!(c3.text.contains("Info 1") && c3.text.contains("nächsten Klappe"), "{}", c3.text);
+        assert_eq!(c2.vorschlag_dreh.as_deref(), Some("D1"));
+        assert!(u.zu_klaeren.iter().all(|o| !o.clip.starts_with("A009C002") && !o.clip.starts_with("A009C003")));
+        // Gelöschte Takes stehen nicht unter „Takes ohne Clip“.
+        assert!(u.ohne_aufnahme.iter().all(|t| t.take_id != "T2" && t.take_id != "T3"));
+        // „Gehört nicht dazu“: C003 steht danach unter „Clips ohne Take“, C002 bleibt oben.
+        let mut karten = karten;
+        karten[0].inhalt.stimmt_so.push(ingest_kern::uebersicht::StimmtSo {
+            schluessel: c3.schluessel.clone(),
+            zeit: String::new(),
+            rechner: String::new(),
+        });
+        let u = zusammenfuehren(p, &drehs, &json!([]), karten, vec![], &Value::Null);
+        let oben: Vec<&str> = u.unstimmigkeiten.iter().map(|x| x.clip.as_str()).collect();
+        assert_eq!(oben, ["A009C002_120101_R132"]);
+        assert!(u.zu_klaeren.iter().any(|o| o.clip == "A009C003_120101_R132"));
     }
 
     #[test]

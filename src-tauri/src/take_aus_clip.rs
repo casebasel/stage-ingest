@@ -60,6 +60,11 @@ fn kamera(w: &std::collections::BTreeMap<String, String>) -> Value {
     Value::Object(k)
 }
 
+/// Clipname, wie der Ingest ihn an einen Take schreibt: ohne Endung, gross, ohne Leerzeichen, höchstens 100 Zeichen.
+pub fn clip_name(clip: &str) -> String {
+    ingest_kern::soll::ohne_endung(clip).to_uppercase().replace(' ', "").chars().take(100).collect()
+}
+
 /// Baut die Änderung `take` `_anlegen` (ohne Netz, testbar).
 #[allow(clippy::too_many_arguments)] // eine flache Liste der Bausteine ist hier lesbarer als ein Hilfs-Struct
 pub fn take_aenderung(
@@ -72,8 +77,7 @@ pub fn take_aenderung(
     jetzt: chrono::DateTime<Utc>,
     aenderung_id: String,
 ) -> Value {
-    let name = ingest_kern::soll::ohne_endung(&a.clip).to_uppercase().replace(' ', "");
-    let name: String = name.chars().take(100).collect();
+    let name = clip_name(&a.clip);
     let fps = angaben.and_then(|c| c.fps).filter(|f| *f > 0.0);
     let start_tc = angaben.and_then(|c| c.start_tc.clone());
     let start_zeit = match (&a.drehtag, &start_tc, fps) {
@@ -130,7 +134,7 @@ pub fn clip_am_take(
     jetzt: chrono::DateTime<Utc>,
     aenderung_id: String,
 ) -> Option<Value> {
-    let name: String = ingest_kern::soll::ohne_endung(clip).to_uppercase().replace(' ', "").chars().take(100).collect();
+    let name = clip_name(clip);
     let tc = angaben?.start_tc.clone().filter(|t| !t.is_empty())?;
     let bilder = angaben?.bilder.filter(|b| *b > 0)?;
     Some(json!({

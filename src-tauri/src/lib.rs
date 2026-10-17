@@ -1776,6 +1776,62 @@ async fn clip_zuordnen(
     .await
 }
 
+/// „Zu klären“: einen Take wiederherstellen, den der Plate Assistant automatisch entfernt hat, und ihm den Clip zuordnen
+/// (Systemkarte 499a1fc; Marlon bestätigt von Hand). Nur wenn der Clip die ID dieses Takes trägt (QR, Info 1 oder seine
+/// Zuordnung) und der Take wirklich automatisch entfernt ist (gelöscht, ohne Clipnamen); die Sperre in `plate.rs`
+/// lässt `geloescht = false` nur zusammen mit dem Clipnamen zu.
+#[tauri::command]
+async fn take_wiederherstellen(
+    plate: State<'_, Arc<plate::Plate>>,
+    zugang: plate::Zugang,
+    dateien: Vec<PathBuf>,
+    clip: String,
+    take_id: String,
+    dreh_id: String,
+    clipdatei: Option<PathBuf>,
+) -> Result<(), String> {
+    let p = Arc::clone(&plate);
+    im_hintergrund(move || {
+        let id = format!("PA:{take_id}");
+        let traegt = dateien.iter().filter_map(|d| ingest_kern::uebersicht::lesen_datei(d)).any(|z| {
+            z.clips.iter().any(|c| {
+                c.name.eq_ignore_ascii_case(&clip)
+                    && (c.info1.as_deref() == Some(id.as_str())
+                        || c.qr.contains(&id)
+                        || c.take_id.as_deref() == Some(take_id.as_str()))
+            })
+        });
+        // Zusammenfassungen vor 0.1.50 haben kein `info1`: die Take-ID aus dem Kopf der Clipdatei, wie `belege_nachholen`.
+        let im_kopf = || {
+            clipdatei
+                .as_deref()
+                .filter(|d| d.is_file())
+                .and_then(|d| ingest_kern::kennung::schnell(d, 64 * 1024))
+                .is_some_and(|k| k.text() == id)
+        };
+        if !traegt && !im_kopf() {
+            return Err(format!("{clip} trägt die ID dieses Takes nicht; nichts geändert."));
+        }
+        p.take_wiederherstellen(&zugang, &take_id, &take_aus_clip::clip_name(&clip))?;
+        zuordnen_ueberall(&p, Some(&zugang), &dateien, &clip, Some(&take_id), Some(&dreh_id))?;
+        // Den Clip auch als `take.clip` eintragen, wie CAP nach dem Stopp.
+        if let Some(d) = &clipdatei {
+            let angaben = ingest_kern::clip::lesen(d).ok();
+            if let Some(a) = take_aus_clip::clip_am_take(
+                &take_id,
+                &clip,
+                angaben.as_ref(),
+                chrono::Utc::now(),
+                plate::ulid_aehnlich(),
+            ) {
+                p.take_aendern(&zugang, a).map_err(|e| format!("Wiederhergestellt und zugeordnet, aber {e}"))?;
+            }
+        }
+        Ok(())
+    })
+    .await
+}
+
 /// „Zu klären“: einen Take ohne Aufnahme weich löschen (Marlon, 16.10.2026; im Plate Assistant wiederherstellbar).
 #[tauri::command]
 async fn take_loeschen(
@@ -2563,6 +2619,7 @@ pub fn run() {
             karte_einsortieren,
             karten_nachtragen,
             zuordnungen_nachtragen,
+            take_wiederherstellen,
             zur_seite_liste,
             studio_take_bewerten,
             zur_seite_wegwerfen,

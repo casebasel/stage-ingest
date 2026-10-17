@@ -286,6 +286,10 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
     await warte(400);
     return null;
   },
+  take_wiederherstellen: async () => {
+    await warte(600);
+    return null;
+  },
   ohne_aufnahme_bestaetigen: async () => {
     await warte(400);
     return null;
@@ -388,6 +392,7 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
     unstimmigkeiten: [
       { schluessel: "w1", clip: "A001C011_261028_R132", karte: "A001R132", takeId: "t4", vorschlagTake: "t5", vorschlagDreh: "d1", text: "Zugeordnet zu On Loc 2 · Brücke · Take 1 (von Hand). Die Take-ID im Clip passt aber zu On Loc 2 · Brücke · Take 2.", dateien: ["/a", "/b"], clipdateien: ["/Volumes/NAS/x.mxf"] },
       { schluessel: "w2", clip: "A001C012_261028_R132", karte: "A001R132", takeId: "t5", text: "Zugeordnet zu On Loc 2 · Brücke · Take 2 (von Hand). Der Clip beginnt aber nicht zwischen dessen Klappe und der nächsten.", dateien: ["/a", "/b"], clipdateien: ["/Volumes/NAS/x.mxf"] },
+      { schluessel: "entfernt:A001C016_261028_R132:t9", art: "entfernt", clip: "A001C016_261028_R132", karte: "A001R132", takeId: "", vorschlagTake: "t9", vorschlagDreh: "d1", text: "On Loc 2 · Brücke · Take 7 wurde automatisch entfernt (die Kamera meldete dem Plate Assistant keine Aufnahme). Dieser Clip trägt seine ID im QR der Klappe im Bild.", dateien: ["/a", "/b"], clipdateien: ["/Volumes/NAS/x.mxf"] },
     ],
     ohneAufnahme: [
       { takeId: "t6", nummer: 3, plateId: "p2", drehId: "d1", clip: "A001C013_261028_R132", karte: "A001R132", sicher: true, grund: "Zwischen Take 2 (A001C012) und Take 6 (A001C013) liegt kein Clip für diesen Take", dateien: ["/a", "/b"] },

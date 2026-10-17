@@ -19,7 +19,8 @@ use serde_json::{json, Value};
 pub const DARF_AENDERN: &[&str] =
     &["projekt", "ingest_meldung", "hdri_job", "dreh", "karte", "clip", "studio_take", "foto", "take"];
 /// `take` (gehört dem Plate Assistant): der Ingest legt Takes aus Clips an (abgestimmt 15.10.2026), mit diesen Feldern.
-/// An bestehenden Takes nur `clip` (aus der Karte) und `geloescht` (Take ohne Aufnahme), siehe `aenderungen_pruefen`.
+/// An bestehenden Takes nur `clip` (aus der Karte) und `geloescht` (Take ohne Aufnahme), siehe `aenderungen_pruefen`;
+/// dazu „Take wiederherstellen“ (Systemkarte 499a1fc): `geloescht = false` nur zusammen mit `clip_name` desselben Takes.
 const TAKE_ANLEGEN: &[&str] = &[
     "plate_id",
     "nummer",
@@ -56,6 +57,14 @@ const CLIP_FELDER: &[&str] = &["_anlegen", "take_id", "studio_take_id", "dreh_id
 /// Prüft alle Änderungen einer Anfrage an `aenderungen_anwenden`, bevor sie das Netz verlassen.
 pub fn aenderungen_pruefen(body: &Value) -> Result<(), String> {
     let liste = body["p_aenderungen"].as_array().ok_or("p_aenderungen fehlt")?;
+    // „Take wiederherstellen“ (Systemkarte 499a1fc, Marlon bestätigt in „Zu klären“): `geloescht = false` und `clip_name`
+    // (der Name des Clips, der die ID des Takes trägt) immer als Paar an denselben Take, nie einzeln.
+    let paar = |a: &Value, anderes: &str, wert_ok: &dyn Fn(&Value) -> bool| {
+        liste.iter().any(|b| {
+            b["tabelle"] == "take" && b["datensatz"] == a["datensatz"] && b["feld"] == anderes && wert_ok(&b["wert"])
+        })
+    };
+    let name_ok = |w: &Value| w.as_str().is_some_and(|n| !n.trim().is_empty());
     for a in liste {
         let t = a["tabelle"].as_str().unwrap_or("");
         if !DARF_AENDERN.contains(&t) {
@@ -78,6 +87,8 @@ pub fn aenderungen_pruefen(body: &Value) -> Result<(), String> {
                 // dem Stopp (nur `name`, `startTc`, `bilder`), oder einen Take ohne Aufnahme weich löschen.
                 "clip" if take_clip_gueltig(&a["wert"]) => {}
                 "geloescht" if a["wert"] == true => {}
+                "geloescht" if a["wert"] == false && paar(a, "clip_name", &name_ok) => {}
+                "clip_name" if name_ok(&a["wert"]) && paar(a, "geloescht", &|w| *w == false) => {}
                 _ => return Err(format!("Stage Ingest ändert am Take „{feld}“ nicht")),
             }
         }
@@ -417,6 +428,45 @@ impl Plate {
                 e.unwrap_or("unbekannt"),
                 v[0]["grund"].as_str().unwrap_or_default()
             )),
+        }
+    }
+
+    /// „Take wiederherstellen“ (Systemkarte 499a1fc): nur einen Take, den der Plate Assistant automatisch entfernt hat
+    /// (`geloescht`, ohne Clipnamen, ohne Clip). Setzt `geloescht = false` und den Clipnamen in einem Schritt.
+    pub fn take_wiederherstellen(&self, z: &Zugang, take_id: &str, clip_name: &str) -> Result<(), String> {
+        let v = self.lesen(z, &format!("take?id=eq.{}&select=id,geloescht,clip_name,clip", url_teil(take_id)))?;
+        let t = v.as_array().and_then(|a| a.first()).ok_or("Take nicht gefunden")?;
+        let leer = |f: &str| t[f].is_null() || t[f].as_str().is_some_and(str::is_empty);
+        if t["geloescht"] != true || !leer("clip_name") || !t["clip"].is_null() {
+            return Err("Der Take ist nicht automatisch entfernt (gelöscht ohne Clipnamen); nichts geändert.".into());
+        }
+        let jetzt = chrono::Utc::now();
+        let aenderung = |feld: &str, wert: Value| {
+            json!({ "id": ulid_aehnlich(), "tabelle": "take", "datensatz": take_id, "feld": feld, "wert": wert,
+                    "zeit": jetzt.timestamp_micros() })
+        };
+        let body = json!({ "p_geraet": geraet_name(),
+                           "p_aenderungen": [aenderung("geloescht", json!(false)), aenderung("clip_name", json!(clip_name))] });
+        let v = self.anwenden(z, &body)?;
+        // „aelter“ hiesse: Der Plate Assistant hat den Take danach nochmals geändert, seine Fassung gilt. Das ist hier kein
+        // Erfolg (der Take wäre noch entfernt), anders als beim blossen Nachtragen.
+        let mut schlecht: Vec<String> = v
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|x| !matches!(x["ergebnis"].as_str(), Some("uebernommen" | "doppelt")))
+            .map(|x| match x["ergebnis"].as_str() {
+                Some("aelter") => "der Plate Assistant hat ihn inzwischen geändert, bitte neu laden".to_owned(),
+                e => format!("{} {}", e.unwrap_or("unbekannt"), x["grund"].as_str().unwrap_or_default())
+                    .trim()
+                    .to_owned(),
+            })
+            .collect();
+        schlecht.dedup();
+        if schlecht.is_empty() {
+            Ok(())
+        } else {
+            Err(format!("Take nicht wiederhergestellt: {}", schlecht.join("; ")))
         }
     }
 
@@ -1415,6 +1465,39 @@ mod tests {
             [include_str!("lib.rs"), include_str!("projekt.rs"), include_str!("plates.rs"), include_str!("stage.rs")]
         {
             assert!(!datei.contains(&format!("{}{}", "aenderungen", "_anwenden\"")), "Schreiben nur über plate.rs");
+        }
+    }
+
+    #[test]
+    fn wiederherstellen_nur_als_paar() {
+        // Systemkarte 499a1fc: `geloescht = false` nur zusammen mit dem Clipnamen desselben Takes, sonst nichts.
+        let a = |datensatz: &str, feld: &str, wert: Value| json!({"tabelle": "take", "datensatz": datensatz, "feld": feld, "wert": wert});
+        let body = |liste: Vec<Value>| json!({ "p_aenderungen": liste });
+        let name = json!("A009C002_120101_R132");
+        assert!(aenderungen_pruefen(&body(vec![
+            a("T2", "geloescht", json!(false)),
+            a("T2", "clip_name", name.clone())
+        ]))
+        .is_ok());
+        assert!(aenderungen_pruefen(&body(vec![
+            a("T2", "clip_name", name.clone()),
+            a("T2", "geloescht", json!(false))
+        ]))
+        .is_ok());
+        for falsch in [
+            vec![a("T2", "geloescht", json!(false))],
+            vec![a("T2", "clip_name", name.clone())],
+            vec![a("T2", "geloescht", json!(false)), a("T3", "clip_name", name.clone())],
+            vec![a("T2", "geloescht", json!(false)), a("T2", "clip_name", json!(" "))],
+            vec![a("T2", "geloescht", json!(false)), a("T2", "clip_name", Value::Null)],
+            vec![a("T2", "geloescht", json!(true)), a("T2", "clip_name", name.clone())],
+            vec![a("T2", "geloescht", json!(false)), a("T2", "clip_name", name.clone()), a("T2", "nummer", json!(3))],
+            vec![
+                a("T2", "geloescht", json!(false)),
+                json!({"tabelle": "plate", "datensatz": "T2", "feld": "clip_name", "wert": name.clone()}),
+            ],
+        ] {
+            assert!(aenderungen_pruefen(&body(falsch.clone())).is_err(), "muss gesperrt sein: {falsch:?}");
         }
     }
 

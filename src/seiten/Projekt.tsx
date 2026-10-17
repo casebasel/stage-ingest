@@ -77,6 +77,8 @@ type OffenerClip = {
 /** Zugeordneter Clip, bei dem die Belege etwas anderes sagen, oder zweiter Clip derselben Kamera an einem Take. */
 type Unstimmigkeit = {
   schluessel: string;
+  /** `zuordnung` (Belege gegen die Zuordnung) oder `entfernt` (Clip zu einem Take, den der Plate Assistant entfernt hat). */
+  art?: string;
   clip: string;
   karte: string;
   takeId: string;
@@ -1522,6 +1524,57 @@ function ZuKlaeren({
     }
   }
 
+  // Clip trägt die ID eines Takes, den der Plate Assistant automatisch entfernt hat (Systemkarte 499a1fc): Marlon
+  // bestätigt das Wiederherstellen von Hand.
+  async function takeWiederherstellen(x: Unstimmigkeit) {
+    const titel = x.text.split(" wurde automatisch entfernt")[0];
+    const ja = await ask(
+      `${titel} wiederherstellen und ${x.clip} zuordnen?\n\nDer Plate Assistant hatte den Take automatisch entfernt, weil die Kamera keine Aufnahme gemeldet hatte. Der Take kommt zurück (nicht mehr gelöscht), sein Clipname wird ${x.clip}, und der Clip gehört danach zu ihm.`,
+      { title: "Take wiederherstellen", kind: "warning", okLabel: "Wiederherstellen", cancelLabel: "Abbrechen" },
+    );
+    if (!ja) return;
+    setStand((s) => ({ ...s, [x.schluessel]: { ton: "laeuft", text: "Stellt wieder her …" } }));
+    try {
+      await invoke("take_wiederherstellen", {
+        zugang,
+        dateien: x.dateien,
+        clip: x.clip,
+        takeId: x.vorschlagTake,
+        drehId: x.vorschlagDreh,
+        clipdatei: x.clipdateien[0] ?? null,
+      });
+      setStand((s) => ({ ...s, [x.schluessel]: { ton: "ok", text: "Wiederhergestellt und zugeordnet" } }));
+      gespeichert();
+    } catch (e) {
+      setStand((s) => ({ ...s, [x.schluessel]: { ton: "fehler", text: String(e) } }));
+    }
+  }
+
+  // Der Clip gehört nicht zum entfernten Take: Der Hinweis erscheint nicht mehr, der Clip steht unter „Clips ohne Take“.
+  // War er dem entfernten Take zugeordnet, zuerst die Zuordnung aufheben (sonst hinge er an einem gelöschten Take).
+  async function gehoertNichtDazu(x: Unstimmigkeit) {
+    setStand((s) => ({ ...s, [x.schluessel]: { ton: "laeuft", text: "Speichert …" } }));
+    try {
+      if (x.takeId) {
+        await invoke("clip_zuordnen", {
+          zugang,
+          dateien: x.dateien,
+          clip: x.clip,
+          takeId: null,
+          drehId: null,
+          clipdatei: x.clipdateien[0] ?? null,
+          takeHatClip: null,
+          aufnehmen: null,
+        });
+      }
+      await invoke("stimmt_so", { dateien: x.dateien, schluessel: x.schluessel });
+      setStand((s) => ({ ...s, [x.schluessel]: { ton: "ok", text: "Gespeichert" } }));
+      gespeichert();
+    } catch (e) {
+      setStand((s) => ({ ...s, [x.schluessel]: { ton: "fehler", text: String(e) } }));
+    }
+  }
+
   // Widerspruch: dem Take der Belege neu zuordnen, Zuordnung aufheben (Clip wieder ohne Take) oder beibehalten.
   async function unstimmigAendern(x: Unstimmigkeit, art: "umhaengen" | "loesen" | "stimmt") {
     if (art === "loesen") {
@@ -1558,6 +1611,8 @@ function ZuKlaeren({
   // Drei Teile, das Dringendste zuerst: Widersprüche (eine falsche Zuordnung wiegt schwerer als eine fehlende), Clips
   // ohne Take, Takes ohne Clip. Je Teil ein Satz, was er ist und was zu tun ist (Marlon, 17.10.2026: „von der Wortwahl
   // und den Sätzen noch nicht klar“).
+  const entfernteWidersprueche = unstimmig.filter((x) => x.art === "entfernt").length;
+  const zuordnungWidersprueche = unstimmig.length - entfernteWidersprueche;
   const widerspruchTeil = unstimmig.length > 0 && (
     <section className="zk-teil" aria-labelledby="zk-widersprueche">
       <div className="detail-kopf">
@@ -1566,9 +1621,19 @@ function ZuKlaeren({
         </h2>
       </div>
       <p className="zk-erklaerung">
-        Bei {unstimmig.length === 1 ? "diesem Clip passt" : "diesen Clips passt"} die Zuordnung nicht zu dem, was im Clip
-        steht (Timecode, Take-ID, QR der Klappe). Je Clip entscheiden: dem passenden Take neu zuordnen, die Zuordnung
-        aufheben oder beibehalten.
+        {zuordnungWidersprueche > 0 && (
+          <>
+            Bei {zuordnungWidersprueche === 1 ? "einem Clip passt" : "diesen Clips passt"} die Zuordnung nicht zu dem, was
+            im Clip steht (Timecode, Take-ID, QR der Klappe). Je Clip entscheiden: dem passenden Take neu zuordnen, die
+            Zuordnung aufheben oder beibehalten.{" "}
+          </>
+        )}
+        {entfernteWidersprueche > 0 && (
+          <>
+            {entfernteWidersprueche === 1 ? "Ein Clip trägt" : "Clips tragen"} die ID eines Takes, den der Plate Assistant
+            automatisch entfernt hat, weil die Kamera keine Aufnahme meldete. Gehört der Clip dazu: Take wiederherstellen.
+          </>
+        )}
       </p>
       <table className="tabelle zu-klaeren">
         <thead>
@@ -1606,34 +1671,59 @@ function ZuKlaeren({
                 </td>
                 <td>{x.text}</td>
                 <td className="spalte-aktion">
-                  <span className="aktion-stapel">
-                    {ziel && (
+                  {x.art === "entfernt" ? (
+                    <span className="aktion-stapel">
+                      <button
+                        className="knopf knopf-klein"
+                        disabled={beschaeftigt || !zugang}
+                        onClick={() => takeWiederherstellen(x)}
+                        title={
+                          zugang
+                            ? "Den Take im Plate Assistant zurückholen und ihm diesen Clip zuordnen"
+                            : "Braucht die Verbindung zum Plate Assistant"
+                        }
+                      >
+                        Take wiederherstellen
+                      </button>
                       <button
                         className="knopf knopf-klein"
                         disabled={beschaeftigt}
-                        onClick={() => unstimmigAendern(x, "umhaengen")}
-                        title="Den Clip dem Take zuordnen, zu dem Timecode, Take-ID oder QR passen"
+                        onClick={() => gehoertNichtDazu(x)}
+                        title="Der Clip gehört nicht zu diesem Take; er steht danach unter „Clips ohne Take“"
                       >
-                        Neu zuordnen: {plateTitel(ziel.p).split(" · ")[0]} · Take {ziel.t.nummer}
+                        Gehört nicht dazu
                       </button>
-                    )}
-                    <button
-                      className="knopf knopf-klein"
-                      disabled={beschaeftigt}
-                      onClick={() => unstimmigAendern(x, "loesen")}
-                      title="Der Clip steht danach unter „Clips ohne Take“"
-                    >
-                      Zuordnung aufheben
-                    </button>
-                    <button
-                      className="knopf knopf-klein"
-                      disabled={beschaeftigt}
-                      onClick={() => unstimmigAendern(x, "stimmt")}
-                      title="Die Zuordnung stimmt; der Widerspruch erscheint nicht mehr"
-                    >
-                      Beibehalten
-                    </button>
-                  </span>
+                    </span>
+                  ) : (
+                    <span className="aktion-stapel">
+                      {ziel && (
+                        <button
+                          className="knopf knopf-klein"
+                          disabled={beschaeftigt}
+                          onClick={() => unstimmigAendern(x, "umhaengen")}
+                          title="Den Clip dem Take zuordnen, zu dem Timecode, Take-ID oder QR passen"
+                        >
+                          Neu zuordnen: {plateTitel(ziel.p).split(" · ")[0]} · Take {ziel.t.nummer}
+                        </button>
+                      )}
+                      <button
+                        className="knopf knopf-klein"
+                        disabled={beschaeftigt}
+                        onClick={() => unstimmigAendern(x, "loesen")}
+                        title="Der Clip steht danach unter „Clips ohne Take“"
+                      >
+                        Zuordnung aufheben
+                      </button>
+                      <button
+                        className="knopf knopf-klein"
+                        disabled={beschaeftigt}
+                        onClick={() => unstimmigAendern(x, "stimmt")}
+                        title="Die Zuordnung stimmt; der Widerspruch erscheint nicht mehr"
+                      >
+                        Beibehalten
+                      </button>
+                    </span>
+                  )}
                 </td>
               </tr>
             );

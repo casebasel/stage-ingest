@@ -105,6 +105,8 @@ pub(crate) struct Drehtag {
     pub clips: Vec<SimClip>,
     /// Takes ohne Aufnahme (Wahrheit).
     pub ohne_rec: HashSet<String>,
+    /// Takes, die der Plate Assistant entfernt hat, obwohl die Kamera aufnahm (Fehler, den der Ingest melden soll).
+    pub falsch_entfernt: HashSet<String>,
     /// Drehort, in dem eine Karte (überwiegend) gedreht wurde: mit dessen Soll-Liste wird sie eingelesen.
     pub karten: BTreeMap<String, String>,
 }
@@ -195,6 +197,7 @@ pub(crate) fn drehtag(saat: u64) -> Drehtag {
     let mut take_nr_global = 0u64;
     let mut clips: Vec<SimClip> = Vec::new();
     let mut ohne_rec = HashSet::new();
+    let mut falsch_entfernt = HashSet::new();
     let mut drehs = Vec::new();
     let mut karten: BTreeMap<String, BTreeMap<String, usize>> = BTreeMap::new();
     let anzahl_drehs = if lage.zweiter_dreh { 2 } else { 1 };
@@ -347,6 +350,15 @@ pub(crate) fn drehtag(saat: u64) -> Drehtag {
                         take["start_tc"] = json!(start_tc);
                         take["end_tc"] = json!(end_tc);
                     }
+                    // Build 34 mit Fehler: Selten entfernt die App einen Take, obwohl die Kamera aufnahm (die Meldung kam
+                    // nicht an). Der Ingest soll das melden, wenn der QR der Klappe im Bild steht (Systemkarte baf868e).
+                    if lage.build34 && z34.ja(0.02) {
+                        take["geloescht"] = json!(true);
+                        for f in ["clip_name", "clip", "start_tc", "end_tc", "kamera"] {
+                            take[f] = Value::Null;
+                        }
+                        falsch_entfernt.insert(take_id.clone());
+                    }
                     t = ende;
                     // An der Kamera nochmals ausgelöst, ohne Klappe in der App.
                     if z.ja(lage.nur_kamera) {
@@ -415,7 +427,7 @@ pub(crate) fn drehtag(saat: u64) -> Drehtag {
         .into_iter()
         .map(|(k, je)| (k, je.into_iter().max_by_key(|(_, n)| *n).map(|(d, _)| d).unwrap_or_default()))
         .collect();
-    Drehtag { lage, drehs: Value::Array(drehs), clips, ohne_rec, karten }
+    Drehtag { lage, drehs: Value::Array(drehs), clips, ohne_rec, falsch_entfernt, karten }
 }
 
 #[allow(clippy::too_many_arguments)] // flache Liste der Bausteine eines Clips
@@ -670,6 +682,65 @@ pub(crate) fn vorschlaege_uebernehmen(
     n
 }
 
+/// Marlon entscheidet oben in „Zu klären“ über Clips, die die ID eines automatisch entfernten Takes tragen (Systemkarte
+/// 499a1fc). Gehört der Clip dazu (er sieht es am Bild), „Take wiederherstellen“ wie `take_wiederherstellen`: Take nicht
+/// mehr gelöscht, Clipname und `take.clip` vom Clip, Clip von Hand zugeordnet. Sonst „Gehört nicht dazu“: Zuordnung
+/// aufheben, falls der Clip am entfernten Take hing, und „Stimmt so“. Nach einem Wiederherstellen lädt die Seite neu;
+/// weitere Clips desselben Takes (B-Kamera) stehen dann unter „Clips ohne Take“ mit Vorschlag. Gibt (wiederhergestellt,
+/// gehört nicht dazu) zurück.
+pub(crate) fn entfernte_entscheiden(
+    drehs: &mut Value,
+    gefunden: &mut [GefundeneKarte],
+    u: &crate::projekt::Uebersicht,
+    clips: &[SimClip],
+    wahr: &HashMap<String, Option<String>>,
+) -> (usize, usize) {
+    let (mut wieder, mut nicht) = (0, 0);
+    let mut zurueck: HashSet<String> = HashSet::new();
+    for x in u.unstimmigkeiten.iter().filter(|x| x.art == "entfernt") {
+        let Some(take_id) = &x.vorschlag_take else { continue };
+        if zurueck.contains(take_id) {
+            continue;
+        }
+        let gehoert = wahr.get(&x.clip.to_uppercase()).cloned().flatten().as_deref() == Some(take_id.as_str());
+        if gehoert {
+            let take = take_mut(drehs, take_id).expect("entfernter Take");
+            let name = crate::take_aus_clip::clip_name(&x.clip);
+            take["geloescht"] = json!(false);
+            take["clip_name"] = json!(name);
+            if let Some(an) =
+                clips.iter().find(|c| c.name.eq_ignore_ascii_case(&x.clip)).and_then(|c| c.zeile.angaben.as_ref())
+            {
+                take["clip"] = json!({ "name": name, "startTc": an.start_tc, "bilder": an.bilder });
+            }
+            zurueck.insert(take_id.clone());
+            wieder += 1;
+        } else {
+            nicht += 1;
+        }
+        for k in gefunden.iter_mut().filter(|k| k.inhalt.karte.eq_ignore_ascii_case(&x.karte)) {
+            let Some(c) = k.inhalt.clips.iter_mut().find(|c| c.name.eq_ignore_ascii_case(&x.clip)) else { continue };
+            if gehoert {
+                c.take_id = Some(take_id.clone());
+                c.dreh_id = x.vorschlag_dreh.clone();
+                c.zuordnung = "hand".into();
+            } else {
+                if !x.take_id.is_empty() {
+                    c.take_id = None;
+                    c.dreh_id = None;
+                    c.zuordnung = String::new();
+                }
+                k.inhalt.stimmt_so.push(ingest_kern::uebersicht::StimmtSo {
+                    schluessel: x.schluessel.clone(),
+                    zeit: "2026-10-17T20:00:00+02:00".into(),
+                    rechner: "sim".into(),
+                });
+            }
+        }
+    }
+    (wieder, nicht)
+}
+
 /// Ein Verstoss gegen die Wahrheit.
 #[derive(Debug, Clone)]
 pub(crate) struct Fehler {
@@ -730,14 +801,44 @@ pub(crate) fn pruefen_mit(
             f_("Take zeigt „Karte fehlt“, obwohl alle Karten eingelesen sind", format!("Take {} ({})", t.id, t.clip));
         }
     }
-    // 7. Unstimmigkeiten nur mit Grund: Alle Zuordnungen hier stimmen (sonst meldet 1. sie schon).
+    // 7. Unstimmigkeiten nur mit Grund: Alle Zuordnungen hier stimmen (sonst meldet 1. sie schon). Ein Clip zu einem
+    // automatisch entfernten Take braucht einen Beleg im Clip (QR, Info 1 oder Zuordnung). Der QR der Klappe im Bild irrt
+    // nie; Info 1 kann vom vorigen Take stammen (die Kamera behält sie), darüber entscheidet Marlon am Bild.
     for x in &u.unstimmigkeiten {
+        if x.art == "entfernt" {
+            let take = x.vorschlag_take.clone().unwrap_or_default();
+            let id = format!("PA:{take}");
+            let c = gefunden.iter().flat_map(|k| &k.inhalt.clips).find(|c| c.name.eq_ignore_ascii_case(&x.clip));
+            let qr = c.is_some_and(|c| c.qr.contains(&id));
+            let beleg = qr
+                || c.is_some_and(|c| {
+                    c.info1.as_deref() == Some(id.as_str()) || c.take_id.as_deref() == Some(take.as_str())
+                });
+            if !beleg {
+                f_("Clip zu entferntem Take ohne Beleg", format!("{} {}: {}", x.clip, x.karte, x.text));
+            } else if qr && wahr.get(&x.clip.to_uppercase()).cloned().flatten() != Some(take) {
+                f_(
+                    "QR zeigt auf entfernten Take, Clip gehört nicht dazu",
+                    format!("{} {}: {}", x.clip, x.karte, x.text),
+                );
+            }
+            continue;
+        }
         f_("Unstimmigkeit ohne Grund", format!("{} {}: {}", x.clip, x.karte, x.text));
     }
     // 3. Jeder Clip bei seinem Take oder in „Zu klären“; 4. Vorschläge.
     let offen: HashMap<String, &crate::projekt::OffenerClip> =
         u.zu_klaeren.iter().map(|o| (o.clip.to_uppercase(), o)).collect();
+    // Oben in „Zu klären“: Clips zu automatisch entfernten Takes (stehen nicht zusätzlich unter „Clips ohne Take“).
+    let oben: HashSet<String> =
+        u.unstimmigkeiten.iter().filter(|x| x.art == "entfernt").map(|x| x.clip.to_uppercase()).collect();
     for (n, w) in wahr {
+        if oben.contains(n) {
+            if offen.contains_key(n) {
+                f_("Clip doppelt (oben und unter Clips ohne Take)", n.clone());
+            }
+            continue;
+        }
         // Zugeordnet (der Take zeigt vielleicht den Clip der anderen Kamera): nicht verloren.
         match (gezeigt.contains_key(n) || zugeordnet.contains(n), offen.get(n)) {
             (true, Some(_)) => f_("Clip doppelt (Take und Zu klären)", n.clone()),
@@ -836,6 +937,8 @@ mod tests {
         let (mut ohne_rec, mut ohne_sicher, mut ohne_unklar, mut uebernommen) = (0usize, 0usize, 0usize, 0usize);
         let mut nachgetragen = 0usize;
         let (mut tage34, mut entfernt34, mut nachfrage34) = (0usize, 0usize, 0usize);
+        let (mut falsch34, mut falsch34_gemeldet, mut falsch34_zurueck) = (0usize, 0usize, 0usize);
+        let (mut wiederhergestellt, mut nicht_dazu) = (0usize, 0usize);
         let (mut hand_falsch, mut hand_erkannt) = (0usize, 0usize);
         for nr in einzeln.map_or(1..=anzahl, |n| n..=n) {
             let d = drehtag(nr);
@@ -856,6 +959,15 @@ mod tests {
                 }
             }
             let e = durchrechnen(&d);
+            for t in &d.falsch_entfernt {
+                falsch34 += 1;
+                falsch34_gemeldet += usize::from(
+                    e.uebersicht
+                        .unstimmigkeiten
+                        .iter()
+                        .any(|x| x.art == "entfernt" && x.vorschlag_take.as_ref() == Some(t)),
+                );
+            }
             clips += d.clips.len();
             automatisch += e.zuordnung.len();
             offen += e.uebersicht.zu_klaeren.len();
@@ -890,14 +1002,21 @@ mod tests {
                     gefunden = g;
                     nachgetragen += u.nachzutragen.len();
                     u = projektseite(&drehs, &gefunden);
+                    // Oben zuerst: Clips zu automatisch entfernten Takes (Systemkarte 499a1fc).
+                    let (w, nd) = entfernte_entscheiden(&mut drehs, &mut gefunden, &u, &d.clips, &wahr);
+                    wiederhergestellt += w;
+                    nicht_dazu += nd;
+                    if w + nd > 0 {
+                        u = projektseite(&drehs, &gefunden);
+                    }
                     let n = vorschlaege_uebernehmen(&mut drehs, &mut gefunden, &u, &d.clips, &mut wahr, &mut neu_nr);
-                    if n == 0 {
+                    if n + w + nd == 0 {
                         break;
                     }
                     uebernommen += n;
                     u = projektseite(&drehs, &gefunden);
                     if einzeln.is_some() {
-                        println!("— Runde {runde}: {n} Vorschläge übernommen");
+                        println!("— Runde {runde}: {w} Takes wiederhergestellt, {nd}× gehört nicht dazu, {n} Vorschläge übernommen");
                         ausgeben(&d, &e.zuordnung, &[], &u);
                         for t in drehs
                             .as_array()
@@ -929,6 +1048,11 @@ mod tests {
                         break;
                     }
                 }
+                falsch34_zurueck += d
+                    .falsch_entfernt
+                    .iter()
+                    .filter(|t| take_mut(&mut drehs, t).is_some_and(|x| x["geloescht"] != true))
+                    .count();
             }
             // Marlon ordnet einen Clip von Hand falsch zu (einem anderen Take derselben Plate): Erscheint das unter
             // „Unstimmigkeiten“? Nur gezählt, nicht verlangt (ohne sicheren Beleg gibt es nichts zu melden).
@@ -959,6 +1083,12 @@ mod tests {
         println!("{nachgetragen} eindeutige Zuordnungen nachgetragen (Ansicht danach unverändert)");
         println!(
             "{tage34} Drehtage mit Plate Assistant Build 34: {entfernt34} Takes ohne REC von der App entfernt, {nachfrage34} Takes mit Nachfrage für Aufnahmen nur an der Kamera"
+        );
+        println!(
+            "{falsch34} Takes mit Aufnahme fälschlich entfernt (Fehler im Plate Assistant): {falsch34_gemeldet} oben gemeldet, {falsch34_zurueck} von Hand wiederhergestellt"
+        );
+        println!(
+            "{wiederhergestellt}× „Take wiederherstellen“, {nicht_dazu}× „Gehört nicht dazu“ (Take-ID in Info 1 vom vorigen Take)"
         );
         println!("{hand_falsch} falsche Zuordnungen von Hand, {hand_erkannt} davon unter „Unstimmigkeiten“ gemeldet");
         for (art, (n, nr, bsp)) in &je_art {
