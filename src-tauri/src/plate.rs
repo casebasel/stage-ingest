@@ -530,7 +530,7 @@ impl Plate {
             .lesen(
                 z,
                 &format!(
-                    "clip?projekt_id=eq.{p}&select=name,karte_id,take_id,studio_take_id,zuordnung,geloescht,start_tc,end_tc,fps,dreh_id,aus_clip"
+                    "clip?projekt_id=eq.{p}&select=name,karte_id,take_id,studio_take_id,zuordnung,geloescht,start_tc,end_tc,fps,dreh_id,aus_clip,geaendert_am,felder_zeit"
                 ),
             )
             .or_else(|_| {
@@ -645,19 +645,20 @@ impl Plate {
             let ids: Vec<String> = teil.iter().map(|t| url_teil(t)).collect();
             let clips = self.lesen(
                 z,
-                &format!("clip?take_id=in.({})&geloescht=not.is.true&select=take_id,name,aus_clip", ids.join(",")),
+                &format!(
+                    "clip?take_id=in.({})&geloescht=not.is.true&select=take_id,name,aus_clip,geaendert_am,felder_zeit",
+                    ids.join(",")
+                ),
             )?;
-            let takes = self.lesen(z, &format!("take?id=in.({})&select=id,aus_clip", ids.join(",")))?;
-            let clips: Vec<(String, String, Value)> = clips
-                .as_array()
-                .into_iter()
-                .flatten()
-                .map(|c| (text(&c["take_id"]).to_owned(), text(&c["name"]).to_owned(), c["aus_clip"].clone()))
-                .collect();
+            let takes = self.lesen(z, &format!("take?id=in.({})&select=id,aus_clip,geloescht", ids.join(",")))?;
+            let clips: Vec<crate::aus_clip::Clip> =
+                clips.as_array().into_iter().flatten().map(crate::aus_clip::Clip::aus_zeile).collect();
+            // Gelöschte Takes bleiben, wie sie sind (Plate Assistant).
             let ist: Vec<(String, Value)> = takes
                 .as_array()
                 .into_iter()
                 .flatten()
+                .filter(|t| t["geloescht"] != true)
                 .map(|t| (text(&t["id"]).to_owned(), t["aus_clip"].clone()))
                 .collect();
             liste.extend(crate::aus_clip::abweichungen(ist.iter().map(|(i, w)| (i.as_str(), w)), &clips));

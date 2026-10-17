@@ -6,7 +6,10 @@
 //! dasselbe schreiben und nichts hin und her springt: Massgebend ist unter den Clips, die auf den Take zeigen
 //! (`clip.take_id`, nicht gelöscht), der Clip der A-Kamera, sonst der Kamera mit dem kleinsten Buchstaben (erster
 //! Buchstabe des Clipnamens). Sein `clip.aus_clip` (vom Einlesen, aus ART CMD) kommt auf 0,1° gerundet an den Take, halbe
-//! Werte von null weg wie Swift `.rounded()`. Zeigt kein Clip auf den Take, ist `take.aus_clip` leer.
+//! Werte von null weg wie Swift `.rounded()`. Zeigt kein Clip auf den Take, ist `take.aus_clip` leer. Randfälle wie im
+//! Plate Assistant (`ClipRegel.massgebend`): zwei Clips derselben Kamera → der jüngere (`geaendert_am`, sonst die jüngste
+//! Zeit aus `felder_zeit`); Clips ohne Kamerabuchstaben nur, wenn keiner mit Buchstaben da ist; gelöschte Takes bleiben,
+//! wie sie sind.
 
 use std::collections::HashMap;
 
@@ -31,12 +34,51 @@ pub fn gerundet(a: &Value) -> Option<Value> {
     (!m.is_empty()).then_some(Value::Object(m))
 }
 
-/// Soll-Wert eines Takes aus den Clips, die auf ihn zeigen (Name, `clip.aus_clip`): der massgebende Clip ist der der
-/// A-Kamera, sonst der kleinste Buchstabe; sein Wert gerundet, ohne Wert leer (`Null`). Ohne Clip ebenfalls leer.
-pub fn soll(clips: &[(&str, &Value)]) -> Value {
-    let mut alle: Vec<&(&str, &Value)> = clips.iter().collect();
-    alle.sort_by_key(|(n, _)| (n.chars().next().map(|c| c.to_ascii_uppercase()), n.to_uppercase()));
-    alle.first().and_then(|(_, a)| gerundet(a)).unwrap_or(Value::Null)
+/// Ein Clip, der auf einen Take zeigt: Name, `clip.aus_clip` und wann er zuletzt geändert wurde (Mikrosekunden).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Clip {
+    pub take_id: String,
+    pub name: String,
+    pub aus_clip: Value,
+    pub zeit: i64,
+}
+
+impl Clip {
+    /// Aus einer Zeile von `clip` (`take_id`, `name`, `aus_clip`, `geaendert_am`, `felder_zeit`).
+    pub fn aus_zeile(c: &Value) -> Clip {
+        let text = |v: &Value| v.as_str().unwrap_or_default().to_owned();
+        let geaendert = c["geaendert_am"]
+            .as_str()
+            .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok().or_else(|| server_zeit(t)))
+            .map(|t| t.timestamp_micros());
+        let felder = c["felder_zeit"].as_object().and_then(|o| o.values().filter_map(Value::as_i64).max());
+        Clip {
+            take_id: text(&c["take_id"]),
+            name: text(&c["name"]),
+            aus_clip: c["aus_clip"].clone(),
+            zeit: geaendert.or(felder).unwrap_or(0),
+        }
+    }
+}
+
+/// `2026-10-17 07:05:16.836365+00` (so liefert Postgres `timestamptz` als Text) als Zeit.
+fn server_zeit(t: &str) -> Option<chrono::DateTime<chrono::FixedOffset>> {
+    chrono::DateTime::parse_from_str(&format!("{t}00"), "%Y-%m-%d %H:%M:%S%.f%z").ok()
+}
+
+/// Kamerabuchstabe eines Clips: der erste Buchstabe des Namens, wenn es einer ist (`A010C022…` → `A`).
+fn buchstabe(name: &str) -> Option<char> {
+    name.chars().next().filter(|c| c.is_ascii_alphabetic()).map(|c| c.to_ascii_uppercase())
+}
+
+/// Soll-Wert eines Takes aus den Clips, die auf ihn zeigen: der massgebende Clip ist der der A-Kamera, sonst der
+/// kleinste Buchstabe, bei gleicher Kamera der jüngere; Clips ohne Buchstaben nur, wenn keiner mit Buchstaben da ist.
+/// Sein Wert gerundet, ohne Wert leer (`Null`). Ohne Clip ebenfalls leer.
+pub fn soll(clips: &[&Clip]) -> Value {
+    let massgebend = clips.iter().min_by_key(|c| {
+        (buchstabe(&c.name).is_none(), buchstabe(&c.name), std::cmp::Reverse(c.zeit), c.name.to_uppercase())
+    });
+    massgebend.and_then(|c| gerundet(&c.aus_clip)).unwrap_or(Value::Null)
 }
 
 /// Gleich, wenn jeder der vier Werte gleich ist (beide fehlen oder dieselbe Zahl); leer ist gleich leer.
@@ -50,13 +92,10 @@ pub fn gleich(ist: &Value, soll: &Value) -> bool {
 
 /// Takes, deren `aus_clip` nicht dem Soll aus ihren Clips entspricht: (Take, Soll, auch `Null` zum Leeren). `takes`:
 /// (ID, `take.aus_clip`); `clips`: (Take-ID, Name, `clip.aus_clip`), nur nicht gelöschte.
-pub fn abweichungen<'a>(
-    takes: impl IntoIterator<Item = (&'a str, &'a Value)>,
-    clips: &[(String, String, Value)],
-) -> Vec<(String, Value)> {
-    let mut je_take: HashMap<&str, Vec<(&str, &Value)>> = HashMap::new();
-    for (t, n, a) in clips {
-        je_take.entry(t.as_str()).or_default().push((n.as_str(), a));
+pub fn abweichungen<'a>(takes: impl IntoIterator<Item = (&'a str, &'a Value)>, clips: &[Clip]) -> Vec<(String, Value)> {
+    let mut je_take: HashMap<&str, Vec<&Clip>> = HashMap::new();
+    for c in clips {
+        je_take.entry(c.take_id.as_str()).or_default().push(c);
     }
     let mut aus = Vec::new();
     for (id, ist) in takes {
@@ -95,6 +134,10 @@ pub fn aenderungen(
 mod tests {
     use super::*;
 
+    fn clip(take: &str, name: &str, a: Value, zeit: i64) -> Clip {
+        Clip { take_id: take.into(), name: name.into(), aus_clip: a, zeit }
+    }
+
     #[test]
     fn rundet_wie_swift() {
         // Plate Assistant: halbe Werte von null weg (Swift `.rounded()`).
@@ -108,30 +151,54 @@ mod tests {
     }
 
     #[test]
-    fn massgebend_ist_die_a_kamera() {
-        let a = json!({ "tiltGrad": 1.89, "rollGrad": 0.77, "tiltBereich": 0.5, "rollBereich": 1.5 });
-        let b = json!({ "tiltGrad": 9.0, "rollGrad": 9.0 });
-        assert_eq!(
-            soll(&[("B001C003_120101_R7XY", &b), ("A010C022_120101_R132", &a)]),
-            json!({ "tiltGrad": 1.9, "rollGrad": 0.8, "tiltBereich": 0.5, "rollBereich": 1.5 })
-        );
-        assert_eq!(soll(&[("B001C003_120101_R7XY", &b)]), json!({ "tiltGrad": 9.0, "rollGrad": 9.0 }));
-        // Der A-Clip ist massgebend, auch ohne Werte: dann leer (wie im Plate Assistant).
-        assert_eq!(soll(&[("A010C022_120101_R132", &Value::Null), ("B001C003_120101_R7XY", &b)]), Value::Null);
+    fn massgebend_wie_im_plate_assistant() {
+        let a = clip("T", "A010C022_120101_R132", json!({ "tiltGrad": 1.89, "rollGrad": 0.77 }), 1);
+        let b = clip("T", "B001C003_120101_R7XY", json!({ "tiltGrad": 9.0, "rollGrad": 9.0 }), 9);
+        assert_eq!(soll(&[&b, &a]), json!({ "tiltGrad": 1.9, "rollGrad": 0.8 }));
+        assert_eq!(soll(&[&b]), json!({ "tiltGrad": 9.0, "rollGrad": 9.0 }));
+        // Der A-Clip zählt auch ohne Werte: dann leer, nicht der nächste Clip mit Werten.
+        let a_leer = clip("T", "A010C022_120101_R132", Value::Null, 1);
+        assert_eq!(soll(&[&a_leer, &b]), Value::Null);
         assert_eq!(soll(&[]), Value::Null);
+        // Zwei Clips derselben Kamera: der jüngere.
+        let a_alt = clip("T", "A010C021_120101_R132", json!({ "tiltGrad": 5.0 }), 1);
+        let a_neu = clip("T", "A010C029_120101_R132", json!({ "tiltGrad": 6.0 }), 2);
+        assert_eq!(soll(&[&a_neu, &a_alt]), json!({ "tiltGrad": 6.0 }));
+        // Ohne Kamerabuchstaben nur, wenn keiner mit Buchstaben da ist.
+        let ziffer = clip("T", "0001", json!({ "tiltGrad": 7.0 }), 5);
+        assert_eq!(soll(&[&ziffer, &b]), json!({ "tiltGrad": 9.0, "rollGrad": 9.0 }));
+        assert_eq!(soll(&[&ziffer]), json!({ "tiltGrad": 7.0 }));
+    }
+
+    #[test]
+    fn zeit_aus_der_datenbank() {
+        let c = Clip::aus_zeile(&json!({ "take_id": "T1", "name": "A", "aus_clip": null,
+            "geaendert_am": "2026-10-17 07:05:16.836365+00", "felder_zeit": { "take_id": 1 } }));
+        assert_eq!(c.zeit, 1_792_220_716_836_365);
+        let c = Clip::aus_zeile(&json!({ "take_id": "T1", "name": "A", "aus_clip": null,
+            "geaendert_am": "2026-10-17T07:05:16.836365+00:00" }));
+        assert_eq!(c.zeit, 1_792_220_716_836_365);
+        let c =
+            Clip::aus_zeile(&json!({ "take_id": "T1", "name": "A", "felder_zeit": { "take_id": 5, "aus_clip": 7 } }));
+        assert_eq!(c.zeit, 7);
     }
 
     #[test]
     fn nur_was_abweicht_auch_leeren() {
         // Predigerhof P6, 17.10.2026: Take 1 ohne, Take 7 schon mit gleichem Wert, Take 9 ohne Clip, Take 4 hatte einen
         // Clip, der umgehängt wurde (Wert bleibt am Take stehen und muss weg).
-        let a = json!({ "tiltGrad": 1.89, "rollGrad": 0.77, "tiltBereich": 0.5, "rollBereich": 1.5 });
         let clips = vec![
-            ("T1".to_owned(), "A010C022_120101_R132".to_owned(), a.clone()),
-            (
-                "T7".to_owned(),
-                "A010C027_120101_R132".to_owned(),
+            clip(
+                "T1",
+                "A010C022_120101_R132",
+                json!({ "tiltGrad": 1.89, "rollGrad": 0.77, "tiltBereich": 0.5, "rollBereich": 1.5 }),
+                1,
+            ),
+            clip(
+                "T7",
+                "A010C027_120101_R132",
                 json!({ "tiltGrad": -1.32, "rollGrad": 1.87, "tiltBereich": 0.4, "rollBereich": 2.4 }),
+                1,
             ),
         ];
         let t7 = json!({ "tiltGrad": -1.3, "rollGrad": 1.9, "tiltBereich": 0.4, "rollBereich": 2.4 });

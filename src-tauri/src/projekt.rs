@@ -1802,10 +1802,10 @@ pub fn zusammenfuehren(
     let clips_db = db["clips"].as_array().filter(|a| !a.is_empty() && a.iter().all(|c| c.get("aus_clip").is_some()));
     let aus_clip_nachzutragen = match clips_db {
         Some(clips) => {
-            let clips: Vec<(String, String, Value)> = clips
+            let clips: Vec<crate::aus_clip::Clip> = clips
                 .iter()
                 .filter(|c| gilt(c) && !text(&c["take_id"]).is_empty())
-                .map(|c| (text(&c["take_id"]), text(&c["name"]), c["aus_clip"].clone()))
+                .map(crate::aus_clip::Clip::aus_zeile)
                 .collect();
             let takes: Vec<(String, Value)> = drehs_json
                 .as_array()
