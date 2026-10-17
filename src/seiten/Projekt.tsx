@@ -2,7 +2,7 @@
 // Takes, Karten). Beantwortet auch vor dem Formatieren: Ist von diesem Projekt alles da? Was ist zu klären?
 // Das Projekt selbst wird oben links gewählt (gilt für alle Seiten). Bearbeiten von Plates und Takes kommt später
 // (Systemkarte, Entscheidung „Projektmanager“ vom 08.10.2026); heute nur lesen, Projekte und Drehorte anlegen.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { ChevronDown, ChevronRight, Image as Bild, MapPinPlus, Play, Plus, RefreshCw, Settings, Trash2, X } from "lucide-react";
@@ -99,6 +99,8 @@ type Uebersicht = {
   einsortieren: Einsortierbar[];
   /** Zusammenfassungen (alle Kopien) von Karten, die noch nicht in der Datenbank stehen. */
   ohneDatenbank?: string[];
+  /** Eindeutige Zuordnungen, die erst nach dem Einlesen erkannt wurden: die App trägt sie nach. */
+  nachzutragen?: { clip: string; karte: string; karteId: string; takeId: string; drehId: string; dateien: string[] }[];
 };
 type TakeOhneAufnahme = {
   takeId: string;
@@ -372,6 +374,8 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
   const aktuell = konto.projekte.find((p) => p.id === projekt?.id) ?? projekt;
 
   const [nachgetragen, setNachgetragen] = useState<{ ton: Ton; text: string } | null>(null);
+  // Je Sitzung jede Zuordnung höchstens einmal nachtragen (schlägt es fehl, versucht es erst ein Neustart wieder).
+  const zuordnungVersucht = useRef(new Set<string>());
   async function laden(p: ProjektT) {
     setLaedt(true);
     setFehler(null);
@@ -395,6 +399,30 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
             );
           })
           .catch((err) => setNachgetragen({ ton: "warn", text: `Nachtragen nicht möglich: ${String(err)}` }));
+      }
+      // Eindeutige Zuordnungen, die die App erst nach dem Einlesen erkannt hat (Clipname von der Kamera am Take bestätigt),
+      // in Datenbank und Zusammenfassungen nachtragen (Marlon, 17.10.2026: „automatisch nachtragen“), dann neu laden.
+      const zuordnungen = (neu.nachzutragen ?? []).filter((n) => !zuordnungVersucht.current.has(`${n.karte}|${n.clip}`));
+      if (verbunden && p.id && zuordnungen.length > 0 && !lauf.laeuft) {
+        zuordnungen.forEach((n) => zuordnungVersucht.current.add(`${n.karte}|${n.clip}`));
+        invoke<{ clip: string; ergebnis: { Ok: null } | { Err: string } }[]>("zuordnungen_nachtragen", {
+          zugang: konto.zugang,
+          eintraege: zuordnungen,
+        })
+          .then((r) => {
+            const fehler = r.filter((x) => "Err" in x.ergebnis);
+            const gut = r.filter((x) => "Ok" in x.ergebnis);
+            setNachgetragen(
+              fehler.length
+                ? { ton: "warn", text: `Zuordnung nicht nachgetragen: ${fehler.map((x) => `${x.clip} (${"Err" in x.ergebnis ? x.ergebnis.Err : ""})`).join("; ")}` }
+                : {
+                    ton: "ok",
+                    text: `${gut.length === 1 ? "Eindeutige Zuordnung" : `${gut.length} eindeutige Zuordnungen`} in die Datenbank nachgetragen (Clipname von der Kamera): ${gut.map((x) => x.clip).join(", ")}`,
+                  },
+            );
+            if (gut.length > 0) void laden(p);
+          })
+          .catch((err) => setNachgetragen({ ton: "warn", text: `Zuordnungen nicht nachgetragen: ${String(err)}` }));
       }
       // Mittelbilder nachholen: sichere Takes mit erreichbarem Clip, aber ohne Mittelbild (z. B. in „Zu klären“
       // zugeordnet). Im Hintergrund, je Take höchstens eines (Marlon, 17.10.2026).

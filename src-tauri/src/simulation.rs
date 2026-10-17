@@ -464,7 +464,8 @@ pub(crate) fn durchrechnen(d: &Drehtag) -> Ergebnis {
             grund: String::new(),
             clips: crate::clip_eintraege(&zeilen, &z, &soll, &HashMap::new()),
             projekt: BTreeMap::from([("Kurzname".to_owned(), "SIM".to_owned())]),
-            karte_id: None,
+            // Die Karte steht in der Datenbank: sonst trägt die Projektseite keine Zuordnung nach.
+            karte_id: Some(format!("karte-sim-{}", karte.to_lowercase())),
             einsortiert: None,
             geloescht: vec![],
             ohne_aufnahme: vec![],
@@ -493,6 +494,65 @@ fn take_mut<'a>(drehs: &'a mut Value, id: &str) -> Option<&'a mut Value> {
         .flat_map(|d| d["plate"].as_array_mut().into_iter().flatten())
         .flat_map(|p| p["take"].as_array_mut().into_iter().flatten())
         .find(|t| t["id"] == id)
+}
+
+/// Die Projektseite trägt eindeutige Zuordnungen nach (`Uebersicht::nachzutragen`, Marlon 17.10.2026: „automatisch
+/// nachtragen“): in die Zusammenfassungen schreiben wie `zuordnungen_nachtragen`, dann neu rechnen. Die Ansicht darf
+/// sich dabei nicht ändern (es wird nur festgehalten, was schon „Sicher“ angezeigt war), und danach bleibt nichts
+/// nachzutragen.
+pub(crate) fn nachtragen_pruefen(
+    drehs: &Value,
+    gefunden: &[GefundeneKarte],
+    u: &crate::projekt::Uebersicht,
+) -> (Vec<GefundeneKarte>, Vec<Fehler>) {
+    let mut g = gefunden.to_vec();
+    let mut f = Vec::new();
+    if u.nachzutragen.is_empty() {
+        return (g, f);
+    }
+    for n in &u.nachzutragen {
+        for k in g.iter_mut().filter(|k| k.inhalt.karte.eq_ignore_ascii_case(&n.karte)) {
+            if let Some(c) = k.inhalt.clips.iter_mut().find(|c| c.name.eq_ignore_ascii_case(&n.clip)) {
+                if c.take_id.is_none() && c.dreh_id.is_none() && c.zuordnung != "hand" && !c.ohne_pruefung {
+                    c.take_id = Some(n.take_id.clone());
+                    c.dreh_id = Some(n.dreh_id.clone());
+                    c.zuordnung = "clipname".into();
+                }
+            }
+        }
+    }
+    let nachher = projektseite(drehs, &g);
+    let bild = |u: &crate::projekt::Uebersicht| -> Vec<String> {
+        let mut b: Vec<String> = u
+            .drehs
+            .iter()
+            .flat_map(|d| &d.plates)
+            .flat_map(|p| &p.takes)
+            .map(|t| {
+                format!(
+                    "take {} {} {:?} frei={} ohne={} offen={} unstimmig={} ungeprueft={}",
+                    t.id, t.clip, t.karte, t.freigegeben, t.ohne_aufnahme, t.clip_offen, t.unstimmig, t.ungeprueft
+                )
+            })
+            .collect();
+        b.extend(u.zu_klaeren.iter().map(|o| format!("offen {} {:?}", o.clip, o.vorschlag_take)));
+        b.extend(u.ohne_aufnahme.iter().map(|o| format!("ohne {} {}", o.take_id, o.sicher)));
+        b.extend(u.unstimmigkeiten.iter().map(|x| format!("unstimmig {}", x.clip)));
+        b.sort();
+        b
+    };
+    let (vorher, danach) = (bild(u), bild(&nachher));
+    if vorher != danach {
+        let erste = vorher.iter().find(|z| !danach.contains(z)).or_else(|| danach.iter().find(|z| !vorher.contains(z)));
+        f.push(Fehler { art: "Nachtragen ändert die Ansicht", text: format!("{erste:?}") });
+    }
+    if !nachher.nachzutragen.is_empty() {
+        f.push(Fehler {
+            art: "Nachtragen nicht abgeschlossen",
+            text: nachher.nachzutragen.iter().map(|n| n.clip.clone()).collect::<Vec<_>>().join(", "),
+        });
+    }
+    (g, f)
 }
 
 fn projektseite(drehs: &Value, gefunden: &[GefundeneKarte]) -> crate::projekt::Uebersicht {
@@ -731,6 +791,7 @@ mod tests {
         let mut je_art: BTreeMap<&str, (usize, u64, String)> = BTreeMap::new();
         let (mut clips, mut automatisch, mut offen, mut vorschlaege) = (0usize, 0usize, 0usize, 0usize);
         let (mut ohne_rec, mut ohne_sicher, mut ohne_unklar, mut uebernommen) = (0usize, 0usize, 0usize, 0usize);
+        let mut nachgetragen = 0usize;
         let (mut hand_falsch, mut hand_erkannt) = (0usize, 0usize);
         for nr in einzeln.map_or(1..=anzahl, |n| n..=n) {
             let d = drehtag(nr);
@@ -754,6 +815,21 @@ mod tests {
                 let (mut drehs, mut gefunden, mut u) = (d.drehs.clone(), e.gefunden.clone(), e.uebersicht);
                 let mut neu_nr = 0;
                 for runde in 2..=6 {
+                    // Die App trägt beim Laden der Seite eindeutige Zuordnungen nach, dann übernimmt Marlon Vorschläge.
+                    let (g, fe) = nachtragen_pruefen(&drehs, &gefunden, &u);
+                    fehler.extend(fe.into_iter().map(|mut fe| {
+                        fe.text = format!("Runde {runde}: {}", fe.text);
+                        fe
+                    }));
+                    if !fehler.is_empty() {
+                        break;
+                    }
+                    if g.iter().zip(&gefunden).any(|(a, b)| a.inhalt.clips.len() != b.inhalt.clips.len()) {
+                        unreachable!("Nachtragen ändert nur Zuordnungen");
+                    }
+                    gefunden = g;
+                    nachgetragen += u.nachzutragen.len();
+                    u = projektseite(&drehs, &gefunden);
                     let n = vorschlaege_uebernehmen(&mut drehs, &mut gefunden, &u, &d.clips, &mut wahr, &mut neu_nr);
                     if n == 0 {
                         break;
@@ -820,6 +896,7 @@ mod tests {
             "{ohne_rec} Klappen ohne REC; in „Zu klären“: {ohne_sicher} Takes sicher ohne Aufnahme, {ohne_unklar} unklar"
         );
         println!("{uebernommen} Vorschläge übernommen (Runden danach ohne neue Fehler)");
+        println!("{nachgetragen} eindeutige Zuordnungen nachgetragen (Ansicht danach unverändert)");
         println!("{hand_falsch} falsche Zuordnungen von Hand, {hand_erkannt} davon unter „Unstimmigkeiten“ gemeldet");
         for (art, (n, nr, bsp)) in &je_art {
             println!("FEHLER {art}: {n}× (z. B. Nr. {nr}: {bsp})");

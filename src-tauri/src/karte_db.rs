@@ -277,11 +277,24 @@ pub fn zuordnung_aenderungen(
     take_id: Option<&str>,
     dreh_id: Option<&str>,
     jetzt: DateTime<Utc>,
+    neue_id: impl FnMut() -> String,
+) -> Option<Vec<Value>> {
+    zuordnung_aenderungen_als(karte_id, clip, take_id, dreh_id, "hand", jetzt, neue_id)
+}
+
+/// Wie [`zuordnung_aenderungen`], mit der Art der Zuordnung (`hand`, `clipname`, …; Prüfbedingung von `clip.zuordnung`).
+pub fn zuordnung_aenderungen_als(
+    karte_id: &str,
+    clip: &str,
+    take_id: Option<&str>,
+    dreh_id: Option<&str>,
+    art: &str,
+    jetzt: DateTime<Utc>,
     mut neue_id: impl FnMut() -> String,
 ) -> Option<Vec<Value>> {
     let name = clipname(clip)?;
     let cid = clip_id(karte_id, &name);
-    let zuordnung = (take_id.is_some() || dreh_id.is_some()).then_some("hand");
+    let zuordnung = (take_id.is_some() || dreh_id.is_some()).then_some(art);
     Some(
         [("take_id", json!(take_id)), ("dreh_id", json!(dreh_id)), ("zuordnung", json!(zuordnung))]
             .into_iter()

@@ -428,6 +428,55 @@ fn karten_nachtragen_jetzt(
     aus
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ZuordnungNachgetragen {
+    clip: String,
+    ergebnis: Result<(), String>,
+}
+
+/// Projektseite: eindeutige Zuordnungen nachtragen, die die App erst nach dem Einlesen erkannt hat (Marlon, 17.10.2026:
+/// „automatisch nachtragen“; siehe `projekt::Nachtrag`). Erst die Datenbank, dann die Zusammenfassungen, beides mit der
+/// Art `clipname` und nur, wo der Clip noch offen ist. Schlägt die Datenbank fehl, bleibt alles, und das nächste Laden
+/// versucht es wieder.
+#[tauri::command]
+async fn zuordnungen_nachtragen(
+    plate: State<'_, Arc<plate::Plate>>,
+    zugang: plate::Zugang,
+    eintraege: Vec<projekt::Nachtrag>,
+) -> Result<Vec<ZuordnungNachgetragen>, String> {
+    let p = Arc::clone(&plate);
+    im_hintergrund(move || {
+        let mut aus = Vec::new();
+        for e in eintraege {
+            let ergebnis = (|| {
+                let a = karte_db::zuordnung_aenderungen_als(
+                    &e.karte_id,
+                    &e.clip,
+                    Some(&e.take_id),
+                    Some(&e.dreh_id),
+                    "clipname",
+                    chrono::Utc::now(),
+                    plate::ulid_aehnlich,
+                )
+                .ok_or_else(|| format!("Clipname {} nicht verwendbar", e.clip))?;
+                let abgelehnt = p.karte_schreiben(&zugang, a)?;
+                if !abgelehnt.is_empty() {
+                    return Err(format!("Datenbank: {}", abgelehnt.join("; ")));
+                }
+                for d in &e.dateien {
+                    ingest_kern::uebersicht::eindeutig_nachtragen(d, &e.clip, &e.take_id, &e.dreh_id, "clipname")
+                        .map_err(|x| format!("{}: {x}", d.display()))?;
+                }
+                Ok(())
+            })();
+            aus.push(ZuordnungNachgetragen { clip: e.clip, ergebnis });
+        }
+        Ok(aus)
+    })
+    .await
+}
+
 #[tauri::command]
 async fn karten_nachtragen(
     plate: State<'_, Arc<plate::Plate>>,
@@ -2498,6 +2547,7 @@ pub fn run() {
             karte_wiedererkennen,
             karte_einsortieren,
             karten_nachtragen,
+            zuordnungen_nachtragen,
             zur_seite_liste,
             studio_take_bewerten,
             zur_seite_wegwerfen,

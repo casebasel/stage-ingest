@@ -134,6 +134,30 @@ pub fn zuordnen(
     Ok(z.karte_id)
 }
 
+/// Trägt eine eindeutige Zuordnung nach, die die App erst nach dem Einlesen erkannt hat (Marlon, 17.10.2026: „automatisch
+/// nachtragen“), z. B. über den von der Kamera bestätigten Clipnamen am Take (`art` = `clipname`). Nur wenn der Clip in
+/// dieser Zusammenfassung noch keinen Take, keinen Drehort und keine Zuordnung von Hand hat; sonst bleibt die Datei, wie
+/// sie ist. Gibt zurück, ob geschrieben wurde.
+pub fn eindeutig_nachtragen(
+    datei: &Path,
+    clip: &str,
+    take_id: &str,
+    dreh_id: &str,
+    art: &str,
+) -> std::io::Result<bool> {
+    let mut z: KartenZusammenfassung = serde_json::from_slice(&std::fs::read(datei)?).map_err(std::io::Error::other)?;
+    let Some(eintrag) = z.clips.iter_mut().find(|c| c.name.eq_ignore_ascii_case(clip)) else { return Ok(false) };
+    if eintrag.take_id.is_some() || eintrag.dreh_id.is_some() || eintrag.zuordnung == "hand" || eintrag.ohne_pruefung {
+        return Ok(false);
+    }
+    eintrag.take_id = Some(take_id.to_owned());
+    eintrag.dreh_id = Some(dreh_id.to_owned());
+    eintrag.zuordnung = art.to_owned();
+    let text = serde_json::to_vec_pretty(&z).map_err(std::io::Error::other)?;
+    crate::sicher_schreiben(datei, &text)?;
+    Ok(true)
+}
+
 /// Nimmt einen endgültig gelöschten Clip aus der Zusammenfassung und vermerkt ihn unter `geloescht`. Gibt die ID der
 /// Karte in der Datenbank zurück (falls die Karte dort steht). Fehlt der Clip schon, bleibt die Datei unverändert.
 pub fn clip_entfernen(datei: &Path, clip: &str) -> std::io::Result<Option<String>> {
@@ -395,5 +419,36 @@ mod tests {
         let leer: KartenZusammenfassung = serde_json::from_slice(&std::fs::read(&datei).unwrap()).unwrap();
         assert_eq!(leer, z);
         assert!(zuordnen(&datei, "GIBTSNICHT", None, None).is_err());
+    }
+
+    #[test]
+    fn eindeutig_nachtragen_nur_wo_offen() {
+        let t = tempfile::tempdir().unwrap();
+        let datei = t.path().join("A007R132_ingest.json");
+        let z: KartenZusammenfassung = serde_json::from_value(serde_json::json!({
+            "format": 1, "karte": "A007R132", "beginn": "2026-10-14T12:58:24Z", "version": "test",
+            "freigegeben": true, "unabhaengigeKopien": 1, "grund": "",
+            "clips": [
+                { "name": "A007C004_120101_R132", "startTc": "14:42:09:16", "endTc": null, "takeId": null, "zuordnung": "" },
+                { "name": "A007C013_120101_R132", "startTc": "16:56:39:16", "endTc": null, "takeId": null,
+                  "zuordnung": "hand", "drehId": "D9" }
+            ]
+        }))
+        .unwrap();
+        std::fs::write(&datei, serde_json::to_vec_pretty(&z).unwrap()).unwrap();
+        assert!(eindeutig_nachtragen(&datei, "A007C004_120101_R132", "T2", "D1", "clipname").unwrap());
+        assert!(
+            !eindeutig_nachtragen(&datei, "A007C004_120101_R132", "T5", "D1", "clipname").unwrap(),
+            "schon zugeordnet"
+        );
+        assert!(!eindeutig_nachtragen(&datei, "A007C013_120101_R132", "T4", "D1", "clipname").unwrap(), "von Hand");
+        assert!(!eindeutig_nachtragen(&datei, "A007C099_120101_R132", "T4", "D1", "clipname").unwrap(), "nicht da");
+        let z = lesen_datei(&datei).unwrap();
+        let c = &z.clips[0];
+        assert_eq!(
+            (c.take_id.as_deref(), c.dreh_id.as_deref(), c.zuordnung.as_str()),
+            (Some("T2"), Some("D1"), "clipname")
+        );
+        assert_eq!(z.clips[1].dreh_id.as_deref(), Some("D9"));
     }
 }

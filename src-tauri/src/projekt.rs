@@ -36,6 +36,25 @@ pub struct Uebersicht {
     /// Zusammenfassungen (alle Kopien) von Karten, die noch nicht in der gemeinsamen Datenbank stehen (z. B. ohne Netz
     /// eingelesen): die App trägt sie nach (Systemkarte „Datenfluss“, 10.10.2026).
     pub ohne_datenbank: Vec<PathBuf>,
+    /// Eindeutige Zuordnungen, die die App erst nach dem Einlesen erkannt hat und die noch nirgends stehen: die App
+    /// trägt sie in Datenbank und Zusammenfassungen nach (Marlon, 17.10.2026: „automatisch nachtragen“).
+    pub nachzutragen: Vec<Nachtrag>,
+}
+
+/// Eine eindeutige Zuordnung zum Nachtragen: Der Clipname am Take ist von der Kamera bestätigt (`plate::name_bestaetigt`:
+/// CAP, gleicher Timecode), der Clip liegt auf einer eingelesenen Karte, steht dort aber noch ohne Take, ohne Drehort und
+/// ohne Zuordnung von Hand, auch in der Datenbank nicht. Die Projektseite zeigte den Take schon als „Sicher“; der Plate
+/// Assistant sah ihn ohne Clip (4 stock P2 T2/T3, Treppenhaus T10, 17.10.2026).
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Nachtrag {
+    pub clip: String,
+    pub karte: String,
+    pub karte_id: String,
+    pub take_id: String,
+    pub dreh_id: String,
+    /// Zusammenfassungen der Karte auf den erreichbaren Zielen; leer, wenn nur die Datenbank erreichbar ist.
+    pub dateien: Vec<PathBuf>,
 }
 
 /// Eine Karte unter `<Datum>_OHNE_DREHORT` (alle gefundenen Kopien zusammen). Einsortierbar, wenn jeder Clip über
@@ -1369,6 +1388,8 @@ pub fn zusammenfuehren(
     }
     // Clip (gross) → Take, der ihn zeigt (über die Take-ID oder den bestätigten Namen der Kamera).
     let mut zugeordnete_clips: HashMap<String, String> = HashMap::new();
+    // Über den bestätigten Namen gefunden, aber ohne Take-ID in Zusammenfassung und Datenbank: (Clip, Karte, Take, Drehort).
+    let mut ueber_namen: Vec<(String, String, String, String)> = Vec::new();
     // Für das Einsortieren: Take → Drehort und Clipname (aus dem Plate Assistant) → Drehort.
     let mut take_zu_dreh: HashMap<String, String> = HashMap::new();
     let mut clip_zu_dreh: HashMap<String, String> = HashMap::new();
@@ -1394,6 +1415,9 @@ pub fn zusammenfuehren(
                     .or_else(|| (bestaetigt && !clip.is_empty()).then(|| nach_clip.get(&clip)).flatten());
                 if let Some(s) = stand.filter(|s| !s.clip.is_empty()) {
                     zugeordnete_clips.insert(s.clip.to_uppercase(), id.clone());
+                    if !nach_take.contains_key(&id) && t["studio"] != true {
+                        ueber_namen.push((s.clip.clone(), s.karte.clone(), id.clone(), text(&d["id"])));
+                    }
                 }
                 let mut werte = std::collections::BTreeMap::new();
                 flach("take", t, &mut werte);
@@ -1618,6 +1642,7 @@ pub fn zusammenfuehren(
     }
     let einsortieren = einsortierbar(&karten, &drehs, &take_zu_dreh, &clip_zu_dreh);
     let ohne_datenbank = karten.iter().filter(|k| k.inhalt.karte_id.is_none()).map(|k| k.datei.clone()).collect();
+    let nachzutragen = nachtraege(ueber_namen, &karten, db, &unstimmigkeiten);
     // Anzeige: dieselbe Karte auf mehreren Zielen einmal (neuester Durchgang gewinnt). Vorher wurde schon beim Laden
     // zusammengefasst, dann sah das Einsortieren nur eine Kopie (Prüfung der Systemkarte, 10.10.2026).
     let mut karten = karten;
@@ -1634,7 +1659,75 @@ pub fn zusammenfuehren(
         hinweis: None,
         einsortieren,
         ohne_datenbank,
+        nachzutragen,
     }
+}
+
+/// Welche über den bestätigten Namen gefundenen Zuordnungen nachzutragen sind: Der Clip ist in keiner Kopie der
+/// Zusammenfassung und nicht in der Datenbank einem Take, einem Drehort oder von Hand zugeordnet, nicht gelöscht, nicht
+/// ungeprüft, keinem zweiten Take zugeordnet und ohne Widerspruch; die Karte steht in der Datenbank.
+fn nachtraege(
+    ueber_namen: Vec<(String, String, String, String)>,
+    karten: &[GefundeneKarte],
+    db: &Value,
+    unstimmigkeiten: &[Unstimmigkeit],
+) -> Vec<Nachtrag> {
+    let mut je_clip: HashMap<String, usize> = HashMap::new();
+    for (clip, ..) in &ueber_namen {
+        *je_clip.entry(clip.to_uppercase()).or_default() += 1;
+    }
+    let db_clip = |name: &str| {
+        db["clips"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|c| c["name"].as_str().is_some_and(|n| n.eq_ignore_ascii_case(name)))
+    };
+    let db_karte_id = |karte: &str| {
+        db["karten"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|k| k["geloescht"] != true && k["name"].as_str().is_some_and(|n| n.eq_ignore_ascii_case(karte)))
+            .and_then(|k| k["id"].as_str().map(str::to_owned))
+    };
+    let mut aus = Vec::new();
+    for (clip, karte, take_id, dreh_id) in ueber_namen {
+        if je_clip.get(&clip.to_uppercase()) != Some(&1)
+            || unstimmigkeiten.iter().any(|u| u.clip.eq_ignore_ascii_case(&clip) || u.take_id == take_id)
+        {
+            continue;
+        }
+        let kopien: Vec<&GefundeneKarte> =
+            karten.iter().filter(|k| k.inhalt.karte.eq_ignore_ascii_case(&karte)).collect();
+        let in_kopien =
+            kopien.iter().filter_map(|k| k.inhalt.clips.iter().find(|c| c.name.eq_ignore_ascii_case(&clip)));
+        let mut offen_in_kopien = true;
+        for c in in_kopien {
+            if c.take_id.is_some() || c.dreh_id.is_some() || c.zuordnung == "hand" || c.ohne_pruefung {
+                offen_in_kopien = false;
+            }
+        }
+        let offen_in_db = db_clip(&clip).is_none_or(|c| {
+            let leer = |f: &str| c[f].as_str().is_none_or(str::is_empty);
+            c["geloescht"] != true
+                && leer("take_id")
+                && leer("studio_take_id")
+                && leer("dreh_id")
+                && c["zuordnung"] != "hand"
+        });
+        let karte_id = kopien.iter().find_map(|k| k.inhalt.karte_id.clone()).or_else(|| db_karte_id(&karte));
+        let (true, true, Some(karte_id)) = (offen_in_kopien, offen_in_db, karte_id) else { continue };
+        aus.push(Nachtrag {
+            clip,
+            karte,
+            karte_id,
+            take_id,
+            dreh_id,
+            dateien: kopien.iter().map(|k| k.datei.clone()).collect(),
+        });
+    }
+    aus
 }
 
 /// Liest Plan und Stand und verbindet beides. Ohne Zugang zum Plate Assistant: nur die Karten.
@@ -2070,6 +2163,62 @@ mod tests {
                 t.grund
             );
         }
+        println!("== Nachzutragen ({})", u.nachzutragen.len());
+        for n in &u.nachzutragen {
+            println!(
+                "  {} {} → {} ({} Zusammenfassungen, Karte {})",
+                n.clip,
+                n.karte,
+                take_nr.get(&n.take_id).cloned().unwrap_or_default(),
+                n.dateien.len(),
+                n.karte_id
+            );
+        }
+    }
+
+    #[test]
+    fn eindeutige_zuordnung_nachtragen() {
+        // 4 stock P2 T2/T3 und Treppenhaus T10, 17.10.2026: Die Kamera hat den Clipnamen am Take bestätigt, in der
+        // Datenbank steht der Clip aber ohne Take. Die Projektseite zeigte „Sicher“, der Plate Assistant „ohne Clip“.
+        // Nachgetragen wird nur, was nirgends zugeordnet ist: nie über eine Zuordnung von Hand, nie an gelöschte Takes.
+        let take = |n: i64, zeit: &str, name: &str, tc: &str, geloescht: bool| {
+            json!({ "id": format!("T{n}"), "nummer": n, "clip_name": name, "geloescht": geloescht,
+                    "start_zeit": format!("2026-10-14T{zeit}+00:00"), "erstellt_am": format!("2026-10-14T{zeit}+00:00"),
+                    "kamera": { "quelle": "cap" }, "start_tc": tc, "clip": { "name": name, "startTc": tc, "bilder": 100 } })
+        };
+        let drehs = json!([{ "id": "D1", "name": "4 stock", "kurzname": "4_STOCK", "datum": "2026-10-14",
+            "geloescht": false, "plate": [{ "id": "P2", "nummer": 2, "geloescht": false, "take": [
+                take(1, "12:41:28", "A007C004_120101_R132", "14:42:09:16", false),
+                take(2, "12:42:52", "A007C005_120101_R132", "14:42:51:20", false),
+                take(3, "12:43:33", "A007C006_120101_R132", "14:43:35:06", true),
+            ] }] }]);
+        let clip = |n: &str, tc: &str, zuordnung: Value, dreh: Value| {
+            json!({ "name": n, "karte_id": "K7", "take_id": null, "zuordnung": zuordnung, "dreh_id": dreh,
+                    "geloescht": false, "start_tc": tc, "end_tc": tc, "fps": 25 })
+        };
+        let db = json!({
+            "karten": [{ "id": "K7", "name": "A007R132", "freigegeben": true, "geloescht": false }],
+            "clips": [clip("A007C004_120101_R132", "14:42:09:16", Value::Null, Value::Null),
+                      clip("A007C005_120101_R132", "14:42:51:20", json!("hand"), json!("D9")),
+                      clip("A007C006_120101_R132", "14:43:35:06", Value::Null, Value::Null)],
+        });
+        let p: Projekt =
+            serde_json::from_value(json!({"id": "projekt-x", "name": "X", "kurzname": "X", "aktiv": true})).unwrap();
+        let u = zusammenfuehren(p, &drehs, &json!([]), vec![], vec![], &db);
+        assert_eq!(u.nachzutragen.len(), 1, "{:?}", u.nachzutragen);
+        let n = &u.nachzutragen[0];
+        assert_eq!(
+            (n.clip.as_str(), n.karte.as_str(), n.karte_id.as_str(), n.take_id.as_str(), n.dreh_id.as_str()),
+            ("A007C004_120101_R132", "A007R132", "K7", "T1", "D1")
+        );
+        assert!(n.dateien.is_empty(), "nur Datenbank erreichbar");
+        // Danach steht die Zuordnung in der Datenbank: nichts mehr nachzutragen.
+        let mut db = db;
+        db["clips"][0]["take_id"] = json!("T1");
+        db["clips"][0]["zuordnung"] = json!("clipname");
+        let p: Projekt =
+            serde_json::from_value(json!({"id": "projekt-x", "name": "X", "kurzname": "X", "aktiv": true})).unwrap();
+        assert!(zusammenfuehren(p, &drehs, &json!([]), vec![], vec![], &db).nachzutragen.is_empty());
     }
 
     #[test]
