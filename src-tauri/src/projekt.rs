@@ -1142,6 +1142,9 @@ pub struct TakeStand {
     /// Alle erreichbaren Kopien der Clipdatei (NAS, Platten), für „Pfad kopieren“ per Rechtsklick (Marlon, 14.10.2026).
     pub dateien: Vec<PathBuf>,
     pub csv: Option<PathBuf>,
+    /// Alle Werte der Clipdatei aus der gemeinsamen Datenbank (`clip.technik`, 0031), wie `take_technik` sie liefert:
+    /// Ersatz, wenn die Datei hier nicht erreichbar ist.
+    pub technik_db: Option<Value>,
     /// Alle Felder aus dem Plate Assistant für die Spalten: `take.<feld>`, `plate.<feld>`, verschachtelt mit Punkt
     /// (`plate.kamera.iso`). Ohne IDs, Löschmarke und Listen.
     pub werte: std::collections::BTreeMap<String, Value>,
@@ -1573,6 +1576,11 @@ pub fn zusammenfuehren(
                     datei: stand.and_then(|s| s.datei.clone()),
                     dateien,
                     csv: stand.and_then(|s| s.csv.clone()),
+                    // Werte der Datei aus der Datenbank (alle Rechner), für Takes ohne erreichbare Datei.
+                    technik_db: stand
+                        .map(|s| s.clip.to_uppercase())
+                        .and_then(|c| db["technik"].get(&c).cloned())
+                        .filter(Value::is_object),
                     werte,
                     id,
                 });
@@ -1999,7 +2007,15 @@ pub fn laden(plate: &Plate, zugang: Option<&Zugang>, projekt: Projekt, basis: &[
     if let Some(Ok(studio)) = zugang.map(|z| plate.studio(z, &projekt.id)) {
         studio_einhaengen(&mut drehs, &studio);
     }
-    let db = zugang.map(|z| plate.karten_und_clips(z, &projekt.id)).unwrap_or(Value::Null);
+    let mut db = zugang.map(|z| plate.karten_und_clips(z, &projekt.id)).unwrap_or(Value::Null);
+    // Alle Werte aus den Dateien (`clip.technik`, 0031): Ersatz in der Take-Tabelle, wenn die Datei hier fehlt.
+    if let Some(z) = zugang.filter(|z| plate.technik_spalte_da(z)) {
+        if let Ok(t) = plate.technik_lesen(z, &projekt.id) {
+            let je_name: serde_json::Map<String, Value> =
+                t.into_iter().filter(|(_, _, w)| w.is_object()).map(|(_, n, w)| (n.to_uppercase(), w)).collect();
+            db["technik"] = Value::Object(je_name);
+        }
+    }
     let mut u = zusammenfuehren(projekt, &drehs, &jobs, karten, unlesbar, &db);
     u.hinweis = hinweis;
     u
@@ -2252,6 +2268,15 @@ mod tests {
                 ("T7", json!({ "tiltGrad": 9.9, "rollGrad": 9.9 }))
             ]
         );
+        // Alle Werte der Datei aus der Datenbank (`clip.technik`): am Take als Ersatz, wenn die Datei fehlt.
+        let mut mit_technik = db.clone();
+        mit_technik["technik"] = json!({ "A010C022_120101_R132": { "aufloesung": "3840x2160", "sensorFps": "25" } });
+        let p: Projekt =
+            serde_json::from_value(json!({"id": "projekt-x", "name": "X", "kurzname": "X", "aktiv": true})).unwrap();
+        let u2 = zusammenfuehren(p, &drehs, &json!([]), vec![], vec![], &mit_technik);
+        let t1 = &u2.drehs[0].plates[0].takes[0];
+        assert_eq!(t1.technik_db.as_ref().map(|t| t["aufloesung"].clone()), Some(json!("3840x2160")));
+        assert!(u2.drehs[0].plates[0].takes[1].technik_db.is_none());
         // Bringen die Clips das Feld nicht mit (Rückfall-Abfrage), wird nichts geleert oder geschrieben.
         let mut ohne = db.clone();
         for c in ohne["clips"].as_array_mut().unwrap() {

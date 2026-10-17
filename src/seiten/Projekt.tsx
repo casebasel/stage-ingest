@@ -440,6 +440,7 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
   // Je Sitzung jede Zuordnung höchstens einmal nachtragen (schlägt es fehl, versucht es erst ein Neustart wieder).
   const zuordnungVersucht = useRef(new Set<string>());
   const ausClipVersucht = useRef(new Set<string>());
+  const technikVersucht = useRef(new Set<string>());
   async function laden(p: ProjektT) {
     setLaedt(true);
     setFehler(null);
@@ -471,6 +472,14 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
         tiltRoll.forEach((x) => ausClipVersucht.current.add(`${x.takeId}|${JSON.stringify(x.wert)}`));
         invoke<number>("aus_clip_nachtragen", { zugang: konto.zugang, eintraege: tiltRoll }).catch((err) =>
           setNachgetragen({ ton: "warn", text: `Tilt und Roll nicht an alle Takes nachgetragen: ${String(err)}` }),
+        );
+      }
+      // Alle Werte aus den Dateien in die Datenbank (`clip.technik`), für ältere Karten mit erreichbarer Kopie: im
+      // Hintergrund, je Sitzung und Projekt einmal (höchstens 100 Clips je Durchgang).
+      if (konto.darfSchreiben && p.id && !lauf.laeuft && !technikVersucht.current.has(p.id)) {
+        technikVersucht.current.add(p.id);
+        invoke<number>("technik_nachtragen", { zugang: konto.zugang, projekt: { id: p.id, kurzname: p.kurzname }, basis: e.ziele }).catch(
+          (err) => setNachgetragen({ ton: "warn", text: `Werte der Dateien nicht in die Datenbank nachgetragen: ${String(err)}` }),
         );
       }
       // Eindeutige Zuordnungen, die die App erst nach dem Einlesen erkannt hat (Clipname von der Kamera am Take bestätigt),

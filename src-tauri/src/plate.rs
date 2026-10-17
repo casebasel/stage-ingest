@@ -67,7 +67,7 @@ const DREH_FELDER: &[&str] = &["_anlegen", "name", "datum"];
 /// zusammengeführt); ein Clip zusätzlich umhängen („Zu klären“). Projekt, Name und Reel sind nach dem Anlegen fest.
 // `speicherort` ändert sich beim Einsortieren (Systemkarte; änderbar seit 0018, Plate Assistant 09.10.2026).
 const KARTE_FELDER: &[&str] = &["_anlegen", "speicherort", "ordner_datum", "ablage"];
-const CLIP_FELDER: &[&str] = &["_anlegen", "take_id", "studio_take_id", "dreh_id", "zuordnung", "geloescht"];
+const CLIP_FELDER: &[&str] = &["_anlegen", "take_id", "studio_take_id", "dreh_id", "zuordnung", "geloescht", "technik"];
 
 /// Prüft alle Änderungen einer Anfrage an `aenderungen_anwenden`, bevor sie das Netz verlassen.
 pub fn aenderungen_pruefen(body: &Value) -> Result<(), String> {
@@ -121,6 +121,13 @@ pub fn aenderungen_pruefen(body: &Value) -> Result<(), String> {
         if t == "plate" && !(feld == "art" && a["wert"].as_str().is_some_and(|w| PLATE_ARTEN.contains(&w))) {
             return Err(format!("Stage Ingest ändert an der Einstellung nur die Art, nicht „{feld}“"));
         }
+        // Alle Werte aus der Datei (0031): als Ganzes, ein Objekt bis 64 KB (der Server prüft dasselbe).
+        if t == "clip"
+            && feld == "technik"
+            && !(a["wert"].is_null() || (a["wert"].is_object() && a["wert"].to_string().len() <= 64 * 1024))
+        {
+            return Err("Stage Ingest schreibt clip.technik nur als Objekt bis 64 KB".into());
+        }
         // Vorgänge (0030): nur anhängen; danach ist nur `geloescht` änderbar (der Server sperrt es ebenso).
         if t == crate::vorgang::TABELLE && !matches!(feld, "_anlegen" | "geloescht") {
             return Err(format!("Stage Ingest hängt Vorgänge nur an; „{feld}“ ändert er nicht"));
@@ -165,6 +172,8 @@ struct Sitzung {
 #[derive(Default)]
 pub struct Plate {
     sitzung: Mutex<Option<Sitzung>>,
+    /// Gibt es `clip.technik` (Migration 0031) an dieser Adresse? Einmal je Sitzung gefragt.
+    technik_spalte: Mutex<std::collections::HashMap<String, bool>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -634,6 +643,79 @@ impl Plate {
                 e.unwrap_or("unbekannt"),
                 v[0]["grund"].as_str().unwrap_or_default()
             )),
+        }
+    }
+
+    /// Gibt es `clip.technik` (Migration 0031)? Ohne die Spalte schreibt und liest der Ingest sie nicht; gefragt wird
+    /// einmal je Adresse und Sitzung (ein Fehler ohne Antwort des Servers wird nicht gemerkt).
+    pub fn technik_spalte_da(&self, z: &Zugang) -> bool {
+        if let Some(da) = self.technik_spalte.lock().ok().and_then(|m| m.get(&z.adresse).copied()) {
+            return da;
+        }
+        let da = match self.lesen(z, "clip?select=technik&limit=0") {
+            Ok(_) => true,
+            Err(e) if e.contains("42703") || e.contains("technik") => false,
+            Err(_) => return false,
+        };
+        if let Ok(mut m) = self.technik_spalte.lock() {
+            m.insert(z.adresse.clone(), da);
+        }
+        da
+    }
+
+    /// `clip.technik` der Clips eines Projekts: (Clip-ID, Name, Wert; `Null` = noch keiner).
+    pub fn technik_lesen(&self, z: &Zugang, projekt_id: &str) -> Result<Vec<(String, String, Value)>, String> {
+        let v = self.lesen(
+            z,
+            &format!("clip?projekt_id=eq.{}&geloescht=not.is.true&select=id,name,technik", url_teil(projekt_id)),
+        )?;
+        Ok(v.as_array()
+            .into_iter()
+            .flatten()
+            .map(|c| (text(&c["id"]).to_owned(), text(&c["name"]).to_owned(), c["technik"].clone()))
+            .collect())
+    }
+
+    /// `clip.technik` dieser Clips (Clip-ID → Wert); fehlt ein Clip, fehlt er auch hier.
+    pub fn technik_der_clips(
+        &self,
+        z: &Zugang,
+        ids: &[String],
+    ) -> Result<std::collections::HashMap<String, Value>, String> {
+        let mut aus = std::collections::HashMap::new();
+        for teil in ids.chunks(50) {
+            let liste: Vec<String> = teil.iter().map(|i| url_teil(i)).collect();
+            let v = self.lesen(z, &format!("clip?id=in.({})&select=id,technik", liste.join(",")))?;
+            aus.extend(v.as_array().into_iter().flatten().map(|c| (text(&c["id"]).to_owned(), c["technik"].clone())));
+        }
+        Ok(aus)
+    }
+
+    /// `clip.technik` schreiben (Clip-ID, Wert), als Ganzes; gibt die Zahl der übernommenen zurück.
+    pub fn technik_schreiben(&self, z: &Zugang, liste: &[(String, Value)]) -> Result<usize, String> {
+        let mut gut = 0;
+        let mut fehler = Vec::new();
+        for teil in liste.chunks(20) {
+            let jetzt = chrono::Utc::now().timestamp_micros();
+            let a: Vec<Value> = teil
+                .iter()
+                .map(|(id, w)| {
+                    json!({ "id": ulid_aehnlich(), "tabelle": "clip", "datensatz": id, "feld": "technik", "wert": w,
+                            "zeit": jetzt })
+                })
+                .collect();
+            let body = json!({ "p_geraet": geraet_name(), "p_aenderungen": a });
+            for x in self.anwenden(z, &body)?.as_array().into_iter().flatten() {
+                match x["ergebnis"].as_str() {
+                    Some("uebernommen" | "aelter" | "doppelt") => gut += 1,
+                    e => fehler.push(format!("{} {}", e.unwrap_or("?"), x["grund"].as_str().unwrap_or_default())),
+                }
+            }
+        }
+        if fehler.is_empty() {
+            Ok(gut)
+        } else {
+            Err(format!("Werte der Datei nicht überall in der Datenbank: {}", fehler.join("; ")))
         }
     }
 
@@ -1732,6 +1814,11 @@ mod tests {
             assert!(aenderungen_pruefen(&a("plate", "art", json!(w))).is_ok(), "plate.art = {w}");
         }
         assert!(aenderungen_pruefen(&a("take", "aus_clip", json!({"tiltGrad": 1.9, "rollGrad": 0.8}))).is_ok());
+        // clip.technik: ein Objekt bis 64 KB, keine Liste, kein Teilwert.
+        assert!(aenderungen_pruefen(&a("clip", "technik", json!({"aufloesung": "3840x2160"}))).is_ok());
+        assert!(aenderungen_pruefen(&a("clip", "technik", json!(["x"]))).is_err());
+        assert!(aenderungen_pruefen(&a("clip", "technik.codec", json!("x"))).is_err());
+        assert!(aenderungen_pruefen(&a("clip", "technik", json!({"x": "y".repeat(70_000)}))).is_err());
         assert!(aenderungen_pruefen(&a("take", "aus_clip", json!({"tiltGrad": 1.9, "x": 1}))).is_err());
         for (t, f, w) in [
             ("take", "art", json!("studio")),

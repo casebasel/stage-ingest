@@ -145,9 +145,53 @@ pub fn lesen(a: &Anfrage) -> BTreeMap<String, String> {
     w
 }
 
+/// Höchstens so gross darf `clip.technik` sein (Server: 64 KB als Text; etwas Luft).
+const TECHNIK_HOECHSTENS: usize = 60 * 1024;
+
+/// Die Werte eines Clips für `clip.technik` (Marlon, 17.10.2026: „Also alles kommt in die Datenbank“; Migration 0031):
+/// ein Objekt mit allen Werten als Text. Wird es zu gross, fallen zuerst die Rohwerte der CSV (`artcmd:`), dann die der
+/// Datei (`datei:`) weg; die Spaltenwerte bleiben. `None` ohne Werte.
+pub fn fuer_datenbank(w: &BTreeMap<String, String>) -> Option<serde_json::Value> {
+    let mut m: BTreeMap<&str, &str> = w.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+    for weg in ["artcmd:", "datei:"] {
+        if serde_json::to_string(&m).map_or(0, |t| t.len()) <= TECHNIK_HOECHSTENS {
+            break;
+        }
+        m.retain(|k, _| !k.starts_with(weg));
+    }
+    (!m.is_empty() && serde_json::to_string(&m).map_or(0, |t| t.len()) <= TECHNIK_HOECHSTENS)
+        .then(|| serde_json::to_value(&m).unwrap_or_default())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Grösse von `clip.technik` für eine echte CSV (nur von Hand: `TECHNIK_CSV=<pfad>`).
+    #[test]
+    fn echte_technik_groesse() {
+        let Ok(csv) = std::env::var("TECHNIK_CSV") else { return };
+        let w = lesen(&Anfrage { datei: PathBuf::from("/gibt/es/nicht.mxf"), csv: Some(PathBuf::from(csv)) });
+        let v = fuer_datenbank(&w).expect("Werte");
+        let roh = w.keys().filter(|k| k.starts_with("artcmd:")).count();
+        println!("{} Werte ({roh} Rohwerte), {} Bytes; Tilt {:?} Roll {:?}", w.len(), v.to_string().len(), w.get("tilt"), w.get("roll"));
+    }
+
+    #[test]
+    fn technik_fuer_die_datenbank() {
+        let mut w: BTreeMap<String, String> = BTreeMap::new();
+        w.insert("aufloesung".into(), "3840x2160".into());
+        w.insert("tilt".into(), "1.9".into());
+        assert_eq!(fuer_datenbank(&w), Some(serde_json::json!({"aufloesung": "3840x2160", "tilt": "1.9"})));
+        // Zu viele Rohwerte: Sie fallen weg, die Spaltenwerte bleiben.
+        for i in 0..3000 {
+            w.insert(format!("artcmd:feld{i:04}"), "x".repeat(20));
+        }
+        let v = fuer_datenbank(&w).unwrap();
+        assert_eq!(v["aufloesung"], "3840x2160");
+        assert!(v.as_object().unwrap().keys().all(|k| !k.starts_with("artcmd:")));
+        assert_eq!(fuer_datenbank(&BTreeMap::new()), None);
+    }
 
     #[test]
     fn kamerawerte_erkennen() {

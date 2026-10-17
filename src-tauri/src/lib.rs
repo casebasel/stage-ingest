@@ -322,7 +322,103 @@ fn karte_in_datenbank(
     if let Err(e) = app.state::<Arc<plate::Plate>>().aus_clip_abgleichen(z, &takes) {
         abgelehnt.push(e);
     }
+    // Alle Werte aus den Dateien in die Datenbank (`clip.technik`, 0031; Marlon, 17.10.2026: „Also alles kommt in die
+    // Datenbank“): aus der Hauptkopie, nur was sich geändert hat.
+    if let Some(&i) = haupt {
+        if let Err(e) = technik_in_datenbank(&app.state::<Arc<plate::Plate>>(), z, &id, &urteile[i].ordner, clips) {
+            abgelehnt.push(e);
+        }
+    }
     Ok((id, abgelehnt))
+}
+
+/// `clip.technik` der Clips einer Kopie (Kartenordner) in die Datenbank, nur was sich geändert hat (Plate Assistant: jedes
+/// Schreiben ändert `geaendert_am` am Clip). Ohne Spalte (vor 0031) nichts. Gibt die Zahl der geschriebenen zurück.
+fn technik_in_datenbank(
+    p: &plate::Plate,
+    z: &plate::Zugang,
+    karte_id: &str,
+    kartenordner: &Path,
+    clips: &[ClipZeile],
+) -> Result<usize, String> {
+    if !p.technik_spalte_da(z) {
+        return Ok(0);
+    }
+    let soll: Vec<(String, serde_json::Value)> = clips
+        .iter()
+        .filter_map(|c| {
+            let name = karte_db::clipname(soll::ohne_endung(&c.pfad))?;
+            let csv = struktur::metadatenordner(kartenordner).join(format!("{}.csv", soll::ohne_endung(&c.pfad)));
+            let w = technik::lesen(&technik::Anfrage { datei: kartenordner.join(&c.pfad), csv: Some(csv) });
+            Some((karte_db::clip_id(karte_id, &name), technik::fuer_datenbank(&w)?))
+        })
+        .collect();
+    let ist = p.technik_der_clips(z, &soll.iter().map(|(i, _)| i.clone()).collect::<Vec<_>>())?;
+    // Nur Clips, die es in der Datenbank gibt, und nur, was anders ist.
+    let neu: Vec<(String, serde_json::Value)> =
+        soll.into_iter().filter(|(i, w)| ist.get(i).is_some_and(|x| x != w)).collect();
+    if neu.is_empty() {
+        return Ok(0);
+    }
+    p.technik_schreiben(z, &neu)
+}
+
+/// Projektseite: `clip.technik` für ältere Karten nachtragen, deren Kopie hier erreichbar ist (Marlon, 17.10.2026: „Also
+/// alles kommt in die Datenbank“). Nur Clips ohne Wert, höchstens 100 je Aufruf (liest die Köpfe der Clipdateien).
+/// Gibt die Zahl der geschriebenen zurück.
+#[tauri::command]
+async fn technik_nachtragen(
+    plate: State<'_, Arc<plate::Plate>>,
+    zugang: plate::Zugang,
+    projekt: PlateProjekt,
+    basis: Vec<PathBuf>,
+) -> Result<usize, String> {
+    let p = Arc::clone(&plate);
+    im_hintergrund(move || {
+        if !p.technik_spalte_da(&zugang) {
+            return Ok(0);
+        }
+        let ohne: std::collections::HashSet<String> = p
+            .technik_lesen(&zugang, &projekt.id)?
+            .into_iter()
+            .filter(|(_, _, w)| w.is_null())
+            .map(|(id, _, _)| id)
+            .collect();
+        let mut soll: Vec<(String, serde_json::Value)> = Vec::new();
+        'karten: for w in protokoll::wurzeln(&basis) {
+            for k in ingest_kern::uebersicht::suchen(&w, &projekt.kurzname).0 {
+                let Some(kid) = k.inhalt.karte_id.clone() else { continue };
+                let Some(dreh) = k.datei.parent().and_then(Path::parent) else { continue };
+                let kartenordner = dreh.join(struktur::KAMERA).join(struktur::ordnername(&k.inhalt.karte));
+                for c in &k.inhalt.clips {
+                    let Some(name) = karte_db::clipname(&c.name) else { continue };
+                    let id = karte_db::clip_id(&kid, &name);
+                    if !ohne.contains(&id) || soll.iter().any(|(i, _)| *i == id) || c.pfad.is_empty() {
+                        continue;
+                    }
+                    let datei = kartenordner.join(&c.pfad);
+                    if !datei.is_file() {
+                        continue;
+                    }
+                    let csv =
+                        struktur::metadatenordner(&kartenordner).join(format!("{}.csv", soll::ohne_endung(&c.pfad)));
+                    if let Some(v) =
+                        technik::fuer_datenbank(&technik::lesen(&technik::Anfrage { datei, csv: Some(csv) }))
+                    {
+                        soll.push((id, v));
+                    }
+                    if soll.len() >= 100 {
+                        break 'karten;
+                    }
+                }
+            }
+        }
+        if soll.is_empty() {
+            return Ok(0);
+        }
+        p.technik_schreiben(&zugang, &soll)
+    })
+    .await
 }
 
 /// Ergebnis des Nachtragens je Karte.
@@ -2915,6 +3011,7 @@ pub fn run() {
             take_art_aendern,
             einstellung_art_aendern,
             aus_clip_nachtragen,
+            technik_nachtragen,
             zur_seite_liste,
             studio_take_bewerten,
             zur_seite_wegwerfen,

@@ -118,7 +118,14 @@ Ohne verbundenes Ziel folgt `02_PLATES` beim nächsten Einlesen. Der Plate Assis
 - Ab Build 36 des Plate Assistant schreibt nur noch der Ingest (Vorschlag des Plate Assistant an Marlon).
 - Referenz-Takes zeigen keine Bewertung (wie im Plate Assistant); sie bleibt gespeichert und erscheint als Take wieder.
 
-**Alle Werte aus den Dateien in die Datenbank (geplant):** Codec, Auflösung, Bildrate, Kamerawerte, Objektiv, Tilt, Roll und alle Rohwerte aus Datei und ART CMD sollen als `clip.technik` (jsonb, Migration 0031 des Plate Assistant, bis 64 KB, nur bei Änderung geschrieben) in die gemeinsame Datenbank. Die Migration kommt erst nach Marlons direktem OK an den Plate Assistant.
+**Alle Werte aus den Dateien in die Datenbank (0.1.63, `clip.technik`, Migration 0031, live 17.10.2026):**
+- **Inhalt:** Je Clip steht, was `technik::lesen` aus der Kopie liest: Codec, Auflösung, Bildrate, Bilder, Dauer, Timecode, Grösse, Kamerawerte, Objektiv, Tilt, Roll, Brennweite und alle Rohwerte aus der Datei (`datei:`) und aus ART CMD (`artcmd:`), als Text, als Ganzes geschrieben.
+- **Grösse:** über 60 KB fallen zuerst die Rohwerte weg. Echte CSV von A010C022: 152 Werte, 7,3 KB.
+- **Wann geschrieben:**
+  - nach dem Einlesen aus der Hauptkopie, nur was sich geändert hat (jedes Schreiben ändert `geaendert_am` am Clip);
+  - für ältere Karten mit erreichbarer Kopie im Hintergrund der Projektseite, je Sitzung und Projekt einmal, höchstens 100 Clips je Durchgang, nur Clips ohne Wert.
+- **Vorbedingung:** Der Ingest fragt je Sitzung, ob die Spalte da ist. Ohne sie schreibt und liest er nichts.
+- **Anzeige:** Ohne erreichbare Datei nimmt die Take-Tabelle alle Werte aus `clip.technik`, auf jedem Rechner. Plate Assistant und Stage dürfen sie lesen.
 
 **Tilt und Roll ohne Clipdatei (Marlon, 17.10.2026: „Wieso werden hier die Metadaten nicht gezeigt? Tilt, Roll …“):** Ist die Clipdatei hier nicht erreichbar, nimmt die Take-Tabelle Tilt und Roll aus `take.aus_clip`, sonst aus `clip.aus_clip`. Letzteres schreibt der Ingest beim Einlesen für jeden Clip. Anlass: Predigerhof, Plate 6. Dort hatte nur Take 7 die Werte am Take, weil der Ingest ihn selbst aus dem Clip angelegt hatte. Kamerahöhe, Abstand und Richtung kommen nur aus der Messung im Plate Assistant.
 

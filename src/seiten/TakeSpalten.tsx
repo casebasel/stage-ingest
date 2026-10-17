@@ -33,6 +33,8 @@ export type TakeMitWerten = {
   /** Alle erreichbaren Kopien (Rechtsklick: Pfad kopieren). */
   dateien?: string[];
   csv?: string | null;
+  /** Alle Werte der Clipdatei aus der gemeinsamen Datenbank (`clip.technik`): Ersatz, wenn die Datei hier fehlt. */
+  technikDb?: Technik | null;
   werte?: Record<string, unknown>;
 };
 
@@ -256,7 +258,7 @@ function weitere(takes: TakeMitWerten[], technik: Record<string, Technik>): Spal
   const datei = new Set<string>();
   for (const t of takes) {
     for (const k of Object.keys(t.werte ?? {})) if (!IM_KATALOG.has(k)) pa_.add(k);
-    const x = t.datei ? technik[t.datei] : undefined;
+    const x = technikVon(t, technik);
     for (const k of Object.keys(x ?? {})) if (k.includes(":")) datei.add(k);
   }
   return [
@@ -428,8 +430,13 @@ export function SpaltenKopf({ spalten }: { spalten: Spalte[] }) {
   );
 }
 
+/** Werte der Clipdatei: gelesen, wenn sie hier erreichbar ist, sonst aus der gemeinsamen Datenbank (`clip.technik`). */
+function technikVon(t: TakeMitWerten, technik: Record<string, Technik>): Technik | undefined {
+  return (t.datei ? technik[t.datei] : undefined) ?? t.technikDb ?? undefined;
+}
+
 export function SpaltenZellen({ spalten, t, technik }: { spalten: Spalte[]; t: TakeMitWerten; technik: Record<string, Technik> }) {
-  const x = t.datei ? technik[t.datei] : undefined;
+  const x = technikVon(t, technik);
   return (
     <>
       {spalten.map((s) => {
