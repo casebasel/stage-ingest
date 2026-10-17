@@ -148,10 +148,16 @@ pub fn lesen(a: &Anfrage) -> BTreeMap<String, String> {
             w.extend(artcmd::felder(&s).into_iter().map(|(feld, v)| (format!("artcmd:{feld}"), v)));
         }
     }
-    for (z, v) in aus_datei {
+    for (z, v) in aus_datei.into_iter().filter(|(z, v)| gilt(z, v)) {
         w.entry(z.to_owned()).or_insert(v);
     }
     w
+}
+
+/// Leer oder eine Blende/ein Fokus von 0 ist kein Wert: Er darf weder die Spalte füllen noch an einen Take gehen, sonst
+/// überdeckte er dort einen Wert aus CAP oder von Hand (Plate Assistant, 17.10.2026).
+fn gilt(spalte: &str, v: &str) -> bool {
+    !v.trim().is_empty() && !(matches!(spalte, "blende" | "fokus") && artcmd::zahl(v) == Some(0.0))
 }
 
 /// Spaltenwerte aus den typisierten Kamerawerten, damit die Take-Tabelle dasselbe zeigt wie die Datenbank. Shutter wie
@@ -306,5 +312,8 @@ mod tests {
         assert_eq!(db["kamerawerte"]["shutterGrad"], serde_json::json!(180));
         assert_eq!(db["kamerawerte"]["quelle"], "artcmd");
         assert_eq!(db["shutter"], "180.0");
+        // Aus den Metadaten im MOV: leer oder Blende/Fokus 0 überdeckt nie einen Wert am Take.
+        assert!(!gilt("blende", "0") && !gilt("fokus", "0.0") && !gilt("ei", " "));
+        assert!(gilt("blende", "T2.8") && gilt("tint", "0"));
     }
 }
