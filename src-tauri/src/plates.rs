@@ -150,6 +150,38 @@ pub fn ablegen(plate: &Plate, z: &Zugang, dreh_id: &str, drehordner: &[PathBuf])
     a
 }
 
+/// Drehordner eines Drehorts auf allen erreichbaren Ablagen (eingetragene Ziele und Ablagen auf den Laufwerken), wie
+/// beim Einlesen benannt (`<KURZNAME>/<Datum>_<DREHORT>`).
+pub fn drehordner_ueberall(basis: &[PathBuf], dreh: &ingest_kern::struktur::Dreh) -> Vec<PathBuf> {
+    let mut aus: Vec<PathBuf> = Vec::new();
+    for w in crate::protokoll::wurzeln(basis) {
+        let d = ingest_kern::struktur::drehordner(&w, dreh);
+        if d.is_dir() && !aus.contains(&d) {
+            aus.push(d);
+        }
+    }
+    aus
+}
+
+/// Plate → On Location (Marlon, 17.10.2026): Der Ordner in `02_PLATES` enthält nur `plate.json` und Referenzfotos,
+/// keine Clips. Er wird nicht gelöscht, sondern nach `05_METADATEN/frueher/02_PLATES/<Ordner>_<Zeit>` gelegt.
+/// Gibt die neuen Orte und die Fehler zurück.
+pub fn beiseitelegen(drehordner: &[PathBuf], name: &str, zeit: &str) -> (Vec<PathBuf>, Vec<String>) {
+    let (mut neu, mut fehler) = (Vec::new(), Vec::new());
+    for d in drehordner {
+        let von = d.join(PLATES).join(name);
+        if !von.is_dir() {
+            continue;
+        }
+        let nach = d.join(ingest_kern::struktur::METADATEN).join("frueher").join(PLATES).join(format!("{name}_{zeit}"));
+        match nach.parent().map(std::fs::create_dir_all).unwrap_or(Ok(())).and_then(|_| std::fs::rename(&von, &nach)) {
+            Ok(()) => neu.push(nach),
+            Err(e) => fehler.push(format!("{}: {e}", von.display())),
+        }
+    }
+    (neu, fehler)
+}
+
 fn vorhanden(p: &Path) -> bool {
     std::fs::metadata(p).is_ok_and(|m| m.len() > 0)
 }
@@ -158,6 +190,18 @@ fn vorhanden(p: &Path) -> bool {
 mod tests {
     use super::*;
     use ingest_kern::uebersicht::ClipEintrag;
+
+    #[test]
+    fn plate_ordner_beiseitelegen() {
+        let t = tempfile::tempdir().unwrap();
+        let d = t.path().join("HAPPY_END/2026-10-16_PREDIGERHOF");
+        std::fs::create_dir_all(d.join(PLATES).join("P001_Fenster/fotos")).unwrap();
+        std::fs::write(d.join(PLATES).join("P001_Fenster/plate.json"), b"{}").unwrap();
+        let (neu, fehler) = beiseitelegen(&[d.clone(), t.path().join("fehlt")], "P001_Fenster", "2026-10-17_2100");
+        assert!(fehler.is_empty(), "{fehler:?}");
+        assert_eq!(neu, [d.join("05_METADATEN/frueher/02_PLATES/P001_Fenster_2026-10-17_2100")]);
+        assert!(neu[0].join("plate.json").is_file() && !d.join(PLATES).join("P001_Fenster").exists());
+    }
 
     #[test]
     fn nur_plates_kommen_nach_02_plates() {

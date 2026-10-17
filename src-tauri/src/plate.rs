@@ -26,8 +26,13 @@ pub const DARF_AENDERN: &[&str] = &[
     "studio_take",
     "foto",
     "take",
+    "plate",
     "ingest_vorgang",
 ];
+/// Arten eines Takes (ENTSCHEIDUNGEN „Referenz-Takes“; der Server prüft dasselbe, `take_art_wert`).
+pub const TAKE_ARTEN: &[&str] = &["take", "graukugel", "chromkugel", "cleanplate"];
+/// Arten einer Einstellung draussen (`plate.art`, 0028; der Server prüft dasselbe, `plate_art_wert`).
+pub const PLATE_ARTEN: &[&str] = &["plate", "location"];
 /// `take` (gehört dem Plate Assistant): der Ingest legt Takes aus Clips an (abgestimmt 15.10.2026), mit diesen Feldern.
 /// An bestehenden Takes nur `clip` (aus der Karte) und `geloescht` (Take ohne Aufnahme), siehe `aenderungen_pruefen`;
 /// dazu „Take wiederherstellen“ (Systemkarte 499a1fc): `geloescht = false` nur zusammen mit `clip_name` desselben Takes.
@@ -98,6 +103,8 @@ pub fn aenderungen_pruefen(body: &Value) -> Result<(), String> {
                 "clip" if take_clip_gueltig(&a["wert"]) => {}
                 "geloescht" if a["wert"] == true => {}
                 "geloescht" if a["wert"] == false && paar(a, "clip_name", &name_ok) => {}
+                // „Art ändern“ (Marlon, 17.10.2026, mit dem Plate Assistant abgestimmt): nur eine der vier Arten.
+                "art" if a["wert"].as_str().is_some_and(|w| TAKE_ARTEN.contains(&w)) => {}
                 "clip_name" if name_ok(&a["wert"]) && paar(a, "geloescht", &|w| *w == false) => {}
                 _ => return Err(format!("Stage Ingest ändert am Take „{feld}“ nicht")),
             }
@@ -107,6 +114,10 @@ pub fn aenderungen_pruefen(body: &Value) -> Result<(), String> {
         }
         if t == "studio_take" && !STUDIO_TAKE_FELDER.contains(&feld) {
             return Err(format!("Stage Ingest ändert am Studio-Take „{feld}“ nicht (gehört der Stage)"));
+        }
+        // Einstellung (gehört dem Plate Assistant): nur die Art, Plate oder On Location (Marlon, 17.10.2026).
+        if t == "plate" && !(feld == "art" && a["wert"].as_str().is_some_and(|w| PLATE_ARTEN.contains(&w))) {
+            return Err(format!("Stage Ingest ändert an der Einstellung nur die Art, nicht „{feld}“"));
         }
         // Vorgänge (0030): nur anhängen; danach ist nur `geloescht` änderbar (der Server sperrt es ebenso).
         if t == crate::vorgang::TABELLE && !matches!(feld, "_anlegen" | "geloescht") {
@@ -517,7 +528,7 @@ impl Plate {
             .lesen(
                 z,
                 &format!(
-                    "clip?projekt_id=eq.{p}&select=name,karte_id,take_id,studio_take_id,zuordnung,geloescht,start_tc,end_tc,fps,dreh_id"
+                    "clip?projekt_id=eq.{p}&select=name,karte_id,take_id,studio_take_id,zuordnung,geloescht,start_tc,end_tc,fps,dreh_id,aus_clip"
                 ),
             )
             .or_else(|_| {
@@ -599,6 +610,28 @@ impl Plate {
             Ok(())
         } else {
             Err(format!("Take nicht wiederhergestellt: {}", schlecht.join("; ")))
+        }
+    }
+
+    /// „Art ändern“ (Marlon, 17.10.2026: „Teilweise macht man das falsch“): `take.art` oder `plate.art` eines
+    /// bestehenden Datensatzes. Die Bewertung bleibt, wie sie ist (Plate Assistant: nicht anfassen). „aelter“ heisst:
+    /// Ein iPhone hat dasselbe Feld gleichzeitig jünger geändert, seine Fassung gilt.
+    pub fn art_aendern(&self, z: &Zugang, tabelle: &str, id: &str, art: &str) -> Result<(), String> {
+        let a = json!({ "id": ulid_aehnlich(), "tabelle": tabelle, "datensatz": id, "feld": "art", "wert": art,
+                        "zeit": chrono::Utc::now().timestamp_micros() });
+        let body = json!({ "p_geraet": geraet_name(), "p_aenderungen": [a] });
+        let v = self.anwenden(z, &body)?;
+        match v[0]["ergebnis"].as_str() {
+            Some("uebernommen" | "doppelt") => Ok(()),
+            Some("aelter") => {
+                Err("Nicht übernommen: Am iPhone wurde die Art gleichzeitig geändert, diese Fassung gilt. Neu laden."
+                    .into())
+            }
+            e => Err(format!(
+                "Art nicht geändert: {} {}",
+                e.unwrap_or("unbekannt"),
+                v[0]["grund"].as_str().unwrap_or_default()
+            )),
         }
     }
 
@@ -1634,6 +1667,30 @@ mod tests {
         assert_eq!(alle_seiten(json!([1]), Some(5), "foto?select=id&limit=1", &mut nie).unwrap(), json!([1]));
         assert_eq!(alle_seiten(json!({"a": 1}), Some(5), "x", &mut nie).unwrap(), json!({"a": 1}));
         assert_eq!(alle_seiten(json!([1]), None, "x", &mut nie).unwrap(), json!([1]));
+    }
+
+    #[test]
+    fn art_von_take_und_einstellung() {
+        // Marlon, 17.10.2026: Take ↔ Graukugel, Chromkugel, Clean Plate; Plate ↔ On Location. Sonst nichts.
+        let a = |tabelle: &str, feld: &str, wert: Value| json!({"p_aenderungen": [{"tabelle": tabelle, "datensatz": "X1", "feld": feld, "wert": wert}]});
+        for w in TAKE_ARTEN {
+            assert!(aenderungen_pruefen(&a("take", "art", json!(w))).is_ok(), "take.art = {w}");
+        }
+        for w in PLATE_ARTEN {
+            assert!(aenderungen_pruefen(&a("plate", "art", json!(w))).is_ok(), "plate.art = {w}");
+        }
+        for (t, f, w) in [
+            ("take", "art", json!("studio")),
+            ("take", "art", json!(null)),
+            ("plate", "art", json!("studio")),
+            ("plate", "art", json!("")),
+            ("plate", "name", json!("x")),
+            ("plate", "_anlegen", json!({"art": "plate"})),
+            ("plate", "geloescht", json!(true)),
+            ("plate", "szene", json!("42")),
+        ] {
+            assert!(aenderungen_pruefen(&a(t, f, w.clone())).is_err(), "{t}.{f} = {w} muss gesperrt sein");
+        }
     }
 
     #[test]

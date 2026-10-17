@@ -2003,6 +2003,93 @@ async fn take_wiederherstellen(
     .await
 }
 
+/// Ergebnis von „Art ändern“: was in `02_PLATES` auf den verbundenen Zielen geschah.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ArtGeaendert {
+    /// Drehordner dieses Drehorts auf den verbundenen Zielen.
+    drehordner: usize,
+    /// Beiseitegelegte Plate-Ordner (Plate → On Location).
+    beiseite: Vec<PathBuf>,
+    fehler: Vec<String>,
+}
+
+/// „Art ändern“ an einem Take (Marlon, 17.10.2026: „die Takes im Nachhinein noch ändern … in Take, Clean Plate.
+/// Teilweise macht man das falsch“; mit dem Plate Assistant abgestimmt): `take.art` im Plate Assistant, dann
+/// `02_PLATES` des Drehorts auf allen verbundenen Zielen neu (`plate.json` nennt die Art je Take).
+#[tauri::command]
+async fn take_art_aendern(
+    plate: State<'_, Arc<plate::Plate>>,
+    zugang: plate::Zugang,
+    basis: Vec<PathBuf>,
+    dreh_id: String,
+    dreh: Dreh,
+    take_id: String,
+    art: String,
+) -> Result<ArtGeaendert, String> {
+    let p = Arc::clone(&plate);
+    im_hintergrund(move || {
+        if !plate::TAKE_ARTEN.contains(&art.as_str()) {
+            return Err(format!("Unbekannte Art „{art}“"));
+        }
+        p.art_aendern(&zugang, "take", &take_id, &art)?;
+        let drehordner = plates::drehordner_ueberall(&basis, &dreh);
+        let a = if drehordner.is_empty() {
+            plates::Ablage::default()
+        } else {
+            plates::ablegen(&p, &zugang, &dreh_id, &drehordner)
+        };
+        Ok(ArtGeaendert { drehordner: drehordner.len(), beiseite: vec![], fehler: a.fehler })
+    })
+    .await
+}
+
+/// „Art ändern“ an einer Einstellung draussen: Plate ↔ On Location (Marlon, 17.10.2026: „… und das dann auch umkopiert
+/// wird und überall nachgetragen wird“). `plate.art` im Plate Assistant, dann `02_PLATES` auf allen verbundenen Zielen:
+/// On Location → Plate legt den Plate-Ordner mit Referenzfotos an; Plate → On Location legt ihn nach
+/// `05_METADATEN/frueher/02_PLATES` (er enthält nur `plate.json` und Fotos, keine Clips; gelöscht wird nichts).
+#[tauri::command]
+async fn einstellung_art_aendern(
+    plate: State<'_, Arc<plate::Plate>>,
+    zugang: plate::Zugang,
+    basis: Vec<PathBuf>,
+    dreh_id: String,
+    dreh: Dreh,
+    plate_id: String,
+    art: String,
+) -> Result<ArtGeaendert, String> {
+    let p = Arc::clone(&plate);
+    im_hintergrund(move || {
+        if !plate::PLATE_ARTEN.contains(&art.as_str()) {
+            return Err(format!("Unbekannte Art „{art}“"));
+        }
+        // Der Ordnername vor der Änderung (Slate und Name der Einstellung).
+        let v = p.dreh_mit_plates(&zugang, &dreh_id)?;
+        let name = v
+            .as_array()
+            .into_iter()
+            .flatten()
+            .flat_map(|d| d["plate"].as_array().into_iter().flatten())
+            .find(|x| x["id"] == plate_id.as_str())
+            .map(plates::plate_ordner)
+            .ok_or("Einstellung nicht gefunden")?;
+        p.art_aendern(&zugang, "plate", &plate_id, &art)?;
+        let drehordner = plates::drehordner_ueberall(&basis, &dreh);
+        if art == "location" {
+            let zeit = chrono::Local::now().format("%Y-%m-%d_%H%M%S").to_string();
+            let (beiseite, fehler) = plates::beiseitelegen(&drehordner, &name, &zeit);
+            return Ok(ArtGeaendert { drehordner: drehordner.len(), beiseite, fehler });
+        }
+        let a = if drehordner.is_empty() {
+            plates::Ablage::default()
+        } else {
+            plates::ablegen(&p, &zugang, &dreh_id, &drehordner)
+        };
+        Ok(ArtGeaendert { drehordner: drehordner.len(), beiseite: vec![], fehler: a.fehler })
+    })
+    .await
+}
+
 /// „Zu klären“: einen Take ohne Aufnahme weich löschen (Marlon, 16.10.2026; im Plate Assistant wiederherstellbar).
 #[tauri::command]
 async fn take_loeschen(
@@ -2798,6 +2885,8 @@ pub fn run() {
             take_wiederherstellen,
             vorgaenge_abgleichen,
             ausgang_stand,
+            take_art_aendern,
+            einstellung_art_aendern,
             zur_seite_liste,
             studio_take_bewerten,
             zur_seite_wegwerfen,

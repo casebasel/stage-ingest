@@ -297,6 +297,16 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
     await warte(400);
     return null;
   },
+  take_art_aendern: async () => {
+    await warte(700);
+    return { drehordner: 2, beiseite: [], fehler: [] };
+  },
+  einstellung_art_aendern: async (a) => {
+    await warte(700);
+    return a.art === "location"
+      ? { drehordner: 2, beiseite: ["/Volumes/NAS/x/05_METADATEN/frueher/02_PLATES/42B_Bruecke_2026-10-17_211500", "/Volumes/T7/x"], fehler: [] }
+      : { drehordner: 2, beiseite: [], fehler: [] };
+  },
   vorgaenge_abgleichen: async () => {
     await warte(800);
     return { neu: 14, gesendet: 14, offen: 0, abgelehnt: 0, fehler: null };

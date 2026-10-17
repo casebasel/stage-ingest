@@ -166,10 +166,10 @@ const KATALOG: Spalte[] = [
   tech("fokus", "Fokus", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Take (CAP), sonst Plate", "plate.kamera.fokus"),
   tech("blende", "Blende", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Take (CAP), sonst Plate", "plate.kamera.blende"),
   // Bewegung: ART CMD (Mittel und Bereich über alle Bilder), sonst der Wert, den der Plate Assistant übernommen hat.
-  tech("tilt", "Tilt °", "Bewegung", "ART CMD (Mittel), sonst Plate Assistant", "take.aus_clip.tiltGrad"),
-  tech("tiltBereich", "Tilt Bereich °", "Bewegung", "ART CMD", "take.aus_clip.tiltBereich"),
-  tech("roll", "Roll °", "Bewegung", "ART CMD (Mittel), sonst Plate Assistant", "take.aus_clip.rollGrad"),
-  tech("rollBereich", "Roll Bereich °", "Bewegung", "ART CMD", "take.aus_clip.rollBereich"),
+  tech("tilt", "Tilt °", "Bewegung", "ART CMD (Mittel), sonst gemeinsame Datenbank (Take oder Clip)", "take.aus_clip.tiltGrad"),
+  tech("tiltBereich", "Tilt Bereich °", "Bewegung", "ART CMD, sonst gemeinsame Datenbank", "take.aus_clip.tiltBereich"),
+  tech("roll", "Roll °", "Bewegung", "ART CMD (Mittel), sonst gemeinsame Datenbank (Take oder Clip)", "take.aus_clip.rollGrad"),
+  tech("rollBereich", "Roll Bereich °", "Bewegung", "ART CMD, sonst gemeinsame Datenbank", "take.aus_clip.rollBereich"),
   // Plate Assistant.
   {
     id: "startZeit",

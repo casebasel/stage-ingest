@@ -180,7 +180,7 @@ pub fn liste(basis: &[PathBuf], verlauf: &[VerlaufEintrag], db: impl FnOnce() ->
 }
 
 /// Eingetragene Ziele und die Ablagen auf allen Laufwerken, ohne Doppel.
-fn wurzeln(basis: &[PathBuf]) -> Vec<PathBuf> {
+pub(crate) fn wurzeln(basis: &[PathBuf]) -> Vec<PathBuf> {
     let mut wurzeln: Vec<PathBuf> = Vec::new();
     for b in basis.iter().cloned().chain(ingest_kern::ablage::finden()) {
         let echt = std::fs::canonicalize(&b).unwrap_or_else(|_| b.clone());

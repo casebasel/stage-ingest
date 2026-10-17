@@ -1486,6 +1486,16 @@ pub fn zusammenfuehren(
             nach_clip.entry(name).or_insert(stand);
         }
     }
+    // Tilt und Roll aus dem Clip (`clip.aus_clip`, schreibt der Ingest beim Einlesen aus ART CMD): Ersatz, wenn die
+    // Clipdatei hier nicht erreichbar ist und der Take selbst keine hat (Marlon, 17.10.2026: „Wieso werden hier die
+    // Metadaten nicht gezeigt? Tilt, Roll …“; Predigerhof P6: nur Take 7, den der Ingest selbst angelegt hatte).
+    let aus_clip_von: HashMap<String, &Value> = db["clips"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|c| gilt(c) && c["aus_clip"].is_object())
+        .map(|c| (text(&c["name"]).to_uppercase(), &c["aus_clip"]))
+        .collect();
     // Clip (gross) → Take, der ihn zeigt (über die Take-ID oder den bestätigten Namen der Kamera).
     let mut zugeordnete_clips: HashMap<String, String> = HashMap::new();
     // Über den bestätigten Namen gefunden, aber ohne Take-ID in Zusammenfassung und Datenbank: (Clip, Karte, Take, Drehort).
@@ -1529,6 +1539,11 @@ pub fn zusammenfuehren(
                     .unwrap_or_default();
                 // Eingelesen: der Name auf der Karte (Marlon, 17.10.2026: Take 6 zeigte den geschätzten „…_261016“).
                 let auf_karte = stand.map(|s| s.clip.to_uppercase()).filter(|c| !c.is_empty());
+                if !werte.keys().any(|k| k.starts_with("take.aus_clip.")) {
+                    if let Some(a) = auf_karte.as_ref().and_then(|c| aus_clip_von.get(c)) {
+                        flach("take.aus_clip", a, &mut werte);
+                    }
+                }
                 let clip_geplant = auf_karte.as_ref().filter(|k| **k != clip && !clip.is_empty()).map(|_| clip.clone());
                 takes.push(TakeStand {
                     nummer: t["nummer"].as_i64().unwrap_or(0),
@@ -2155,6 +2170,37 @@ mod tests {
         let u = zusammenfuehren(p, &drehs, &json!([]), karten, vec![], &db);
         let oben: Vec<&str> = u.unstimmigkeiten.iter().map(|x| x.clip.as_str()).collect();
         assert_eq!(oben, ["A009C002_120101_R132"]);
+    }
+
+    #[test]
+    fn tilt_und_roll_vom_clip_in_der_datenbank() {
+        // Predigerhof P6, 17.10.2026: Der Ingest schrieb `clip.aus_clip` für alle Clips, am Take stand es nur bei Take 7.
+        let drehs = json!([{ "id": "D1", "name": "Predigerhof", "datum": "2026-10-16", "geloescht": false,
+            "plate": [{ "id": "P6", "nummer": 6, "geloescht": false, "take": [
+                { "id": "T1", "nummer": 1, "geloescht": false, "clip_name": "A010C022_120101_R132",
+                  "kamera": { "quelle": "cap" }, "start_tc": "15:00:00:00", "clip": { "name": "A010C022_120101_R132", "startTc": "15:00:00:00", "bilder": 100 },
+                  "start_zeit": "2026-10-16T13:00:00+00:00", "erstellt_am": "2026-10-16T13:00:00+00:00" },
+                { "id": "T7", "nummer": 7, "geloescht": false, "clip_name": "A010C027_120101_R132",
+                  "aus_clip": { "tiltGrad": -1.32, "rollGrad": 1.87 },
+                  "start_zeit": "2026-10-16T14:00:00+00:00", "erstellt_am": "2026-10-16T14:00:00+00:00" }] }] }]);
+        let db = json!({
+            "karten": [{ "id": "K1", "name": "A010R132", "freigegeben": true, "geloescht": false, "ordner_datum": "2026-10-16",
+                         "speicherort": "2026-10-16_PREDIGERHOF/01_KAMERA/A010R132" }],
+            "clips": [
+                { "name": "A010C022_120101_R132", "karte_id": "K1", "take_id": "T1", "zuordnung": "info1", "geloescht": false,
+                  "aus_clip": { "tiltGrad": 1.89, "rollGrad": 0.77, "rollBereich": 1.5 } },
+                { "name": "A010C027_120101_R132", "karte_id": "K1", "take_id": "T7", "zuordnung": "hand", "geloescht": false,
+                  "aus_clip": { "tiltGrad": 9.9, "rollGrad": 9.9 } }
+            ]
+        });
+        let p: Projekt =
+            serde_json::from_value(json!({"id": "projekt-x", "name": "X", "kurzname": "X", "aktiv": true})).unwrap();
+        let u = zusammenfuehren(p, &drehs, &json!([]), vec![], vec![], &db);
+        let takes = &u.drehs[0].plates[0].takes;
+        let wert = |i: usize, k: &str| takes[i].werte.get(k).and_then(Value::as_f64);
+        assert_eq!((wert(0, "take.aus_clip.tiltGrad"), wert(0, "take.aus_clip.rollBereich")), (Some(1.89), Some(1.5)));
+        // Hat der Take selbst Werte, gelten diese.
+        assert_eq!(wert(1, "take.aus_clip.tiltGrad"), Some(-1.32));
     }
 
     #[test]

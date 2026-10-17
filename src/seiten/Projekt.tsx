@@ -2,7 +2,7 @@
 // Takes, Karten). Beantwortet auch vor dem Formatieren: Ist von diesem Projekt alles da? Was ist zu klären?
 // Das Projekt selbst wird oben links gewählt (gilt für alle Seiten). Bearbeiten von Plates und Takes kommt später
 // (Systemkarte, Entscheidung „Projektmanager“ vom 08.10.2026); heute nur lesen, Projekte und Drehorte anlegen.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { ChevronDown, ChevronRight, Image as Bild, MapPinPlus, Play, Plus, RefreshCw, Settings, Trash2, X } from "lucide-react";
@@ -130,6 +130,64 @@ type Verschoben = { karte: string; nachpruefung: { geprueft: number; abweichunge
 type EinsortiertStand = { zusammenfassung: string; ergebnis: { Ok: Verschoben } | { Err: string } };
 
 const ART: Record<string, string> = { graukugel: "Graukugel", chromkugel: "Chromkugel", cleanplate: "Clean Plate", take: "Take" };
+/** Reihenfolge zum Wählen: das Häufigste zuerst. */
+const ART_WAHL = ["take", "cleanplate", "graukugel", "chromkugel"];
+
+/** Ergebnis von „Art ändern“ (`take_art_aendern`, `einstellung_art_aendern`). */
+type ArtGeaendert = { drehordner: number; beiseite: string[]; fehler: string[] };
+/** „Art ändern“ (Marlon, 17.10.2026: „Teilweise macht man das falsch“): je Take Drehort und Einstellung, dazu das
+ *  Ändern selbst (Plate Assistant, dann 02_PLATES auf allen verbundenen Zielen). */
+type ArtAendern = {
+  ort: Map<string, { dreh: DrehStand; plate: PlateStand }>;
+  darf: boolean;
+  laeuft: boolean;
+  takeArt: (t: TakeStand, art: string) => Promise<void>;
+  einstellungArt: (dreh: DrehStand, p: PlateStand, art: string) => Promise<void>;
+};
+const ArtKontext = createContext<ArtAendern | null>(null);
+
+/** Art eines Takes, änderbar; ohne Verbindung nur angezeigt. */
+function TakeArt({ t }: { t: TakeStand }) {
+  const k = useContext(ArtKontext);
+  if (!k || !k.ort.has(t.id)) return <span className="leise">{ART[t.art] ?? t.art}</span>;
+  return (
+    <select
+      className="bewertung-wahl"
+      aria-label={`Art Take ${t.nummer}`}
+      value={ART_WAHL.includes(t.art) ? t.art : "take"}
+      disabled={!k.darf || k.laeuft}
+      title={k.darf ? "Art ändern: im Plate Assistant und in 02_PLATES" : "Braucht die Verbindung zum Plate Assistant"}
+      onClick={(ev) => ev.stopPropagation()}
+      onDoubleClick={(ev) => ev.stopPropagation()}
+      onChange={(ev) => void k.takeArt(t, ev.target.value)}
+    >
+      {ART_WAHL.map((w) => (
+        <option key={w} value={w}>
+          {ART[w]}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+/** Art einer Einstellung draussen (Plate oder On Location), änderbar; Studio-Einstellungen gehören der Stage. */
+function EinstellungArt({ dreh, p }: { dreh: DrehStand; p: PlateStand }) {
+  const k = useContext(ArtKontext);
+  if (!k || artVon(p, dreh) === "Studio") return null;
+  return (
+    <select
+      className="bewertung-wahl"
+      aria-label="Art der Einstellung"
+      value={p.art === "location" ? "location" : "plate"}
+      disabled={!k.darf || k.laeuft}
+      title={k.darf ? "Art ändern: im Plate Assistant und in 02_PLATES" : "Braucht die Verbindung zum Plate Assistant"}
+      onChange={(ev) => void k.einstellungArt(dreh, p, ev.target.value)}
+    >
+      <option value="plate">Plate</option>
+      <option value="location">On Location</option>
+    </select>
+  );
+}
 const BEWERTUNG: Record<string, string> = { circle: "Favorit", gut: "Gut", schlecht: "Schlecht" };
 const FOTO: Record<string, string> = { referenz: "Referenz", set: "Set", position: "Position", vorschau: "Vorschau" };
 
@@ -187,7 +245,7 @@ const GRUNDSPALTEN: Spalte[] = [
         <StudioBewertung t={t} />
       ) : (
         <span className="ohne-umbruch">
-          <span className="leise">{ART[t.art] ?? t.art}</span>
+          <TakeArt t={t} />
           {BEWERTUNG[t.bewertung] && ` · ${BEWERTUNG[t.bewertung]}`}
         </span>
       ),
@@ -472,6 +530,100 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
     sicher: zeilen.filter((z) => z.take.freigegeben).length,
   };
   const plates = u?.drehs.flatMap((d) => d.plates.map((p) => ({ dreh: d, plate: p }))) ?? [];
+
+  // „Art ändern“ an Takes und Einstellungen (Marlon, 17.10.2026).
+  const [artLaeuft, setArtLaeuft] = useState(false);
+  const artOrt = useMemo(
+    () => new Map((u?.drehs ?? []).flatMap((d) => d.plates.flatMap((p) => p.takes.map((t) => [t.id, { dreh: d, plate: p }] as const)))),
+    [u],
+  );
+  const drehFuer = (d: DrehStand) => ({
+    projekt: u?.projekt.name ?? projekt?.name ?? "",
+    kurzname: u?.projekt.kurzname ?? projekt?.kurzname ?? null,
+    datum: d.datum,
+    name: d.name,
+    ortKurzname: d.kurzname || null,
+  });
+  const artErgebnis = (r: ArtGeaendert, was: string) => {
+    const ziele = (n: number) => `${n} ${n === 1 ? "Ziel" : "Zielen"}`;
+    const folge = r.beiseite.length
+      ? `Plate-Ordner auf ${ziele(r.beiseite.length)} nach 05_METADATEN/frueher gelegt`
+      : r.drehordner > 0
+        ? `02_PLATES auf ${ziele(r.drehordner)} nachgetragen`
+        : "kein Ziel dieses Drehorts verbunden, 02_PLATES folgt beim nächsten Einlesen";
+    setNachgetragen(
+      r.fehler.length
+        ? { ton: "warn", text: `${was}; ${folge}. Nicht überall: ${r.fehler.join("; ")}` }
+        : { ton: "ok", text: `${was}; ${folge}.` },
+    );
+  };
+  async function takeArt(t: TakeStand, art: string) {
+    const o = artOrt.get(t.id);
+    const alt = ART_WAHL.includes(t.art) ? t.art : "take";
+    if (!o || !projekt || art === alt) return;
+    const titel = `${plateTitel(o.plate)} · Take ${t.nummer}`;
+    const ja = await ask(
+      `${titel} von „${ART[alt]}“ zu „${ART[art]}“ ändern?\n\nDie Art ändert sich im Plate Assistant (für alle iPhones und die Stage) und in 02_PLATES dieses Drehorts auf allen verbundenen Zielen. Die Bewertung bleibt.`,
+      { title: "Art ändern", kind: "info", okLabel: "Ändern", cancelLabel: "Abbrechen" },
+    );
+    if (!ja) return;
+    setArtLaeuft(true);
+    try {
+      const r = await invoke<ArtGeaendert>("take_art_aendern", {
+        zugang: konto.zugang,
+        basis: e.ziele,
+        drehId: o.dreh.id,
+        dreh: drehFuer(o.dreh),
+        takeId: t.id,
+        art,
+      });
+      artErgebnis(r, `${titel} ist jetzt ${ART[art]}`);
+      await laden(projekt);
+    } catch (x) {
+      setNachgetragen({ ton: "fehler", text: `${titel}: ${String(x)}` });
+    } finally {
+      setArtLaeuft(false);
+    }
+  }
+  async function einstellungArt(d: DrehStand, p: PlateStand, art: string) {
+    const alt = p.art === "location" ? "location" : "plate";
+    if (!projekt || art === alt) return;
+    const titel = plateTitel(p);
+    const neu = art === "location" ? "On Location" : "Plate";
+    const folge =
+      art === "location"
+        ? "Ihr Ordner in 02_PLATES kommt auf allen verbundenen Zielen nach 05_METADATEN/frueher. Er enthält nur plate.json und Referenzfotos, keine Clips; gelöscht wird nichts."
+        : "In 02_PLATES entsteht auf allen verbundenen Zielen ihr Ordner mit plate.json und den Referenzfotos aus dem Plate Assistant.";
+    const ja = await ask(
+      `${titel} zu „${neu}“ ändern?\n\nDie Art ändert sich im Plate Assistant (für alle iPhones und die Stage). ${folge}`,
+      { title: "Art der Einstellung ändern", kind: "info", okLabel: "Ändern", cancelLabel: "Abbrechen" },
+    );
+    if (!ja) return;
+    setArtLaeuft(true);
+    try {
+      const r = await invoke<ArtGeaendert>("einstellung_art_aendern", {
+        zugang: konto.zugang,
+        basis: e.ziele,
+        drehId: d.id,
+        dreh: drehFuer(d),
+        plateId: p.id,
+        art,
+      });
+      artErgebnis(r, `${titel} ist jetzt ${neu}`);
+      await laden(projekt);
+    } catch (x) {
+      setNachgetragen({ ton: "fehler", text: `${titel}: ${String(x)}` });
+    } finally {
+      setArtLaeuft(false);
+    }
+  }
+  const artAendern: ArtAendern = {
+    ort: artOrt,
+    darf: verbunden && !!projekt?.id && !lauf.laeuft,
+    laeuft: artLaeuft,
+    takeArt,
+    einstellungArt,
+  };
   // Player: Takes mit erreichbarer MOV/MP4-Kopie, in der Reihenfolge der Projektseite (← → blättert durch sie).
   // MXF/ARRIRAW öffnet der ART Viewer.
   const abspielListe: AbspielEintrag[] = zeilen
@@ -620,55 +772,57 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
           </p>
         </div>
       ) : (
-        <div className="projekt-rumpf">
-          <nav className="baum" aria-label="Projekt">
-            <ul>
-              <BaumKnopf an={auswahl.art === "takes"} onClick={() => setAuswahl({ art: "takes" })} text="Alle Takes" zahl={zahl.alle} />
-              <BaumKnopf
-                an={auswahl.art === "klaeren"}
-                onClick={() => setAuswahl({ art: "klaeren" })}
-                text="Zu klären"
-                zahl={u.zuKlaeren.length + (u.ohneAufnahme ?? []).length + (u.unstimmigkeiten ?? []).length}
-                warn={u.zuKlaeren.length + (u.ohneAufnahme ?? []).length + (u.unstimmigkeiten ?? []).length > 0}
-              />
-              <BaumKnopf an={auswahl.art === "karten"} onClick={() => setAuswahl({ art: "karten" })} text="Karten" zahl={u.karten.length} />
-            </ul>
-            <Gliederung u={u} auswahl={auswahl} setAuswahl={setAuswahl} zu={zu} setZu={setZu} />
-          </nav>
+        <ArtKontext.Provider value={artAendern}>
+          <div className="projekt-rumpf">
+            <nav className="baum" aria-label="Projekt">
+              <ul>
+                <BaumKnopf an={auswahl.art === "takes"} onClick={() => setAuswahl({ art: "takes" })} text="Alle Takes" zahl={zahl.alle} />
+                <BaumKnopf
+                  an={auswahl.art === "klaeren"}
+                  onClick={() => setAuswahl({ art: "klaeren" })}
+                  text="Zu klären"
+                  zahl={u.zuKlaeren.length + (u.ohneAufnahme ?? []).length + (u.unstimmigkeiten ?? []).length}
+                  warn={u.zuKlaeren.length + (u.ohneAufnahme ?? []).length + (u.unstimmigkeiten ?? []).length > 0}
+                />
+                <BaumKnopf an={auswahl.art === "karten"} onClick={() => setAuswahl({ art: "karten" })} text="Karten" zahl={u.karten.length} />
+              </ul>
+              <Gliederung u={u} auswahl={auswahl} setAuswahl={setAuswahl} zu={zu} setZu={setZu} />
+            </nav>
 
-          <section className="detail" aria-label="Einzelheiten">
-            {auswahl.art === "takes" && (
-              <AlleTakes zeilen={zeilen} zahl={zahl} filter={filter} setFilter={setFilter} plateWaehlen={(id) => setAuswahl({ art: "plate", id })} />
-            )}
-            {auswahl.art === "klaeren" && (
-              <ZuKlaeren
-                zugang={verbunden ? konto.zugang : null}
-                u={u}
-                neuerDrehort={() => nurEins("drehort")}
-                gespeichert={() => projekt && laden(projekt)}
-                abspielen={(datei, clip) => setEinzeln({ id: datei, datei, titel: "Zu klären", clip })}
-              />
-            )}
-            {auswahl.art === "karten" && (
-              <KartenListe
-                karten={u.karten}
-                einsortieren={u.einsortieren ?? []}
-                kurzname={u.projekt.kurzname}
-                neuLaden={() => projekt && laden(projekt)}
-              />
-            )}
-            {auswahl.art === "dreh" &&
-              (() => {
-                const d = u.drehs.find((x) => x.id === auswahl.id);
-                return d ? <DrehDetail d={d} plateWaehlen={(id) => setAuswahl({ art: "plate", id })} /> : null;
-              })()}
-            {auswahl.art === "plate" &&
-              (() => {
-                const x = plates.find((x) => x.plate.id === auswahl.id);
-                return x ? <PlateDetail dreh={x.dreh} p={x.plate} drehWaehlen={() => setAuswahl({ art: "dreh", id: x.dreh.id })} /> : null;
-              })()}
-          </section>
-        </div>
+            <section className="detail" aria-label="Einzelheiten">
+              {auswahl.art === "takes" && (
+                <AlleTakes zeilen={zeilen} zahl={zahl} filter={filter} setFilter={setFilter} plateWaehlen={(id) => setAuswahl({ art: "plate", id })} />
+              )}
+              {auswahl.art === "klaeren" && (
+                <ZuKlaeren
+                  zugang={verbunden ? konto.zugang : null}
+                  u={u}
+                  neuerDrehort={() => nurEins("drehort")}
+                  gespeichert={() => projekt && laden(projekt)}
+                  abspielen={(datei, clip) => setEinzeln({ id: datei, datei, titel: "Zu klären", clip })}
+                />
+              )}
+              {auswahl.art === "karten" && (
+                <KartenListe
+                  karten={u.karten}
+                  einsortieren={u.einsortieren ?? []}
+                  kurzname={u.projekt.kurzname}
+                  neuLaden={() => projekt && laden(projekt)}
+                />
+              )}
+              {auswahl.art === "dreh" &&
+                (() => {
+                  const d = u.drehs.find((x) => x.id === auswahl.id);
+                  return d ? <DrehDetail d={d} plateWaehlen={(id) => setAuswahl({ art: "plate", id })} /> : null;
+                })()}
+              {auswahl.art === "plate" &&
+                (() => {
+                  const x = plates.find((x) => x.plate.id === auswahl.id);
+                  return x ? <PlateDetail dreh={x.dreh} p={x.plate} drehWaehlen={() => setAuswahl({ art: "dreh", id: x.dreh.id })} /> : null;
+                })()}
+            </section>
+          </div>
+        </ArtKontext.Provider>
       )}
       {spieler !== null && abspielListe[spieler] && <Abspieler liste={abspielListe} index={spieler} setIndex={setSpieler} />}
       {einzeln && <Abspieler liste={[einzeln]} index={0} setIndex={(i) => i === null && setEinzeln(null)} />}
@@ -1098,6 +1252,7 @@ function PlateDetail({ dreh, p, drehWaehlen }: { dreh: DrehStand; p: PlateStand;
         <h2>
           {plateTitel(p)} {slateDaneben(p) && <span className="zahl leise">{slateDaneben(p)}</span>}
         </h2>
+        <EinstellungArt dreh={dreh} p={p} />
         <button className="verweis" onClick={drehWaehlen}>
           {dreh.name} · {datumKurz(dreh.datum)}
         </button>
