@@ -2467,6 +2467,16 @@ input[type="checkbox"][role="switch"]:checked::before {
 .protokoll-abschnitt .tabelle th {
   position: static;
 }
+/* Clipnamen einer Karte, die nur die gemeinsame Datenbank kennt (Kopie hier nicht verbunden). */
+.db-clips {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 4px 16px;
+  margin: 0;
+  padding: 10px 12px 12px;
+  list-style: none;
+  font-size: 13px;
+}
 /* Dateien wie im Finder (Marlon, 17.10.2026): Liste mit Dreieck zum Aufklappen, neutralen Zeichen je Art, Zebrastreifen
    statt Linien, Spalten Name · Geändert · Grösse · Art und je Kopie der Stand mit Zeichen und Wort. */
 .finder-knoepfe {

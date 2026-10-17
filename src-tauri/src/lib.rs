@@ -637,18 +637,23 @@ fn verlauf_anhaengen(app: &AppHandle, e: &KartenErgebnis) -> Result<(), String> 
 }
 
 /// Kartengedächtnis: Wurde diese Karte schon eingelesen, oder wurde sie danach nicht formatiert (neue Clips zu den
-/// schon gesicherten)? Nur ein Hinweis; liest nur das Verzeichnis der Karte.
+/// schon gesicherten)? Nur ein Hinweis; liest nur das Verzeichnis der Karte. Zuerst der Verlauf dieses Rechners, dann
+/// mit Netz die gemeinsame Datenbank (eingelesen auf einem anderen Rechner; Marlon, 17.10.2026: „alle Ingest-Apps
+/// synchron“). Antwort wie `Wiedererkannt`, dazu `datenbank` und `ablage`.
 #[tauri::command]
 async fn karte_wiedererkennen(
     app: AppHandle,
+    plate: State<'_, Arc<plate::Plate>>,
     quelle: PathBuf,
-) -> Result<Option<ingest_kern::gedaechtnis::Wiedererkannt>, String> {
+    zugang: Option<plate::Zugang>,
+) -> Result<Option<serde_json::Value>, String> {
     let pfad = verlauf_pfad(&app)?;
+    let p = Arc::clone(&plate);
     im_hintergrund(move || {
         let jetzt = ingest_kern::gedaechtnis::erfassen(&quelle).map_err(|e| e.to_string())?;
         let text = std::fs::read_to_string(pfad).unwrap_or_default();
         let liste: Vec<VerlaufEintrag> = text.lines().filter_map(|z| serde_json::from_str(z).ok()).collect();
-        Ok(ingest_kern::gedaechtnis::vergleichen(
+        let hier = ingest_kern::gedaechtnis::vergleichen(
             &jetzt,
             liste.iter().rev().map(|e| ingest_kern::gedaechtnis::Frueher {
                 karte: &e.karte,
@@ -657,20 +662,60 @@ async fn karte_wiedererkennen(
                 beginn: &e.beginn,
                 sicher: e.sicher,
             }),
-        ))
+        );
+        let antwort = |w: &ingest_kern::gedaechtnis::Wiedererkannt, datenbank: bool, ablage: Option<String>| {
+            let mut v = serde_json::to_value(w).unwrap_or_default();
+            v["datenbank"] = serde_json::json!(datenbank);
+            v["ablage"] = serde_json::json!(ablage);
+            v
+        };
+        if let Some(w) = &hier {
+            return Ok(Some(antwort(w, false, None)));
+        }
+        // In der Datenbank heisst die Karte nach ihrer Rolle (Reel); das Laufwerk kann anders heissen.
+        let Some(z) = zugang else { return Ok(None) };
+        let reel = jetzt.clips.iter().find_map(|c| soll::arri_reel(c).map(|(r, k)| format!("{r}{k}")));
+        let namen: Vec<String> = [Some(jetzt.karte.clone()), reel].into_iter().flatten().collect();
+        let Ok(v) = p.karten_namens(&z, &namen) else { return Ok(None) };
+        let mut db = protokoll::db_karten(&v);
+        db.sort_by(|a, b| b.eingelesen.cmp(&a.eingelesen));
+        Ok(db.iter().find_map(|k| {
+            ingest_kern::gedaechtnis::vergleichen_namen(&jetzt, &k.clips, &k.eingelesen, k.freigegeben)
+                .map(|w| antwort(&w, true, k.ablage.clone()))
+        }))
     })
     .await
 }
 
-/// Protokoll: alle eingelesenen Karten auf den eingetragenen Zielen, den Ablagen und im Verlauf dieses Rechners, mit
-/// ihren Kopien (siehe `protokoll`).
+/// Protokoll: alle eingelesenen Karten auf den eingetragenen Zielen, den Ablagen, im Verlauf dieses Rechners und mit
+/// Netz in der gemeinsamen Datenbank (auch von anderen Rechnern), mit ihren Kopien (siehe `protokoll`).
 #[tauri::command]
-async fn protokoll_liste(app: AppHandle, basis: Vec<PathBuf>) -> Result<Vec<protokoll::ProtokollKarte>, String> {
+async fn protokoll_liste(
+    app: AppHandle,
+    plate: State<'_, Arc<plate::Plate>>,
+    basis: Vec<PathBuf>,
+    zugang: Option<plate::Zugang>,
+) -> Result<Vec<protokoll::ProtokollKarte>, String> {
     let pfad = verlauf_pfad(&app)?;
+    let p = Arc::clone(&plate);
     im_hintergrund(move || {
+        // Die Datenbank nebenher fragen, während die Ziele durchsucht werden.
+        let (tx, rx) = std::sync::mpsc::channel();
+        match zugang {
+            Some(z) => {
+                std::thread::spawn(move || {
+                    let _ = tx.send(p.karten_alle(&z).map(|v| protokoll::db_karten(&v)));
+                });
+            }
+            // Ohne Zugang gleich schliessen, sonst wartete die Liste vergeblich.
+            None => drop(tx),
+        }
         let text = std::fs::read_to_string(pfad).unwrap_or_default();
         let verlauf: Vec<VerlaufEintrag> = text.lines().filter_map(|z| serde_json::from_str(z).ok()).collect();
-        Ok(protokoll::liste(&basis, &verlauf))
+        // Ohne Netz, ohne Rechte oder ohne Antwort nach 5 s: nur, was hier erreichbar ist.
+        Ok(protokoll::liste(&basis, &verlauf, || {
+            rx.recv_timeout(std::time::Duration::from_secs(5)).ok().and_then(Result::ok).unwrap_or_default()
+        }))
     })
     .await
 }

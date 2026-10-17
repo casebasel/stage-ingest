@@ -172,6 +172,20 @@ export type ProtokollKopie = {
   dateien: number | null;
   bytes: number | null;
   zuletzt: MhlGeneration | null;
+  /** Nur aus der gemeinsamen Datenbank bekannt; `ordner` ist dann der Ort im Projektordner der Ablage. */
+  ausDatenbank?: boolean;
+};
+/** Was die gemeinsame Datenbank über eine Karte weiss (auch von anderen Rechnern eingelesen). */
+export type DbKarte = {
+  karte: string;
+  projekt: string | null;
+  drehOrdner: string | null;
+  eingelesen: string;
+  kopien: number;
+  freigegeben: boolean;
+  ablage: string | null;
+  speicherort: string;
+  clips: string[];
 };
 export type ProtokollKarte = {
   karte: string;
@@ -184,6 +198,7 @@ export type ProtokollKarte = {
   grund: string;
   unabhaengigeKopien: number;
   kopien: ProtokollKopie[];
+  datenbank?: DbKarte | null;
 };
 export type DateiStand =
   | "geprueft"
@@ -236,7 +251,9 @@ export type Bereinigt = {
   protokoll: string | null;
 };
 /** Protokoll: alle eingelesenen Karten auf den Zielen (dazu die Ablagen) und im Verlauf dieses Rechners. */
-export const protokollListe = (basis: string[]) => invoke<ProtokollKarte[]>("protokoll_liste", { basis });
+/** Mit `zugang` auch die Karten der gemeinsamen Datenbank (alle Rechner). */
+export const protokollListe = (basis: string[], zugang: unknown | null) =>
+  invoke<ProtokollKarte[]>("protokoll_liste", { basis, zugang });
 /** Je Datei und Kopie der Stand laut ASC-MHL-Historie und Ordner, dazu der Verlauf. */
 export const protokollKarte = (ordner: string[]) => invoke<ProtokollDetail>("protokoll_karte", { ordner });
 /** ASC-MHL-Historie einer Kopie nach einem Löschen in Ordnung bringen (nichts wird gelöscht). */

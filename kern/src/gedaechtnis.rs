@@ -83,9 +83,49 @@ pub fn vergleichen<'a>(jetzt: &Abdruck, frueher: impl IntoIterator<Item = Fruehe
     None
 }
 
+/// Vergleich mit einer Karte aus der gemeinsamen Datenbank, die ein anderer Rechner eingelesen hat (Marlon, 17.10.2026:
+/// „alle Ingest-Apps synchron“). Dort stehen nur die Clipnamen ohne Endung, keine Grössen: gleiche Clips = schon
+/// eingelesen; alle von damals da und neue dazu = nicht formatiert. Den Namen der Karte prüft die Abfrage.
+pub fn vergleichen_namen(jetzt: &Abdruck, clips: &[String], beginn: &str, sicher: bool) -> Option<Wiedererkannt> {
+    let jetzt_namen: BTreeSet<String> =
+        jetzt.clips.iter().map(|c| crate::soll::ohne_endung(c).to_uppercase()).collect();
+    let damals: BTreeSet<String> = clips.iter().map(|c| c.to_uppercase()).collect();
+    if damals.is_empty() || !damals.is_subset(&jetzt_namen) {
+        return None;
+    }
+    let neue = jetzt_namen.len() - damals.len();
+    Some(if neue == 0 {
+        Wiedererkannt::Gleich { beginn: beginn.to_owned(), sicher }
+    } else {
+        Wiedererkannt::NichtFormatiert { beginn: beginn.to_owned(), sicher, bekannt: damals.len(), neue }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn karte_eines_anderen_rechners() {
+        let jetzt = abdruck("A010R132", &karte(&["A010C001_120101_R132", "A010C002_120101_R132"]));
+        let db = |c: &[&str]| c.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            vergleichen_namen(
+                &jetzt,
+                &db(&["A010C001_120101_R132", "a010c002_120101_r132"]),
+                "2026-10-17T08:45:00+02:00",
+                true
+            ),
+            Some(Wiedererkannt::Gleich { beginn: "2026-10-17T08:45:00+02:00".into(), sicher: true })
+        );
+        assert_eq!(
+            vergleichen_namen(&jetzt, &db(&["A010C001_120101_R132"]), "t", false),
+            Some(Wiedererkannt::NichtFormatiert { beginn: "t".into(), sicher: false, bekannt: 1, neue: 1 })
+        );
+        // Formatiert und neu gedreht, oder nichts bekannt: kein Hinweis.
+        assert_eq!(vergleichen_namen(&jetzt, &db(&["A010C009_120101_R132"]), "t", true), None);
+        assert_eq!(vergleichen_namen(&jetzt, &[], "t", true), None);
+    }
 
     fn karte(clips: &[&str]) -> BTreeMap<String, u64> {
         let mut m: BTreeMap<String, u64> = clips.iter().map(|c| (format!("A004R132/{c}.mov"), 100)).collect();

@@ -2,7 +2,9 @@
 //! alles auf der Karte war und dass alles kopiert ist … und wohin … ein sicheres Gefühl“).
 //!
 //! Alle Karten auf den erreichbaren Zielen (eingetragene Ziele und Ablagen mit Merkdatei, auch was ein anderer Rechner
-//! eingelesen hat) und im Verlauf dieses Rechners. Je Karte die Kopien; je Datei und Kopie der Beweis aus der
+//! eingelesen hat), im Verlauf dieses Rechners und in der gemeinsamen Datenbank (Marlon, 17.10.2026: „alle Ingest-Apps
+//! synchron … sind ja nur Metadaten“): Eine Karte, die ein anderer Rechner auf eine hier nicht verbundene Ablage kopiert
+//! hat, steht so trotzdem da, mit Ablage, Ort, Freigabe und Clipnamen. Je Karte die Kopien; je Datei und Kopie der Beweis aus der
 //! ASC-MHL-Historie (beim Einlesen ohne Cache zurückgelesen und mit der Prüfsumme der Karte verglichen) und ob die Datei
 //! noch daliegt. Gelesen wird nur die Historie und die Ordnerliste, nicht der Inhalt der Dateien; das volle Nachlesen
 //! bleibt „Nachprüfen“.
@@ -25,8 +27,98 @@ use ingest_kern::mhl::{self, Generation};
 use ingest_kern::struktur;
 use ingest_kern::uebersicht::KartenZusammenfassung;
 use serde::Serialize;
+use serde_json::Value;
 
 use crate::VerlaufEintrag;
+
+/// Eine Karte laut gemeinsamer Datenbank (`karte` mit den Namen ihrer Clips), von welchem Rechner auch immer.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DbKarte {
+    pub karte: String,
+    /// Kurzname des Projekts.
+    pub projekt: Option<String>,
+    pub dreh_ordner: Option<String>,
+    /// Eingelesen (RFC 3339).
+    pub eingelesen: String,
+    /// Unabhängige Kopien beim Einlesen.
+    pub kopien: usize,
+    pub freigegeben: bool,
+    /// Art der Hauptkopie zum Anzeigen: „NAS“ oder „Platte …“ (`karte.ablage` ist `nas` oder `platte:<Kennung>`, nicht
+    /// der Name der Merkdatei).
+    pub ablage: Option<String>,
+    /// Ort der Hauptkopie relativ zum Projektordner (`2026-10-16_PREDIGERHOF/01_KAMERA/A010R132`; bis 0.1.31 absolut).
+    pub speicherort: String,
+    /// Clipnamen ohne Endung.
+    pub clips: Vec<String>,
+}
+
+/// `karte.ablage` zum Anzeigen: `nas` → „NAS“, `platte:<Kennung>` → „Platte“ mit den ersten Zeichen der Kennung.
+fn ablage_anzeige(a: &str) -> String {
+    match a.split_once(':') {
+        None if a.eq_ignore_ascii_case("nas") => "NAS".into(),
+        Some((art, wert)) if art.eq_ignore_ascii_case("platte") => {
+            let kurz: String = wert.chars().filter(|c| c.is_ascii_alphanumeric()).take(8).collect();
+            if kurz.is_empty() {
+                "Platte".into()
+            } else {
+                format!("Platte {kurz}")
+            }
+        }
+        _ => a.to_owned(),
+    }
+}
+
+/// Karten aus `{karten, projekte, clips}` (siehe `Plate::karten_alle`): je Name die beste Zeile (nicht gelöscht, mit
+/// Kopien, zuletzt eingelesen). Abgebrochene Läufe ohne Kopie zählen nur, wenn es nichts anderes gibt.
+pub fn db_karten(v: &Value) -> Vec<DbKarte> {
+    let text = |x: &Value| x.as_str().unwrap_or_default().to_owned();
+    let kurz: HashMap<String, String> =
+        v["projekte"].as_array().into_iter().flatten().map(|p| (text(&p["id"]), text(&p["kurzname"]))).collect();
+    let mut clips: HashMap<String, Vec<String>> = HashMap::new();
+    for c in v["clips"].as_array().into_iter().flatten().filter(|c| c["geloescht"] != true) {
+        clips.entry(text(&c["karte_id"])).or_default().push(text(&c["name"]));
+    }
+    let mut beste: BTreeMap<String, (bool, String, DbKarte)> = BTreeMap::new();
+    for k in v["karten"].as_array().into_iter().flatten().filter(|k| k["geloescht"] != true) {
+        let name = text(&k["name"]);
+        if name.is_empty() {
+            continue;
+        }
+        let speicherort = text(&k["speicherort"]);
+        let erster = speicherort.split('/').next().unwrap_or_default();
+        let dreh_ordner = if chrono::NaiveDate::parse_from_str(erster.get(..10).unwrap_or_default(), "%Y-%m-%d").is_ok()
+        {
+            Some(erster.to_owned())
+        } else {
+            Some(text(&k["ordner_datum"])).filter(|d| !d.is_empty())
+        };
+        let kopien = k["kopien"].as_u64().unwrap_or(0) as usize;
+        let eingelesen = text(&k["eingelesen_am"]);
+        let mut namen = clips.get(&text(&k["id"])).cloned().unwrap_or_default();
+        namen.sort();
+        namen.dedup();
+        let karte = DbKarte {
+            karte: name.clone(),
+            projekt: kurz.get(&text(&k["projekt_id"])).cloned().filter(|p| !p.is_empty()),
+            dreh_ordner,
+            eingelesen: eingelesen.clone(),
+            kopien,
+            freigegeben: k["freigegeben"] == true,
+            ablage: Some(text(&k["ablage"])).filter(|a| !a.is_empty()).map(|a| ablage_anzeige(&a)),
+            speicherort,
+            clips: namen,
+        };
+        let rang = (kopien > 0, eingelesen);
+        match beste.get(&name.to_uppercase()) {
+            Some((mit, zeit, _)) if (*mit, zeit.clone()) >= rang => {}
+            _ => {
+                beste.insert(name.to_uppercase(), (rang.0, rang.1, karte));
+            }
+        }
+    }
+    beste.into_values().map(|(_, _, k)| k).collect()
+}
 
 /// Eine eingelesene Karte mit allen bekannten Kopien.
 #[derive(Debug, Serialize)]
@@ -45,6 +137,8 @@ pub struct ProtokollKarte {
     pub grund: String,
     pub unabhaengige_kopien: usize,
     pub kopien: Vec<ProtokollKopie>,
+    /// Was die gemeinsame Datenbank über die Karte weiss (auch von anderen Rechnern).
+    pub datenbank: Option<DbKarte>,
 }
 
 #[derive(Debug, Serialize)]
@@ -62,10 +156,15 @@ pub struct ProtokollKopie {
     pub dateien: Option<usize>,
     pub bytes: Option<u64>,
     pub zuletzt: Option<Generation>,
+    /// Nur aus der gemeinsamen Datenbank bekannt (Ablage hier nicht verbunden); `ordner` ist dann der Ort im
+    /// Projektordner der Ablage.
+    pub aus_datenbank: bool,
 }
 
-/// Alle Karten, neueste zuerst. `basis`: eingetragene Ziele; dazu die Ablagen auf allen Laufwerken.
-pub fn liste(basis: &[PathBuf], verlauf: &[VerlaufEintrag]) -> Vec<ProtokollKarte> {
+/// Alle Karten, neueste zuerst. `basis`: eingetragene Ziele; dazu die Ablagen auf allen Laufwerken und die Karten der
+/// gemeinsamen Datenbank (`db`, leer ohne Netz). `db` wird erst nach dem Durchsuchen der Ziele gefragt, damit die
+/// Abfrage nebenher laufen kann.
+pub fn liste(basis: &[PathBuf], verlauf: &[VerlaufEintrag], db: impl FnOnce() -> Vec<DbKarte>) -> Vec<ProtokollKarte> {
     let mut wurzeln: Vec<PathBuf> = Vec::new();
     for b in basis.iter().cloned().chain(ingest_kern::ablage::finden()) {
         let echt = std::fs::canonicalize(&b).unwrap_or_else(|_| b.clone());
@@ -73,11 +172,15 @@ pub fn liste(basis: &[PathBuf], verlauf: &[VerlaufEintrag]) -> Vec<ProtokollKart
             wurzeln.push(b);
         }
     }
-    liste_unter(&wurzeln, verlauf)
+    liste_unter(&wurzeln, verlauf, db)
 }
 
 /// [`liste`] unter gegebenen Wurzeln (für Tests).
-pub fn liste_unter(wurzeln: &[PathBuf], verlauf: &[VerlaufEintrag]) -> Vec<ProtokollKarte> {
+pub fn liste_unter(
+    wurzeln: &[PathBuf],
+    verlauf: &[VerlaufEintrag],
+    db: impl FnOnce() -> Vec<DbKarte>,
+) -> Vec<ProtokollKarte> {
     // Karte (gross) → (Zusammenfassungen mit Kartenordner, Projekt, Drehordner, Ablage).
     struct Fund {
         z: KartenZusammenfassung,
@@ -122,13 +225,17 @@ pub fn liste_unter(wurzeln: &[PathBuf], verlauf: &[VerlaufEintrag]) -> Vec<Proto
             *e = v;
         }
     }
+    let db = db();
+    let aus_db: HashMap<String, &DbKarte> = db.iter().map(|k| (k.karte.to_uppercase(), k)).collect();
     let mut namen: Vec<String> = funde.keys().cloned().collect();
     namen.extend(laeufe.keys().filter(|k| !funde.contains_key(*k)).cloned());
+    namen.extend(aus_db.keys().filter(|k| !funde.contains_key(*k) && !laeufe.contains_key(*k)).cloned());
 
     let mut aus = Vec::new();
     for name in namen {
         let f = funde.get(&name).map(Vec::as_slice).unwrap_or_default();
         let lauf = laeufe.get(&name).copied();
+        let dbk = aus_db.get(&name).copied();
         let mut kopien: Vec<ProtokollKopie> = Vec::new();
         let gleich = |a: &Path, b: &Path| {
             a == b || std::fs::canonicalize(a).ok().is_some_and(|x| std::fs::canonicalize(b).ok() == Some(x))
@@ -151,20 +258,41 @@ pub fn liste_unter(wurzeln: &[PathBuf], verlauf: &[VerlaufEintrag]) -> Vec<Proto
                 }
             }
         }
+        // Die Hauptkopie laut Datenbank, wenn sie hier nicht schon gefunden ist (eingelesen auf einem anderen Rechner,
+        // Ablage hier nicht verbunden). Die Datenbank kennt nur die Art der Ablage, nicht ihre Merkdatei: dieselbe Kopie
+        // ist, was am selben Ort im Projektordner liegt. Bis 0.1.31 steht dort ein absoluter Pfad des Rechners, der
+        // eingelesen hat.
+        if let Some(d) = dbk.filter(|d| !d.speicherort.is_empty()) {
+            let absolut = Path::new(&d.speicherort).is_absolute();
+            let ort = match (&d.projekt, absolut) {
+                (Some(p), false) => PathBuf::from(format!("{p}/{}", d.speicherort)),
+                _ => PathBuf::from(&d.speicherort),
+            };
+            let schon = kopien.iter().any(|k| if absolut { gleich(&k.ordner, &ort) } else { k.ordner.ends_with(&ort) });
+            if !schon {
+                let mut k = kopie(&ort, d.ablage.clone(), None, None);
+                k.aus_datenbank = !k.erreichbar;
+                kopien.push(k);
+            }
+        }
         kopien.sort_by_key(|k| !k.erreichbar);
-        // Neueste Zusammenfassung: Zeit, Freigabe, Zahl der Kopien; sonst der Lauf dieses Rechners.
+        // Neueste Zusammenfassung: Zeit, Freigabe, Zahl der Kopien; sonst der Lauf dieses Rechners, sonst die Datenbank.
         let neueste = f.iter().max_by(|a, b| a.z.beginn.cmp(&b.z.beginn));
         let beginn = [neueste.map(|x| x.z.beginn.clone()), lauf.map(|l| l.beginn.clone())]
             .into_iter()
             .flatten()
             .max()
+            .or_else(|| dbk.map(|d| d.eingelesen.clone()))
             .unwrap_or_default();
         let lauf_neuer = lauf.is_some_and(|l| neueste.is_none_or(|n| l.beginn > n.z.beginn));
         let (sicher, grund, unabhaengig) = match (neueste, lauf) {
             (Some(n), Some(l)) if lauf_neuer => (l.sicher, l.grund.clone(), n.z.unabhaengige_kopien),
             (Some(n), _) => (n.z.freigegeben, n.z.grund.clone(), n.z.unabhaengige_kopien),
             (None, Some(l)) => (l.sicher, l.grund.clone(), l.ziele.iter().filter(|z| z.gut).count()),
-            (None, None) => (false, String::new(), 0),
+            (None, None) => match dbk {
+                Some(d) => (d.freigegeben, String::new(), d.kopien),
+                None => (false, String::new(), 0),
+            },
         };
         let beste = kopien.iter().filter(|k| k.dateien.is_some()).max_by_key(|k| k.dateien);
         let (dateien, bytes) = match (beste, lauf) {
@@ -173,9 +301,13 @@ pub fn liste_unter(wurzeln: &[PathBuf], verlauf: &[VerlaufEintrag]) -> Vec<Proto
             (None, None) => (0, 0),
         };
         aus.push(ProtokollKarte {
-            karte: neueste.map(|n| n.z.karte.clone()).or_else(|| lauf.map(|l| l.karte.clone())).unwrap_or(name),
-            projekt: neueste.map(|n| n.projekt.clone()),
-            dreh_ordner: neueste.map(|n| n.dreh.clone()),
+            karte: neueste
+                .map(|n| n.z.karte.clone())
+                .or_else(|| lauf.map(|l| l.karte.clone()))
+                .or_else(|| dbk.map(|d| d.karte.clone()))
+                .unwrap_or(name),
+            projekt: neueste.map(|n| n.projekt.clone()).or_else(|| dbk.and_then(|d| d.projekt.clone())),
+            dreh_ordner: neueste.map(|n| n.dreh.clone()).or_else(|| dbk.and_then(|d| d.dreh_ordner.clone())),
             beginn,
             dateien,
             bytes,
@@ -183,6 +315,7 @@ pub fn liste_unter(wurzeln: &[PathBuf], verlauf: &[VerlaufEintrag]) -> Vec<Proto
             grund,
             unabhaengige_kopien: unabhaengig,
             kopien,
+            datenbank: dbk.cloned(),
         });
     }
     aus.sort_by(|a, b| b.beginn.cmp(&a.beginn));
@@ -190,7 +323,8 @@ pub fn liste_unter(wurzeln: &[PathBuf], verlauf: &[VerlaufEintrag]) -> Vec<Proto
 }
 
 fn kopie(ordner: &Path, ablage: Option<String>, gut: Option<bool>, bericht: Option<PathBuf>) -> ProtokollKopie {
-    let erreichbar = ordner.is_dir();
+    // Relativ ist nur ein Ort aus der Datenbank (im Projektordner einer Ablage), nie ein Ordner hier.
+    let erreichbar = ordner.is_absolute() && ordner.is_dir();
     let p = erreichbar.then(|| mhl::protokoll(ordner).ok()).flatten();
     ProtokollKopie {
         ordner: ordner.to_path_buf(),
@@ -201,6 +335,7 @@ fn kopie(ordner: &Path, ablage: Option<String>, gut: Option<bool>, bericht: Opti
         dateien: p.as_ref().map(|p| p.dateien.len()),
         bytes: p.as_ref().map(|p| p.dateien.iter().map(|d| d.groesse).sum()),
         zuletzt: p.and_then(|p| p.generationen.last().cloned()),
+        aus_datenbank: false,
     }
 }
 
@@ -348,7 +483,7 @@ pub fn detail(ordner: &[PathBuf]) -> ProtokollDetail {
     let mut kopien = Vec::new();
     let mut staende = Vec::new();
     for o in ordner {
-        let erreichbar = o.is_dir();
+        let erreichbar = o.is_absolute() && o.is_dir();
         let p = if erreichbar { Some(mhl::protokoll(o)) } else { None };
         let fehler = match &p {
             Some(Err(e)) => Some(format!("ASC-MHL-Historie nicht lesbar: {e}")),
@@ -625,18 +760,34 @@ mod tests {
     #[test]
     fn echtes_protokoll_pruefen() {
         let Ok(o) = std::env::var("PROTOKOLL_PRUEFEN") else { return };
-        let l = liste_unter(&[PathBuf::from(o).join("nas")], &[]);
+        // Dazu die gemeinsame Datenbank, wenn `db_alle.json` (`{karten, projekte, clips}`) daliegt.
+        let db = std::fs::read(PathBuf::from(&o).join("db_alle.json"))
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+            .map(|v| db_karten(&v))
+            .unwrap_or_default();
+        let l = liste_unter(&[PathBuf::from(&o).join("nas")], &[], || db);
         for k in &l {
             println!(
-                "{} {} {} Dateien {} B sicher={} kopien={} ({})",
+                "{} {} {} Dateien {} B sicher={} kopien={} ({}) datenbank={:?}",
                 k.karte,
                 k.beginn,
                 k.dateien,
                 k.bytes,
                 k.sicher,
                 k.kopien.len(),
-                k.grund
+                k.grund,
+                k.datenbank.as_ref().map(|d| (d.ablage.clone(), d.clips.len()))
             );
+            for x in &k.kopien {
+                println!(
+                    "  {} ablage={:?} erreichbar={} aus_datenbank={}",
+                    x.ordner.display(),
+                    x.ablage,
+                    x.erreichbar,
+                    x.aus_datenbank
+                );
+            }
             let d = detail(&k.kopien.iter().map(|x| x.ordner.clone()).collect::<Vec<_>>());
             for x in &d.kopien {
                 println!("  Kopie {} erreichbar={} fehler={:?}", x.ordner.display(), x.erreichbar, x.fehler);
@@ -667,10 +818,72 @@ mod tests {
     }
 
     #[test]
+    fn karten_aus_der_datenbank() {
+        // Marlon, 17.10.2026: Der i9 las A010R132 auf das NAS ein; das MacBook ohne NAS sah die Karte nicht.
+        let v = serde_json::json!({
+            "projekte": [{ "id": "projekt-happy_end_test", "kurzname": "HAPPY_END_TEST" }],
+            "karten": [
+                { "id": "k1", "name": "A010R132", "projekt_id": "projekt-happy_end_test", "eingelesen_am": "2026-10-17T06:45:23+00:00",
+                  "kopien": 1, "freigegeben": true, "ablage": "nas", "speicherort": "2026-10-16_PREDIGERHOF/01_KAMERA/A010R132",
+                  "ordner_datum": "2026-10-16", "geloescht": false },
+                // Abgebrochene Läufe ohne Kopie zählen nicht, wenn es einen richtigen gibt.
+                { "id": "k2", "name": "A008R132", "projekt_id": "projekt-happy_end_test", "eingelesen_am": "2026-10-15T10:43:08+00:00",
+                  "kopien": 1, "freigegeben": true, "ablage": "nas", "speicherort": "2026-10-14_4_STOCK/01_KAMERA/A008R132", "geloescht": false },
+                { "id": "k3", "name": "A008R132", "projekt_id": "projekt-happy_end_test", "eingelesen_am": "2026-10-15T11:00:00+00:00",
+                  "kopien": 0, "freigegeben": false, "ablage": null, "speicherort": null, "geloescht": false },
+                { "id": "k4", "name": "A099R132", "projekt_id": "projekt-happy_end_test", "eingelesen_am": "2026-10-15T11:00:00+00:00",
+                  "kopien": 1, "freigegeben": true, "ablage": "nas", "speicherort": "x", "geloescht": true }
+            ],
+            "clips": [
+                { "karte_id": "k1", "name": "A010C002_120101_R132", "geloescht": false },
+                { "karte_id": "k1", "name": "A010C001_120101_R132", "geloescht": false },
+                { "karte_id": "k1", "name": "A010C003_120101_R132", "geloescht": true },
+                { "karte_id": "k2", "name": "A008C001_120101_R132", "geloescht": false }
+            ]
+        });
+        let db = db_karten(&v);
+        assert_eq!(db.iter().map(|k| k.karte.as_str()).collect::<Vec<_>>(), ["A008R132", "A010R132"]);
+        let a010 = &db[1];
+        assert_eq!(a010.clips, ["A010C001_120101_R132", "A010C002_120101_R132"]);
+        assert_eq!(
+            (a010.projekt.as_deref(), a010.dreh_ordner.as_deref()),
+            (Some("HAPPY_END_TEST"), Some("2026-10-16_PREDIGERHOF"))
+        );
+        assert_eq!((db[0].kopien, db[0].ablage.as_deref()), (1, Some("NAS")));
+        assert_eq!(ablage_anzeige("platte:5A3B-1C2D-99EE"), "Platte 5A3B1C2D");
+
+        // Ohne verbundenes NAS: beide Karten aus der Datenbank, mit Ablage, Ort und Freigabe; nichts erreichbar.
+        let t = tempfile::tempdir().unwrap();
+        let l = liste_unter(&[t.path().join("leer")], &[], || db.clone());
+        assert_eq!(l.iter().map(|k| k.karte.as_str()).collect::<Vec<_>>(), ["A010R132", "A008R132"], "neueste zuerst");
+        let k = &l[0];
+        assert!(k.sicher && k.datenbank.as_ref() == Some(a010));
+        assert_eq!((k.beginn.as_str(), k.unabhaengige_kopien), ("2026-10-17T06:45:23+00:00", 1));
+        assert_eq!(k.kopien.len(), 1);
+        let x = &k.kopien[0];
+        assert!(!x.erreichbar && x.aus_datenbank);
+        assert_eq!(
+            (x.ablage.as_deref(), x.ordner.as_path()),
+            (Some("NAS"), Path::new("HAPPY_END_TEST/2026-10-16_PREDIGERHOF/01_KAMERA/A010R132"))
+        );
+        let d = detail(std::slice::from_ref(&x.ordner));
+        assert!(!d.kopien[0].erreichbar && d.dateien.is_empty());
+
+        // Mit verbundenem NAS: die Kopie dort (gleicher Ort im Projektordner), keine zweite aus der Datenbank.
+        let (a, _) = einlesen(t.path());
+        let mut db = db;
+        db[1].projekt = Some("HAPPY_END".into());
+        let l = liste_unter(&[t.path().join("nas")], &[], || db);
+        let k = l.iter().find(|k| k.karte == "A010R132").unwrap();
+        assert_eq!(k.kopien.len(), 1, "{:?}", k.kopien);
+        assert!(k.kopien[0].erreichbar && !k.kopien[0].aus_datenbank && k.kopien[0].ordner == a);
+    }
+
+    #[test]
     fn karten_mit_kopien_und_dateien() {
         let t = tempfile::tempdir().unwrap();
         let (a, b) = einlesen(t.path());
-        let l = liste_unter(&[t.path().join("nas"), t.path().join("platte")], &[]);
+        let l = liste_unter(&[t.path().join("nas"), t.path().join("platte")], &[], Vec::new);
         assert_eq!(l.len(), 1, "eine Karte, zwei Kopien");
         let k = &l[0];
         assert_eq!((k.karte.as_str(), k.dateien, k.bytes, k.sicher, k.kopien.len()), ("A010R132", 3, 12_003, true, 2));

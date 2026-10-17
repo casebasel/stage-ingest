@@ -4,7 +4,8 @@
 // Datei kommt aus der ASC-MHL-Historie der Kopie (beim Einlesen ohne Cache zurückgelesen und mit der Prüfsumme der Karte
 // verglichen) und aus dem Ordner (liegt mit gleicher Grösse da); „Nachprüfen“ liest alles nochmals. Die Dateien stehen
 // als Liste wie im Finder (Marlon, 17.10.2026: „dass man wirklich sieht, es sieht aus wie ein Dateibaum“); von Hand
-// gelöschte Clips bleiben grau darin stehen.
+// gelöschte Clips bleiben grau darin stehen. Mit Netz stehen auch die Karten der gemeinsamen Datenbank da, die ein
+// anderer Rechner auf eine hier nicht verbundene Ablage kopiert hat (Marlon, 17.10.2026: „alle Ingest-Apps synchron“).
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { ask } from "@tauri-apps/plugin-dialog";
@@ -50,6 +51,7 @@ import {
   type Vorgang,
 } from "../kern";
 import { gemerkt, merken, useEinstellungen } from "../einstellungen";
+import { useKonto } from "../konto";
 import { useLauf } from "../lauf";
 import { Pfad, Status, datumZeit, type Ton } from "../teile";
 import { abweichungText } from "./Einlesen";
@@ -111,6 +113,8 @@ const geloeschtText = (g: { zeit: string; benutzer: string }) => {
 export function Protokoll({ kopieErgaenzen }: { kopieErgaenzen: (ordner: string) => void }) {
   const e = useEinstellungen();
   const lauf = useLauf();
+  const konto = useKonto();
+  const zugang = konto.verbindung === "verbunden" ? konto.zugang : null;
   const [liste, setListe] = useState<ProtokollKarte[] | null>(null);
   const [fehler, setFehler] = useState<string | null>(null);
   const [laedt, setLaedt] = useState(false);
@@ -123,7 +127,7 @@ export function Protokoll({ kopieErgaenzen }: { kopieErgaenzen: (ordner: string)
     setLaedt(true);
     setFehler(null);
     try {
-      const l = await protokollListe(e.ziele);
+      const l = await protokollListe(e.ziele, zugang);
       const neu = letztesErgebnis.current !== lauf.ergebnis;
       letztesErgebnis.current = lauf.ergebnis;
       setListe(l);
@@ -133,7 +137,7 @@ export function Protokoll({ kopieErgaenzen }: { kopieErgaenzen: (ordner: string)
     } finally {
       setLaedt(false);
     }
-  }, [e.ziele, lauf.ergebnis]);
+  }, [e.ziele, lauf.ergebnis, zugang]);
   useEffect(() => {
     void laden();
   }, [laden]);
@@ -167,7 +171,9 @@ export function Protokoll({ kopieErgaenzen }: { kopieErgaenzen: (ordner: string)
         ) : (
           <ul>
             {gefiltert.map((k) => {
-              const da = k.kopien.filter((x) => x.erreichbar).length;
+              const weg = k.kopien.filter((x) => !x.erreichbar);
+              // Nur aus der Datenbank bekannt: Clips statt Dateien (die Dateiliste liegt bei der Kopie).
+              const nurDb = weg.length === k.kopien.length && !!k.datenbank && k.dateien === 0;
               return (
                 <li key={k.karte}>
                   <button
@@ -188,13 +194,15 @@ export function Protokoll({ kopieErgaenzen }: { kopieErgaenzen: (ordner: string)
                       )}
                     </span>
                     <span className="baum-info zahl">
-                      {datumKurz(k.beginn)} · {k.dateien} Dateien · {k.kopien.length}{" "}
-                      {k.kopien.length === 1 ? "Kopie" : "Kopien"}
+                      {datumKurz(k.beginn)} · {nurDb ? `${k.datenbank?.clips.length ?? 0} Clips` : `${k.dateien} Dateien`} ·{" "}
+                      {k.kopien.length} {k.kopien.length === 1 ? "Kopie" : "Kopien"}
                     </span>
                     {k.drehOrdner && <span className="baum-info">{k.drehOrdner}</span>}
-                    {da < k.kopien.length && (
+                    {weg.length > 0 && (
                       <span className="baum-info">
-                        {k.kopien.length - da === 1 ? "1 Kopie" : `${k.kopien.length - da} Kopien`} nicht verbunden
+                        {weg.every((x) => x.ablage)
+                          ? `${[...new Set(weg.map((x) => `„${x.ablage}“`))].join(", ")} nicht verbunden`
+                          : `${weg.length === 1 ? "1 Kopie" : `${weg.length} Kopien`} nicht verbunden`}
                       </span>
                     )}
                   </button>
@@ -245,6 +253,9 @@ function KarteDetail({ k, kopieErgaenzen }: { k: ProtokollKarte; kopieErgaenzen:
   const unsauber = d ? d.kopien.filter((x) => x.nenntGeloeschte.length > 0 || x.ausserhalb.length > 0) : [];
   const gute = k.kopien.find((x) => x.erreichbar && x.gut !== false);
   const urteil = !d || lesbar.length === 0 ? "leise" : rot.length ? "rot" : auffaellig.length || unsauber.length ? "warn" : "ok";
+  // Keine Kopie lesbar, aber die gemeinsame Datenbank kennt die Karte (z. B. von einem anderen Rechner eingelesen).
+  const db = d && lesbar.length === 0 ? (k.datenbank ?? null) : null;
+  const dbAblagen = [...new Set(k.kopien.filter((x) => !x.erreichbar && x.ablage).map((x) => `„${x.ablage}“`))];
 
   async function bereinigen(x: ProtokollKopie, det: KopieDetail) {
     const teile = [
@@ -286,7 +297,9 @@ function KarteDetail({ k, kopieErgaenzen }: { k: ProtokollKarte; kopieErgaenzen:
           {k.sicher ? "Sicher zum Formatieren" : "Nicht freigegeben"}
         </Status>
         <span className="leise">
-          {d ? vorhanden.length : k.dateien} Dateien · {bytesText(d ? vorhanden.reduce((s, z) => s + z.groesse, 0) : k.bytes)} ·
+          {db
+            ? `${db.clips.length} Clips · `
+            : `${d ? vorhanden.length : k.dateien} Dateien · ${bytesText(d ? vorhanden.reduce((s, z) => s + z.groesse, 0) : k.bytes)} · `}
           zuletzt eingelesen {datumZeit(k.beginn)}
           {k.projekt && ` · ${k.projekt}`}
           {k.drehOrdner && ` / ${k.drehOrdner}`}
@@ -308,6 +321,19 @@ function KarteDetail({ k, kopieErgaenzen }: { k: ProtokollKarte; kopieErgaenzen:
           <Status ton="fehler">{fehler}</Status>
         ) : !d ? (
           <Status ton="laeuft">Liest die Historie der Kopien …</Status>
+        ) : db ? (
+          <Status ton="leise">
+            <strong>
+              Laut gemeinsamer Datenbank am {datumZeit(db.eingelesen)} eingelesen
+              {db.kopien > 0 && `, ${db.kopien} ${db.kopien === 1 ? "unabhängige Kopie" : "unabhängige Kopien"}`}
+            </strong>
+            {" · "}
+            {dbAblagen.length > 0
+              ? `${dbAblagen.join(", ")} ${dbAblagen.length === 1 ? "ist" : "sind"} an diesem Rechner nicht verbunden`
+              : "Keine Kopie hier verbunden"}
+            :
+            Dateien, Prüfsummen und Verlauf erscheinen, sobald die Kopie verbunden ist (dann neu laden).
+          </Status>
         ) : lesbar.length === 0 ? (
           <Status ton="leise">Keine Kopie verbunden: NAS oder Platte anschliessen, dann neu laden.</Status>
         ) : auffaellig.length === 0 ? (
@@ -434,7 +460,15 @@ function KarteDetail({ k, kopieErgaenzen }: { k: ProtokollKarte; kopieErgaenzen:
                     )}
                   </td>
                   <td>
-                    {eingelesen ? <VorgangWer v={eingelesen} /> : <span className="leise">–</span>}
+                    {eingelesen ? (
+                      <VorgangWer v={eingelesen} />
+                    ) : x.ausDatenbank && k.datenbank ? (
+                      <span className="leise">
+                        <span className="zahl">{datumZeit(k.datenbank.eingelesen)}</span> · laut Datenbank
+                      </span>
+                    ) : (
+                      <span className="leise">–</span>
+                    )}
                     {nachgeprueft && (
                       <span className="unterzeile leise">
                         <span>
@@ -485,6 +519,19 @@ function KarteDetail({ k, kopieErgaenzen }: { k: ProtokollKarte; kopieErgaenzen:
       {d && <Laeufe d={d} k={k} />}
 
       {d && d.dateien.length > 0 && <Dateibaum d={d} k={k} geloescht={geloescht} anzahl={vorhanden.length} />}
+
+      {db && db.clips.length > 0 && (
+        <section className="protokoll-abschnitt" aria-labelledby="t-db-clips">
+          <h3 id="t-db-clips">
+            Clips laut Datenbank <span className="leise zahl">{db.clips.length}</span>
+          </h3>
+          <ul className="db-clips zahl">
+            {db.clips.map((c) => (
+              <li key={c}>{c}</li>
+            ))}
+          </ul>
+        </section>
+      )}
     </div>
   );
 }

@@ -190,7 +190,12 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
       ordner, ablage, erreichbar, gut: true, bericht: erreichbar ? "/x.pdf" : null, dateien: erreichbar ? dateien : null,
       bytes: erreichbar ? dateien * 3.2e9 : null, zuletzt: erreichbar ? gen(zeit, "WIN-EDIT", "transfer", dateien) : null,
     });
+    // Von einem anderen Rechner auf das NAS eingelesen; das NAS ist hier nicht verbunden (nur die Datenbank kennt sie).
+    const dbClips = Array.from({ length: 12 }, (_, i) => `A001C${String(i + 1).padStart(3, "0")}_261029_R133`);
     return [
+      { karte: "A001R133", projekt: "HAPPY_END", drehOrdner: "2026-10-29_BRUECKE", beginn: "2026-10-29T06:45:00Z", dateien: 0, bytes: 0, sicher: true, grund: "", unabhaengigeKopien: 1,
+        kopien: [{ ordner: "HAPPY_END/2026-10-29_BRUECKE/01_KAMERA/A001R133", ablage: "nas", erreichbar: false, gut: null, bericht: null, dateien: null, bytes: null, zuletzt: null, ausDatenbank: true }],
+        datenbank: { karte: "A001R133", projekt: "HAPPY_END", drehOrdner: "2026-10-29_BRUECKE", eingelesen: "2026-10-29T06:45:00Z", kopien: 1, freigegeben: true, ablage: "nas", speicherort: "2026-10-29_BRUECKE/01_KAMERA/A001R133", clips: dbClips } },
       { karte: "A001R132", projekt: "HAPPY_END", drehOrdner: "2026-10-28_RHEINUFER", beginn: "2026-10-28T13:55:00Z", dateien: 56, bytes: 64.3e9, sicher: true, grund: "2 unabhängige Kopien geprüft", unabhaengigeKopien: 2,
         kopien: [kopie("/Volumes/NAS/Footage/HAPPY_END/2026-10-28_RHEINUFER/01_KAMERA/A001R132", "NAS Footage", true, 56, "2026-10-28T13:55:00Z"),
                  kopie("/Volumes/SAMSUNG T7/Footage/HAPPY_END/2026-10-28_RHEINUFER/01_KAMERA/A001R132", "Samsung T7", true, 56, "2026-10-28T13:55:00Z")] },
@@ -222,6 +227,8 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
     const weg = karte === "A001R131" ? `A${n}C002_261028_${r}` : null;
     const loesch = weg ? { clip: weg, zeit: "2026-10-28T19:40:12+01:00", benutzer: "marlon auf MAC-STUDIO" } : null;
     const da = (o: string) => o.startsWith("/");
+    // Keine Kopie lesbar: keine Dateien und kein Verlauf (wie `protokoll::detail`).
+    const keine = !ordner.some(da);
     const generationen = [
       { nr: 1, datei: "0001.mhl", zeit: "2026-10-28T13:55:00Z", rechner: "WIN-EDIT", werkzeug: "Stage Ingest", version: "0.1.55", prozess: "transfer", dateien: pfade.length },
       { nr: 2, datei: "0002.mhl", zeit: "2026-10-29T08:12:00Z", rechner: "MAC-STUDIO", werkzeug: "Stage Ingest", version: "0.1.55", prozess: "in-place", dateien: pfade.length },
@@ -238,7 +245,7 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
         nenntGeloeschte: weg && i === 0 ? [`${reel}/${weg}.mxf`] : [],
         ausserhalb: [],
       })),
-      dateien: pfade.map(([pfad, groesse, geaendert], i) => {
+      dateien: (keine ? [] : pfade).map(([pfad, groesse, geaendert], i) => {
         const geloescht = weg !== null && pfad.includes(weg);
         return {
           pfad,

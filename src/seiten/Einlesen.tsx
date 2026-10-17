@@ -1518,35 +1518,47 @@ function Dateiliste() {
   );
 }
 
-type Wiedererkannt =
+type Wiedererkannt = (
   | { art: "gleich"; beginn: string; sicher: boolean }
-  | { art: "nichtFormatiert"; beginn: string; sicher: boolean; bekannt: number; neue: number };
+  | { art: "nichtFormatiert"; beginn: string; sicher: boolean; bekannt: number; neue: number }
+) & {
+  /** Aus der gemeinsamen Datenbank: eingelesen auf einem anderen Rechner. */
+  datenbank?: boolean;
+  ablage?: string | null;
+};
 
-/** Kartengedächtnis: schon eingelesen, oder danach nicht formatiert (neue Clips zu schon gesicherten)? Nur Hinweis. */
+/** Kartengedächtnis: schon eingelesen, oder danach nicht formatiert (neue Clips zu schon gesicherten)? Nur Hinweis.
+ * Mit Netz auch Karten, die ein anderer Rechner eingelesen hat (gemeinsame Datenbank). */
 function KartenGedaechtnis({ pfad }: { pfad: string }) {
+  const konto = useKonto();
+  const zugang = konto.verbindung === "verbunden" ? konto.zugang : null;
   const [w, setW] = useState<Wiedererkannt | null>(null);
   useEffect(() => {
     let aus = false;
     setW(null);
-    invoke<Wiedererkannt | null>("karte_wiedererkennen", { quelle: pfad })
+    invoke<Wiedererkannt | null>("karte_wiedererkennen", { quelle: pfad, zugang })
       .then((x) => !aus && setW(x))
       .catch(() => {});
     return () => {
       aus = true;
     };
-  }, [pfad]);
+  }, [pfad, zugang]);
   if (!w) return null;
   const wann = new Date(w.beginn).toLocaleString("de-CH", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  // Eingelesen auf einem anderen Rechner: wo die Kopie liegt.
+  const woanders = w.datenbank ? ` auf einem anderen Rechner${w.ablage ? ` (Kopie auf „${w.ablage}“)` : ""}` : "";
   return (
     <div className="gedaechtnis" role="status">
       {w.art === "gleich" ? (
         <Status ton={w.sicher ? "warn" : "leise"}>
-          Diese Karte wurde am {wann} schon eingelesen{w.sicher ? " und ist sicher" : ", damals ohne Freigabe"}. Noch einmal
-          einlesen ist nur nötig, wenn eine Kopie fehlt.
+          Diese Karte wurde am {wann}
+          {woanders} schon eingelesen{w.sicher ? " und ist sicher" : ", damals ohne Freigabe"}. Noch einmal einlesen ist nur
+          nötig, wenn eine Kopie fehlt.
         </Status>
       ) : (
         <Status ton="warn">
-          Seit dem Einlesen am {wann} weitergedreht: {w.bekannt} Clips sind schon gesichert,{" "}
+          Seit dem Einlesen am {wann}
+          {woanders} weitergedreht: {w.bekannt} Clips sind schon gesichert,{" "}
           <b>
             {w.neue} {w.neue === 1 ? "Clip ist neu" : "Clips sind neu"}
           </b>

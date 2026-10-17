@@ -220,6 +220,36 @@ fn agent() -> ureq::Agent {
     AGENT.get_or_init(|| ureq::AgentBuilder::new().timeout(Duration::from_secs(15)).build()).clone()
 }
 
+/// Holt die übrigen Seiten einer Liste, wenn der Server sie gekappt hat (`gesamt` grösser als geliefert). Neu ab Zeile 0
+/// und stabil geordnet (nach `id`, ausser die Abfrage ordnet selbst), damit keine Zeile doppelt kommt oder fehlt. Eine
+/// Abfrage mit eigenem `limit=` bekommt, was sie verlangt hat.
+fn alle_seiten(
+    erste: Value,
+    gesamt: Option<usize>,
+    pfad: &str,
+    mut seite: impl FnMut(&str) -> Result<(Value, Option<usize>), String>,
+) -> Result<Value, String> {
+    let geliefert = erste.as_array().map_or(0, Vec::len);
+    let Some(gesamt) = gesamt.filter(|g| *g > geliefert && erste.is_array() && !pfad.contains("limit=")) else {
+        return Ok(erste);
+    };
+    let geordnet = if pfad.contains("order=") {
+        pfad.to_owned()
+    } else {
+        format!("{pfad}{}order=id", if pfad.contains('?') { '&' } else { '?' })
+    };
+    let mut alle: Vec<Value> = Vec::with_capacity(gesamt);
+    while alle.len() < gesamt {
+        let (v, _) = seite(&format!("{geordnet}&offset={}", alle.len()))?;
+        let neu = v.as_array().cloned().unwrap_or_default();
+        if neu.is_empty() {
+            break;
+        }
+        alle.extend(neu);
+    }
+    Ok(Value::Array(alle))
+}
+
 fn fehler(e: ureq::Error) -> String {
     match e {
         ureq::Error::Status(code, antwort) => {
@@ -250,8 +280,15 @@ impl Plate {
         Ok(t)
     }
 
-    /// GET auf PostgREST; bei 401 einmal neu anmelden.
+    /// GET auf PostgREST; bei 401 einmal neu anmelden. Listen kommen vollständig: Der Server liefert je Abfrage höchstens
+    /// `db-max-rows` Zeilen (1000), den Rest holt [`alle_seiten`].
     fn lesen(&self, z: &Zugang, pfad_und_abfrage: &str) -> Result<Value, String> {
+        let (erste, gesamt) = self.lesen_seite(z, pfad_und_abfrage)?;
+        alle_seiten(erste, gesamt, pfad_und_abfrage, |p| self.lesen_seite(z, p))
+    }
+
+    /// Eine Seite und die Gesamtzahl laut `Content-Range` (`0-999/5234`; `*` = unbekannt).
+    fn lesen_seite(&self, z: &Zugang, pfad_und_abfrage: &str) -> Result<(Value, Option<usize>), String> {
         let url = format!("{}/rest/v1/{pfad_und_abfrage}", z.adresse.trim_end_matches('/'));
         for neu in [false, true] {
             let token = self.token(z, neu)?;
@@ -259,14 +296,60 @@ impl Plate {
                 .get(&url)
                 .set("apikey", &key_bereinigen(&z.anon_key))
                 .set("Authorization", &format!("Bearer {token}"))
+                .set("Prefer", "count=exact")
                 .call()
             {
-                Ok(a) => return a.into_json().map_err(|e| e.to_string()),
+                Ok(a) => {
+                    let gesamt =
+                        a.header("Content-Range").and_then(|r| r.rsplit('/').next()).and_then(|g| g.parse().ok());
+                    return Ok((a.into_json().map_err(|e| e.to_string())?, gesamt));
+                }
                 Err(ureq::Error::Status(401, _)) if !neu => continue,
                 Err(e) => return Err(fehler(e)),
             }
         }
         Err("Anmeldung beim Plate Assistant abgelehnt".into())
+    }
+
+    /// Alle eingelesenen Karten aller Projekte mit den Namen ihrer Clips (Protokoll auf jedem Rechner; Marlon,
+    /// 17.10.2026: „alle Ingest-Apps synchron“).
+    pub fn karten_alle(&self, z: &Zugang) -> Result<Value, String> {
+        let karten = self.lesen(
+            z,
+            "karte?select=id,name,projekt_id,eingelesen_am,kopien,freigegeben,ablage,speicherort,ordner_datum,geloescht",
+        )?;
+        let projekte = self.lesen(z, "projekt?select=id,kurzname")?;
+        let clips = self.lesen(z, "clip?select=karte_id,name,geloescht")?;
+        Ok(json!({ "karten": karten, "projekte": projekte, "clips": clips }))
+    }
+
+    /// Karten mit einem dieser Namen (Reel oder Name des Kartenlaufwerks) und ihre Clips, für das Kartengedächtnis.
+    pub fn karten_namens(&self, z: &Zugang, namen: &[String]) -> Result<Value, String> {
+        let mut karten: Vec<Value> = Vec::new();
+        for n in namen.iter().filter(|n| !n.is_empty()) {
+            let v = self.lesen(
+                z,
+                &format!(
+                    "karte?name=ilike.{}&select=id,name,projekt_id,eingelesen_am,kopien,freigegeben,ablage,speicherort,ordner_datum,geloescht",
+                    url_teil(n)
+                ),
+            )?;
+            for k in v.as_array().into_iter().flatten() {
+                // `ilike` liest `_` als Platzhalter: nur gleiche Namen behalten.
+                if k["name"].as_str().is_some_and(|x| x.eq_ignore_ascii_case(n))
+                    && !karten.iter().any(|a| a["id"] == k["id"])
+                {
+                    karten.push(k.clone());
+                }
+            }
+        }
+        let ids: Vec<String> = karten.iter().filter_map(|k| k["id"].as_str()).map(url_teil).collect();
+        let clips = if ids.is_empty() {
+            json!([])
+        } else {
+            self.lesen(z, &format!("clip?karte_id=in.({})&select=karte_id,name,geloescht", ids.join(",")))?
+        };
+        Ok(json!({ "karten": karten, "projekte": [], "clips": clips }))
     }
 
     /// Abmelden: Sitzung am Server beenden (wenn erreichbar), Token vergessen, Passwort aus dem Schlüsselbund löschen.
@@ -1466,6 +1549,37 @@ mod tests {
         {
             assert!(!datei.contains(&format!("{}{}", "aenderungen", "_anwenden\"")), "Schreiben nur über plate.rs");
         }
+    }
+
+    #[test]
+    fn listen_kommen_vollstaendig() {
+        // Server mit 2500 Zeilen und höchstens 1000 je Abfrage (wie `db-max-rows`).
+        let zeilen: Vec<Value> = (0..2500).map(|i| json!({ "id": format!("{i:05}") })).collect();
+        let mut abfragen: Vec<String> = Vec::new();
+        let mut server = |pfad: &str| -> Result<(Value, Option<usize>), String> {
+            abfragen.push(pfad.to_owned());
+            let ab: usize = pfad.split("offset=").nth(1).map_or(0, |o| o.parse().unwrap());
+            Ok((Value::Array(zeilen.iter().skip(ab).take(1000).cloned().collect()), Some(2500)))
+        };
+        let (erste, gesamt) = server("clip?select=id").unwrap();
+        let alle = alle_seiten(erste, gesamt, "clip?select=id", &mut server).unwrap();
+        let ids: Vec<&str> = alle.as_array().unwrap().iter().map(|z| z["id"].as_str().unwrap()).collect();
+        assert_eq!(ids.len(), 2500);
+        assert!(ids.windows(2).all(|w| w[0] < w[1]), "geordnet, ohne Doppel");
+        assert_eq!(
+            abfragen[1..],
+            [
+                "clip?select=id&order=id&offset=0",
+                "clip?select=id&order=id&offset=1000",
+                "clip?select=id&order=id&offset=2000"
+            ]
+        );
+        // Alles schon da, oder die Abfrage will selbst wenige: keine weitere Abfrage.
+        let mut nie = |_: &str| -> Result<(Value, Option<usize>), String> { panic!("keine weitere Abfrage") };
+        assert_eq!(alle_seiten(json!([1, 2]), Some(2), "karte?select=id", &mut nie).unwrap(), json!([1, 2]));
+        assert_eq!(alle_seiten(json!([1]), Some(5), "foto?select=id&limit=1", &mut nie).unwrap(), json!([1]));
+        assert_eq!(alle_seiten(json!({"a": 1}), Some(5), "x", &mut nie).unwrap(), json!({"a": 1}));
+        assert_eq!(alle_seiten(json!([1]), None, "x", &mut nie).unwrap(), json!([1]));
     }
 
     #[test]
