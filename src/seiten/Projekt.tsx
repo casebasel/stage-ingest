@@ -67,6 +67,20 @@ type OffenerClip = {
   ohnePruefung?: boolean;
   /** Pfad in der Karte (relativ). */
   pfad?: string;
+  /** Warum der Abgleich ihn nicht zuordnet (z. B. Take-ID im ersten Clip der Karte). */
+  hinweis?: string | null;
+};
+/** Zugeordneter Clip, bei dem die Belege etwas anderes sagen, oder zweiter Clip derselben Kamera an einem Take. */
+type Unstimmigkeit = {
+  schluessel: string;
+  clip: string;
+  karte: string;
+  takeId: string;
+  vorschlagTake?: string | null;
+  vorschlagDreh?: string | null;
+  text: string;
+  dateien: string[];
+  clipdateien: string[];
 };
 type Uebersicht = {
   projekt: ProjektT;
@@ -75,13 +89,26 @@ type Uebersicht = {
   zuKlaeren: OffenerClip[];
   /** Takes ohne Aufnahme: kein Clip auf der eingelesenen Karte ihres Magazins (Klappe ohne REC). */
   ohneAufnahme?: TakeOhneAufnahme[];
+  unstimmigkeiten?: Unstimmigkeit[];
   unlesbar: string[];
   hinweis: string | null;
   einsortieren: Einsortierbar[];
   /** Zusammenfassungen (alle Kopien) von Karten, die noch nicht in der Datenbank stehen. */
   ohneDatenbank?: string[];
 };
-type TakeOhneAufnahme = { takeId: string; nummer: number; plateId: string; drehId: string; clip: string; karte: string };
+type TakeOhneAufnahme = {
+  takeId: string;
+  nummer: number;
+  plateId: string;
+  drehId: string;
+  clip: string;
+  karte: string;
+  /** Sicher keine Aufnahme (zwischen zwei Clips derselben Karte, kein offener Clip passt, kein REC gemeldet). */
+  sicher: boolean;
+  grund: string;
+  /** Zusammenfassungen der Karte (alle Kopien), dort wird die Bestätigung gespeichert. */
+  dateien: string[];
+};
 type Einsortierbar = {
   karte: string;
   von: string;
@@ -126,11 +153,18 @@ type Auswahl = { art: "takes" } | { art: "klaeren" } | { art: "karten" } | { art
 
 function stand(t: TakeStand): { ton: Ton; stand: string } {
   if (t.ungeprueft) return { ton: "warn", stand: "Ungeprüft" };
+  // Zuordnung fraglich (Belege im Clip sagen etwas anderes): in „Zu klären“ entscheiden.
+  if (t.unstimmig) return { ton: "warn", stand: "Zu klären" };
   if (t.freigegeben) return { ton: "ok", stand: "Sicher" };
   if (t.karte) return { ton: "rot", stand: "Nicht freigegeben" };
   if (t.ohneAufnahme) return { ton: "leise", stand: "Ohne Aufnahme" };
+  // Die Karte ist eingelesen, aber der Clip des Takes ist offen oder fraglich: in „Zu klären“ entscheiden.
+  if (t.clipOffen) return { ton: "warn", stand: "Zu klären" };
   return { ton: "fehler", stand: "Karte fehlt" };
 }
+
+/** Karte noch nicht eingelesen (nicht „ohne Aufnahme“ und nicht in „Zu klären“). */
+const karteFehlt = (t: TakeStand) => !t.karte && !t.ohneAufnahme && !t.clipOffen;
 
 // Grundspalten jeder Take-Tabelle (Gruppe „Take“); „Take“ selbst ist immer sichtbar.
 const GRUNDSPALTEN: Spalte[] = [
@@ -167,6 +201,10 @@ const GRUNDSPALTEN: Spalte[] = [
     wert: (t) =>
       t.ohneAufnahme ? (
         <span className="leise" title="Name, den die App vorgeschlagen hat; die Kamera hat dazu nichts aufgenommen">
+          geplant {t.clip}
+        </span>
+      ) : !t.karte && t.clip ? (
+        <span className="leise" title="Name im Plate Assistant; auf keiner eingelesenen Karte zugeordnet">
           geplant {t.clip}
         </span>
       ) : t.clip ? (
@@ -397,7 +435,7 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
     u?.drehs.flatMap((d) => d.plates.flatMap((p) => p.takes.map((t) => ({ dreh: d, plate: p, take: t, ...stand(t) })))) ?? [];
   const zahl: Record<Filter, number> = {
     alle: zeilen.length,
-    fehlt: zeilen.filter((z) => !z.take.karte).length,
+    fehlt: zeilen.filter((z) => karteFehlt(z.take)).length,
     offen: zeilen.filter((z) => z.take.karte && !z.take.freigegeben).length,
     sicher: zeilen.filter((z) => z.take.freigegeben).length,
   };
@@ -415,13 +453,6 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
     }));
   const [spieler, setSpieler] = useState<number | null>(null);
   const [einzeln, setEinzeln] = useState<AbspielEintrag | null>(null);
-  // Takes ohne Aufnahme, die Marlon behalten will (auf diesem Rechner gemerkt, je Projekt).
-  const [behalten, setBehaltenRoh] = useState<string[]>([]);
-  useEffect(() => setBehaltenRoh(gemerkt<string[]>(`behalten.${projekt?.id ?? ""}`, [])), [projekt?.id]);
-  const setBehalten = (ids: string[]) => {
-    setBehaltenRoh(ids);
-    merken(`behalten.${projekt?.id ?? ""}`, ids);
-  };
   const [pfadMenue, setPfadMenue] = useState<PfadMenueStand | null>(null);
   const [exportClip, setExportClip] = useState<{ datei: string; titel: string } | null>(null);
   pfadMenueOeffnen = (ev, t, titel) => {
@@ -565,8 +596,8 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
                 an={auswahl.art === "klaeren"}
                 onClick={() => setAuswahl({ art: "klaeren" })}
                 text="Zu klären"
-                zahl={u.zuKlaeren.length + (u.ohneAufnahme ?? []).filter((t) => !behalten.includes(t.takeId)).length}
-                warn={u.zuKlaeren.length + (u.ohneAufnahme ?? []).filter((t) => !behalten.includes(t.takeId)).length > 0}
+                zahl={u.zuKlaeren.length + (u.ohneAufnahme ?? []).length + (u.unstimmigkeiten ?? []).length}
+                warn={u.zuKlaeren.length + (u.ohneAufnahme ?? []).length + (u.unstimmigkeiten ?? []).length > 0}
               />
               <BaumKnopf an={auswahl.art === "karten"} onClick={() => setAuswahl({ art: "karten" })} text="Karten" zahl={u.karten.length} />
             </ul>
@@ -584,8 +615,6 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
                 neuerDrehort={() => nurEins("drehort")}
                 gespeichert={() => projekt && laden(projekt)}
                 abspielen={(datei, clip) => setEinzeln({ id: datei, datei, titel: "Zu klären", clip })}
-                behalten={behalten}
-                setBehalten={setBehalten}
               />
             )}
             {auswahl.art === "karten" && (
@@ -650,7 +679,7 @@ function AlleTakes({
   const sichtbar = zeilen.filter(
     (z) =>
       filter === "alle" ||
-      (filter === "fehlt" && !z.take.karte && !z.take.ohneAufnahme) ||
+      (filter === "fehlt" && karteFehlt(z.take)) ||
       (filter === "offen" && z.take.karte && !z.take.freigegeben) ||
       (filter === "sicher" && z.take.freigegeben),
   );
@@ -983,7 +1012,8 @@ function DrehDetail({ d, plateWaehlen }: { d: DrehStand; plateWaehlen: (id: stri
           <tbody>
             {d.plates.map((p) => {
               const sicher = p.takes.filter((t) => t.freigegeben).length;
-              const fehlt = p.takes.filter((t) => !t.karte && !t.ohneAufnahme).length;
+              const fehlt = p.takes.filter(karteFehlt).length;
+              const offen = p.takes.filter((t) => t.clipOffen || t.unstimmig).length;
               return (
                 <tr
                   key={p.id}
@@ -1001,6 +1031,8 @@ function DrehDetail({ d, plateWaehlen }: { d: DrehStand; plateWaehlen: (id: stri
                       <span className="leise">noch nicht gedreht</span>
                     ) : fehlt ? (
                       <Status ton="fehler">{fehlt === 1 ? "1 Karte fehlt" : `${fehlt} Karten fehlen`}</Status>
+                    ) : offen ? (
+                      <Status ton="warn">{offen === 1 ? "1 Take zu klären" : `${offen} Takes zu klären`}</Status>
                     ) : sicher === p.takes.length ? (
                       <Status ton="ok">Sicher</Status>
                     ) : (
@@ -1291,21 +1323,19 @@ function ZuKlaeren({
   neuerDrehort,
   gespeichert,
   abspielen,
-  behalten,
-  setBehalten,
 }: {
   u: Uebersicht;
   zugang: Zugang | null;
   neuerDrehort: () => void;
   gespeichert: () => void;
   abspielen: (datei: string, clip: string) => void;
-  behalten: string[];
-  setBehalten: (ids: string[]) => void;
 }) {
   const [wahl, setWahl] = useState<Record<string, { dreh: string; take: string }>>({});
   const [stand, setStand] = useState<Record<string, { ton: Ton; text: string }>>({});
-  const ohneAufnahme = (u.ohneAufnahme ?? []).filter((t) => !behalten.includes(t.takeId));
-  if (u.zuKlaeren.length === 0 && ohneAufnahme.length === 0)
+  // Bestätigte stehen nicht mehr in der Liste (die App liest sie aus den Zusammenfassungen der Karten).
+  const ohneAufnahme = u.ohneAufnahme ?? [];
+  const unstimmig = u.unstimmigkeiten ?? [];
+  if (u.zuKlaeren.length === 0 && ohneAufnahme.length === 0 && unstimmig.length === 0)
     return <p className="leer-zeile">Nichts zu klären: Jeder eingelesene Clip ist einem Take zugeordnet.</p>;
   const alleTakes = u.drehs.flatMap((d) => d.plates.flatMap((p) => p.takes.map((t) => ({ t, p, d }))));
 
@@ -1388,7 +1418,7 @@ function ZuKlaeren({
   async function alleVorschlaege() {
     const bestehend = mitVorschlag.length - neue;
     const teile = [
-      bestehend > 0 && `${bestehend} ${bestehend === 1 ? "Clip seinem Take" : "Clips ihren Takes"} zuordnen (Name bis aufs Datum gleich)`,
+      bestehend > 0 && `${bestehend} ${bestehend === 1 ? "Clip seinem Take" : "Clips ihren Takes"} zuordnen (QR, Name von der Kamera, Take-ID, Timecode oder Zeit zwischen zwei Klappen)`,
       neue > 0 && `${neue} neue Takes anlegen, je an der vorgeschlagenen Einstellung (Nummer = nächste freie, Werte vom Clip)`,
     ].filter(Boolean);
     const ja = await ask(
@@ -1400,14 +1430,47 @@ function ZuKlaeren({
     gespeichert();
   }
 
-  // Take ohne Aufnahme weich löschen (im Plate Assistant wiederherstellbar).
+  // Bestätigen statt Löschen (Marlon, 17.10.2026: „Ich möchte immer alles behalten, es werden mir nie Takes gelöscht“):
+  // Der Take bleibt im Plate Assistant, die Bestätigung steht in den Zusammenfassungen der Karte (Mac und Windows).
+  async function bestaetigen(t: TakeOhneAufnahme, titel: string, mitNeuladen = true): Promise<boolean> {
+    if (!t.sicher) {
+      const ja = await ask(`${titel} ohne Aufnahme bestätigen?\n\nNicht sicher: ${t.grund}.\n\nDer Take bleibt im Plate Assistant und verschwindet aus „Zu klären“.`, {
+        title: "Ohne Aufnahme bestätigen",
+        kind: "info",
+        okLabel: "Bestätigen",
+        cancelLabel: "Abbrechen",
+      });
+      if (!ja) return false;
+    }
+    setStand((s) => ({ ...s, [t.takeId]: { ton: "laeuft", text: "Speichert …" } }));
+    try {
+      await invoke("ohne_aufnahme_bestaetigen", { dateien: t.dateien, takeId: t.takeId });
+      setStand((s) => ({ ...s, [t.takeId]: { ton: "ok", text: "Bestätigt" } }));
+      if (mitNeuladen) gespeichert();
+      return true;
+    } catch (e) {
+      setStand((s) => ({ ...s, [t.takeId]: { ton: "fehler", text: String(e) } }));
+      return false;
+    }
+  }
+
+  const sichere = ohneAufnahme.filter((t) => t.sicher);
+  async function alleSicherenBestaetigen() {
+    const ja = await ask(
+      `${sichere.length} Takes ohne Aufnahme bestätigen?\n\nBei jedem liegt die Klappe zwischen zwei Clips derselben Karte, kein offener Clip passt dazu und die Kamera hat kein REC gemeldet. Die Takes bleiben im Plate Assistant.`,
+      { title: "Ohne Aufnahme bestätigen", kind: "info", okLabel: "Alle bestätigen", cancelLabel: "Abbrechen" },
+    );
+    if (!ja) return;
+    for (const t of sichere) await bestaetigen(t, "", false);
+    gespeichert();
+  }
+
+  // Löschen nur ausnahmsweise, mit deutlicher Warnung (weich: im Papierkorb des Plate Assistant wiederherstellbar).
   async function takeLoeschen(t: TakeOhneAufnahme, titel: string) {
-    const ja = await ask(`${titel} löschen?\n\nAuf der Karte ${t.karte} liegt kein Clip dazu. Der Take wird im Plate Assistant gelöscht und lässt sich dort wiederherstellen.`, {
-      title: "Take ohne Aufnahme",
-      kind: "warning",
-      okLabel: "Löschen",
-      cancelLabel: "Abbrechen",
-    });
+    const ja = await ask(
+      `${titel} wirklich löschen?\n\nDer Take verschwindet im Plate Assistant, in der Stage und hier, auf allen Geräten. Wiederherstellen geht nur im Papierkorb des Plate Assistant.\n\nMeist genügt „Ohne Aufnahme bestätigen“: Dann bleibt der Take erhalten.`,
+      { title: "Take löschen", kind: "warning", okLabel: "Take löschen", cancelLabel: "Abbrechen" },
+    );
     if (!ja) return;
     setStand((s) => ({ ...s, [t.takeId]: { ton: "laeuft", text: "Löscht …" } }));
     try {
@@ -1418,13 +1481,120 @@ function ZuKlaeren({
     }
   }
 
+  // Unstimmigkeit: umhängen auf den Take der Belege, lösen (zurück nach „Zu klären“) oder „stimmt so“.
+  async function unstimmigAendern(x: Unstimmigkeit, art: "umhaengen" | "loesen" | "stimmt") {
+    if (art === "loesen") {
+      const ja = await ask(`${x.clip} von seinem Take lösen?\n\nDer Clip steht danach oben unter den Clips ohne Take, mit Vorschlag, wenn es einen sicheren gibt.`, {
+        title: "Zuordnung lösen",
+        kind: "info",
+        okLabel: "Lösen",
+        cancelLabel: "Abbrechen",
+      });
+      if (!ja) return;
+    }
+    setStand((s) => ({ ...s, [x.schluessel]: { ton: "laeuft", text: "Speichert …" } }));
+    try {
+      if (art === "stimmt") {
+        await invoke("stimmt_so", { dateien: x.dateien, schluessel: x.schluessel });
+      } else {
+        const ziel = art === "umhaengen" ? alleTakes.find((a) => a.t.id === x.vorschlagTake)?.t : undefined;
+        await invoke("clip_zuordnen", {
+          zugang,
+          dateien: x.dateien,
+          clip: x.clip,
+          takeId: art === "umhaengen" ? x.vorschlagTake : null,
+          drehId: art === "umhaengen" ? x.vorschlagDreh : null,
+          clipdatei: x.clipdateien[0] ?? null,
+          takeHatClip: ziel ? Boolean(ziel.werte?.["take.clip.name"]) : null,
+          aufnehmen: null,
+        });
+      }
+      setStand((s) => ({ ...s, [x.schluessel]: { ton: "ok", text: "Gespeichert" } }));
+      gespeichert();
+    } catch (e) {
+      setStand((s) => ({ ...s, [x.schluessel]: { ton: "fehler", text: String(e) } }));
+    }
+  }
+
+  const unstimmigTeil = unstimmig.length > 0 && (
+    <>
+      <div className="detail-kopf">
+        <h2>Unstimmigkeiten</h2>
+        <span className="leise">
+          {unstimmig.length} {unstimmig.length === 1 ? "zugeordneter Clip passt" : "zugeordnete Clips passen"} nicht zu den Belegen im Clip
+        </span>
+      </div>
+      <table className="tabelle zu-klaeren">
+        <thead>
+          <tr>
+            <th>Bild</th>
+            <th>Clip</th>
+            <th>Befund</th>
+            <th className="spalte-aktion">
+              <span className="unsichtbar">Entscheiden</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {unstimmig.map((x) => {
+            const st = stand[x.schluessel];
+            const ziel = alleTakes.find((a) => a.t.id === x.vorschlagTake);
+            const beschaeftigt = st?.ton === "laeuft" || st?.ton === "ok";
+            return (
+              <tr
+                key={x.schluessel}
+                title={x.clipdateien.length ? "Doppelklick spielt den Clip" : undefined}
+                onDoubleClick={() => x.clipdateien[0] && abspielen(x.clipdateien[0], x.clip)}
+              >
+                <td className="zelle-bild">
+                  {x.clipdateien[0] ? <MittelbildKlein datei={x.clipdateien[0]} /> : <span className="leise">–</span>}
+                </td>
+                <td className="zahl">
+                  <Status ton="warn">{x.clipdateien[0] ? <ClipMitBild clip={x.clip} datei={x.clipdateien[0]} /> : x.clip}</Status>
+                  <span className="unterzeile zahl leise">{x.karte}</span>
+                  {st && (
+                    <span className="unterzeile">
+                      <Status ton={st.ton}>{st.text}</Status>
+                    </span>
+                  )}
+                </td>
+                <td>{x.text}</td>
+                <td className="spalte-aktion">
+                  <span className="aktion-reihe">
+                    {ziel && (
+                      <button className="knopf knopf-klein" disabled={beschaeftigt} onClick={() => unstimmigAendern(x, "umhaengen")}>
+                        Auf {plateTitel(ziel.p)} · Take {ziel.t.nummer} umhängen
+                      </button>
+                    )}
+                    <button className="knopf knopf-klein" disabled={beschaeftigt} onClick={() => unstimmigAendern(x, "loesen")}>
+                      Lösen
+                    </button>
+                    <button className="knopf knopf-klein" disabled={beschaeftigt} onClick={() => unstimmigAendern(x, "stimmt")}>
+                      Stimmt so
+                    </button>
+                  </span>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </>
+  );
+
   const ohneAufnahmeTeil = ohneAufnahme.length > 0 && (
     <>
       <div className="detail-kopf">
         <h2>Takes ohne Aufnahme</h2>
         <span className="leise">
-          {ohneAufnahme.length} {ohneAufnahme.length === 1 ? "Take" : "Takes"} ohne Clip auf der eingelesenen Karte · Klappe ohne REC?
+          {ohneAufnahme.length} {ohneAufnahme.length === 1 ? "Take" : "Takes"} ohne Clip auf den eingelesenen Karten
+          {sichere.length > 0 && sichere.length < ohneAufnahme.length && ` · ${sichere.length} sicher`}
         </span>
+        {sichere.length > 1 && (
+          <button className="knopf knopf-klein" style={{ marginLeft: "auto" }} onClick={alleSicherenBestaetigen}>
+            Alle sicheren bestätigen ({sichere.length})
+          </button>
+        )}
       </div>
       <table className="tabelle zu-klaeren">
         <thead>
@@ -1432,6 +1602,7 @@ function ZuKlaeren({
             <th>Take</th>
             <th>Geplanter Clip</th>
             <th>Karte</th>
+            <th>Befund</th>
             <th className="spalte-aktion">
               <span className="unsichtbar">Entscheiden</span>
             </th>
@@ -1455,13 +1626,27 @@ function ZuKlaeren({
                 </td>
                 <td className="zahl leise">{t.clip}</td>
                 <td className="zahl">{t.karte}</td>
+                <td>
+                  <Status ton={t.sicher ? "leise" : "warn"}>{t.sicher ? "Sicher ohne Aufnahme" : "Unklar"}</Status>
+                  <span className="unterzeile leise">{t.grund}</span>
+                </td>
                 <td className="spalte-aktion">
                   <span className="aktion-reihe">
-                    <button className="knopf knopf-klein" disabled={st?.ton === "laeuft"} onClick={() => setBehalten([...behalten, t.takeId])}>
-                      Behalten
+                    <button
+                      className="knopf knopf-klein"
+                      disabled={!t.dateien.length || st?.ton === "laeuft" || st?.ton === "ok"}
+                      onClick={() => bestaetigen(t, titel)}
+                    >
+                      Ohne Aufnahme bestätigen
                     </button>
-                    <button className="knopf knopf-klein" disabled={!zugang || st?.ton === "laeuft"} onClick={() => takeLoeschen(t, titel)}>
-                      Löschen
+                    <button
+                      className="knopf-symbol symbol-loeschen"
+                      aria-label={`${titel} löschen`}
+                      title="Take löschen (nur ausnahmsweise)"
+                      disabled={!zugang || st?.ton === "laeuft"}
+                      onClick={() => takeLoeschen(t, titel)}
+                    >
+                      <Trash2 size={15} />
                     </button>
                   </span>
                 </td>
@@ -1472,10 +1657,17 @@ function ZuKlaeren({
       </table>
     </>
   );
-  if (u.zuKlaeren.length === 0) return ohneAufnahmeTeil;
+  if (u.zuKlaeren.length === 0)
+    return (
+      <>
+        {unstimmigTeil}
+        {ohneAufnahmeTeil}
+      </>
+    );
 
   return (
     <>
+      {unstimmigTeil}
       <div className="detail-kopf">
         <h2>Zu klären</h2>
         <span className="leise">
@@ -1536,6 +1728,7 @@ function ZuKlaeren({
                       <Status ton="leise">Vorschlag: {c.vorschlagGrund}</Status>
                     </span>
                   )}
+                  {c.hinweis && !c.vorschlagGrund && !st && <span className="unterzeile hinweis-text">{c.hinweis}</span>}
                   {st && (
                     <span className="unterzeile">
                       <Status ton={st.ton}>{st.text}</Status>
@@ -1731,7 +1924,8 @@ function Gliederung({
               {offen && g.eintraege.length > 0 && (
                 <ul className="baum-kinder">
                   {g.eintraege.map(({ p, d }) => {
-                    const fehlt = p.takes.some((t) => !t.karte && !t.ohneAufnahme);
+                    const fehlt = p.takes.some(karteFehlt);
+                    const offen = !fehlt && p.takes.some((t) => t.clipOffen || t.unstimmig);
                     return (
                       <li key={p.id}>
                         <button
@@ -1746,17 +1940,14 @@ function Gliederung({
                           <span className="baum-name-zeile">
                             <span className="baum-name">{plateTitel(p)}</span>
                           </span>
+                          {/* Was fehlt oder zu klären ist zuerst, damit es nie abgeschnitten wird. */}
                           <span className="baum-info zahl">
+                            {fehlt && <span className="baum-warn">Karte fehlt · </span>}
+                            {offen && <span className="baum-warn">zu klären · </span>}
                             {art !== "drehort" && `${d.name} ${datumKurz(d.datum)} · `}
                             {p.takes.length} {p.takes.length === 1 ? "Take" : "Takes"}
                             {p.fotos.length > 0 && ` · ${p.fotos.length} Fotos`}
                             {p.hdri.length > 0 && " · HDRI"}
-                            {fehlt && (
-                              <>
-                                {" · "}
-                                <span className="baum-warn">Karte fehlt</span>
-                              </>
-                            )}
                           </span>
                         </button>
                       </li>

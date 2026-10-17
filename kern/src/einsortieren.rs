@@ -199,6 +199,7 @@ mod tests {
             einsortiert: None,
             geloescht: vec![],
             ohne_aufnahme: vec![],
+            stimmt_so: vec![],
         };
         uebersicht::schreiben(&dreh.join(BERICHTE), &z).unwrap()
     }

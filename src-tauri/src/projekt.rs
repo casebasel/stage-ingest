@@ -24,6 +24,9 @@ pub struct Uebersicht {
     /// Takes ohne Aufnahme: kein Clip auf der Karte, obwohl die Karte ihres Magazins eingelesen ist (Klappe ohne REC).
     /// Marlon entscheidet in „Zu klären“: behalten oder weich löschen (16.10.2026).
     pub ohne_aufnahme: Vec<TakeOhneAufnahme>,
+    /// Unstimmigkeiten bei schon zugeordneten Clips (Marlon, 17.10.2026: „Unstimmigkeiten müssen in Zu klären
+    /// erscheinen“): Belege im Clip nennen einen anderen Take, oder ein Take hat zwei Clips derselben Kamera.
+    pub unstimmigkeiten: Vec<Unstimmigkeit>,
     /// Zusammenfassungen, die nicht lesbar waren.
     pub unlesbar: Vec<PathBuf>,
     /// Hinweis, wenn der Plate Assistant nicht erreichbar war (dann nur die Karten).
@@ -82,6 +85,27 @@ pub struct OffenerClip {
     pub ohne_pruefung: bool,
     /// Pfad in der Karte (relativ), zum Aufnehmen in die Zusammenfassung.
     pub pfad: String,
+    /// Warum der Kern ihn nicht zuordnet (z. B. Take-ID im ersten Clip der Karte, QR und Name widersprechen sich).
+    pub hinweis: Option<String>,
+}
+
+/// Ein zugeordneter Clip, bei dem etwas nicht zusammenpasst.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Unstimmigkeit {
+    /// Schlüssel für „Stimmt so“ (ändert sich mit der Lage).
+    pub schluessel: String,
+    pub clip: String,
+    pub karte: String,
+    /// Take, dem der Clip zugeordnet ist.
+    pub take_id: String,
+    /// Take, den die Belege nennen: Umhängen.
+    pub vorschlag_take: Option<String>,
+    pub vorschlag_dreh: Option<String>,
+    pub text: String,
+    /// Zusammenfassungen der Karte (alle Kopien): Umhängen, Lösen, „Stimmt so“.
+    pub dateien: Vec<PathBuf>,
+    pub clipdateien: Vec<PathBuf>,
 }
 
 /// Ein Take ohne Clip auf einer eingelesenen Karte, deren Zeit seine Klappe umfasst.
@@ -102,6 +126,207 @@ pub struct TakeOhneAufnahme {
     pub dateien: Vec<PathBuf>,
 }
 
+/// Platzhalter des Plate Assistant (Build 32): beim Wiederverbinden je Clip, den die Kamera ohne App aufnahm, ein Take.
+/// Als Klappe tragen sie den Zeitpunkt, an dem die App die Lücke bemerkte, kein Abschnitt für ihre Aufnahme. Erkennbar
+/// als Serie (mehrere Takes innerhalb von 2 s; echte Daten 17.10.2026: Predigerhof P5 T5–T7 um 13:22:49,198/,242/,266)
+/// oder am letzten: Clip und Timecode am Take vom Plate Assistant, aber kein bestätigtes REC. Schreibt der Ingest beim
+/// Zuordnen von Hand `take.clip`, bleibt `take.start_tc` leer (Treppenhaus Take 7).
+fn platzhalter_finden(drehs_json: &Value) -> HashSet<String> {
+    let takes: Vec<&Value> = drehs_json
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|d| d["geloescht"] != true)
+        .flat_map(|d| d["plate"].as_array().into_iter().flatten())
+        .filter(|p| p["geloescht"] != true)
+        .flat_map(|p| p["take"].as_array().into_iter().flatten())
+        .filter(|t| t["geloescht"] != true)
+        .collect();
+    let mut aus: HashSet<String> = takes
+        .iter()
+        .filter(|t| {
+            t["kamera"]["quelle"] != "cap"
+                && t["kamera"]["quelle"] != "ale"
+                && !text(&t["start_tc"]).is_empty()
+                && !text(&t["clip"]["name"]).is_empty()
+        })
+        .map(|t| text(&t["id"]))
+        .collect();
+    let mut zeiten: Vec<(chrono::DateTime<chrono::Utc>, String)> = takes
+        .iter()
+        .filter(|t| t["kamera"]["quelle"] != "ale")
+        .filter_map(|t| {
+            let z = chrono::DateTime::parse_from_rfc3339(t["start_zeit"].as_str()?).ok()?.to_utc();
+            Some((z, text(&t["id"])))
+        })
+        .collect();
+    zeiten.sort();
+    for w in zeiten.windows(2) {
+        if (w[1].0 - w[0].0).num_milliseconds() < 2000 && w[0].1 != w[1].1 {
+            aus.insert(w[0].1.clone());
+            aus.insert(w[1].1.clone());
+        }
+    }
+    aus
+}
+
+/// Was die Belege eines zugeordneten Clips anders sagen (Gegenprobe ohne die Zuordnungen selbst).
+enum Widerspruch {
+    /// Ein sicherer Beleg nennt einen anderen Take: (Take, Beleg).
+    AndererTake(String, &'static str),
+    /// Der Clip beginnt nicht im Abschnitt seines Takes (Klappe bis zur nächsten).
+    Unmoeglich,
+    /// Ein sicherer Beleg gibt dem Take einen anderen Clip derselben Kamera: (Clip, Beleg).
+    AndererClip(String, &'static str),
+}
+
+/// Titel einer Plate wie in der Oberfläche (`plateTitel` in `Projekt.tsx`).
+fn plate_titel(p: &PlateStand) -> String {
+    let name = if p.name.is_empty() { String::new() } else { format!(" · {}", p.name) };
+    match p.art.as_str() {
+        "studio" => format!("{}{name}", if p.slate.is_empty() { "Studio" } else { &p.slate }),
+        art => {
+            let titel = match art {
+                "location" => "On Loc",
+                _ => "Plate",
+            };
+            if p.nummer > 0 {
+                format!("{titel} {}{name}", p.nummer)
+            } else {
+                format!("{titel}{name}")
+            }
+        }
+    }
+}
+
+/// Unstimmigkeiten bei zugeordneten Clips: Widerspruch zu den Belegen (aus `kern_vorschlaege`) und zwei Clips derselben
+/// Kamera an einem Take (eine Kamera nimmt je Take einen Clip auf). Was Marlon mit „Stimmt so“ bestätigt hat, fällt weg.
+fn unstimmigkeiten_finden(
+    karten: &[GefundeneKarte],
+    drehs: &[DrehStand],
+    widerspruch: &HashMap<String, Widerspruch>,
+) -> Vec<Unstimmigkeit> {
+    let ok: HashSet<&str> = karten.iter().flat_map(|k| &k.inhalt.stimmt_so).map(|s| s.schluessel.as_str()).collect();
+    let take_von: HashMap<&str, (&DrehStand, &PlateStand, &TakeStand)> = drehs
+        .iter()
+        .flat_map(|d| d.plates.iter().flat_map(move |p| p.takes.iter().map(move |t| (t.id.as_str(), (d, p, t)))))
+        .collect();
+    let name = |id: &str| match take_von.get(id) {
+        Some((_, p, t)) => format!("{} · Take {}", plate_titel(p), t.nummer),
+        None => "einem gelöschten Take".into(),
+    };
+    // Je Clip (gross) seine Zuordnung und alle Kopien.
+    struct Zugeordnet {
+        take: String,
+        zuordnung: String,
+        karte: String,
+        dateien: Vec<PathBuf>,
+        clipdateien: Vec<PathBuf>,
+    }
+    let mut clips: BTreeMap<String, Zugeordnet> = BTreeMap::new();
+    for k in karten {
+        for c in k.inhalt.clips.iter().filter(|c| c.take_id.is_some()) {
+            let e = clips.entry(c.name.to_uppercase()).or_insert_with(|| Zugeordnet {
+                take: c.take_id.clone().unwrap_or_default(),
+                zuordnung: c.zuordnung.clone(),
+                karte: k.inhalt.karte.clone(),
+                dateien: vec![],
+                clipdateien: vec![],
+            });
+            e.dateien.push(k.datei.clone());
+            let datei = k
+                .datei
+                .parent()
+                .and_then(Path::parent)
+                .map(|d| {
+                    d.join(ingest_kern::struktur::KAMERA)
+                        .join(ingest_kern::struktur::ordnername(&k.inhalt.karte))
+                        .join(&c.pfad)
+                })
+                .filter(|p| !c.pfad.is_empty() && p.is_file());
+            e.clipdateien.extend(datei);
+        }
+    }
+    let wie = |zuordnung: &str| match zuordnung {
+        "hand" => "von Hand".to_owned(),
+        "" => "über den Namen".to_owned(),
+        z => format!("beim Einlesen über {z}"),
+    };
+    let mut aus = Vec::new();
+    for (clip, Zugeordnet { take, zuordnung, karte, dateien, clipdateien }) in &clips {
+        let Some(w) = widerspruch.get(clip) else { continue };
+        let vorne = format!("{} zugeordnet ({})", name(take), wie(zuordnung));
+        let (schluessel, text, vorschlag) = match w {
+            Widerspruch::AndererTake(y, beleg) => (
+                format!("widerspruch:{clip}:{take}:{y}"),
+                format!("{vorne}, aber {beleg} nennt {}", name(y)),
+                take_von.contains_key(y.as_str()).then(|| y.clone()),
+            ),
+            Widerspruch::Unmoeglich => (
+                format!("unmoeglich:{clip}:{take}"),
+                format!("{vorne}, aber der Clip beginnt nicht zwischen dessen Klappe und der nächsten"),
+                None,
+            ),
+            Widerspruch::AndererClip(c, beleg) => (
+                format!("andererclip:{clip}:{take}:{c}"),
+                format!("{vorne}, aber {beleg} gibt dem Take {c}: je Take nimmt eine Kamera einen Clip auf"),
+                None,
+            ),
+        };
+        if ok.contains(schluessel.as_str()) {
+            continue;
+        }
+        aus.push(Unstimmigkeit {
+            schluessel,
+            clip: clip.clone(),
+            karte: karte.clone(),
+            take_id: take.clone(),
+            vorschlag_dreh: vorschlag.as_ref().and_then(|y| take_von.get(y.as_str())).map(|(d, _, _)| d.id.clone()),
+            vorschlag_take: vorschlag,
+            text,
+            dateien: dateien.clone(),
+            clipdateien: clipdateien.clone(),
+        });
+    }
+    // Zwei Clips derselben Kamera an einem Take: der zweite (höherer Zähler) wird gemeldet.
+    let mut je_take: BTreeMap<(String, String), Vec<&String>> = BTreeMap::new();
+    for (clip, Zugeordnet { take, .. }) in &clips {
+        if let Some((m, _)) = ingest_kern::soll::arri_reel(clip) {
+            je_take.entry((take.clone(), m[..1].to_owned())).or_default().push(clip);
+        }
+    }
+    for ((take, kamera), mut liste) in je_take {
+        if liste.len() < 2 {
+            continue;
+        }
+        liste.sort_by_key(|c| (ingest_kern::soll::ohne_datum(c).map(|k| (k.0, k.1)), (*c).clone()));
+        let erster = liste[0];
+        for clip in &liste[1..] {
+            let schluessel = format!("doppelt:{take}:{kamera}:{erster}:{clip}");
+            let Zugeordnet { zuordnung, karte, dateien, clipdateien, .. } = &clips[*clip];
+            if ok.contains(schluessel.as_str()) || aus.iter().any(|u: &Unstimmigkeit| &u.clip == *clip) {
+                continue;
+            }
+            aus.push(Unstimmigkeit {
+                schluessel,
+                clip: (*clip).clone(),
+                karte: karte.clone(),
+                take_id: take.clone(),
+                vorschlag_take: None,
+                vorschlag_dreh: None,
+                text: format!(
+                    "{} zugeordnet ({}), der Take hat aber schon {erster} von Kamera {kamera}: je Take nimmt eine Kamera einen Clip auf",
+                    name(&take),
+                    wie(zuordnung)
+                ),
+                dateien: dateien.clone(),
+                clipdateien: clipdateien.clone(),
+            });
+        }
+    }
+    aus
+}
+
 /// Vorschläge für „Zu klären“ und Takes ohne Clip, nach denselben sicheren Regeln wie beim Einlesen (Kern
 /// `soll::abgleichen`; Marlon, 17.10.2026: „da darf kein Fehler passieren“, Simulation in `simulation.rs`). Je Karte:
 /// die Clips aus der Zusammenfassung (mit Info 1, QR, Timecode), schon zugeordnete als sichere Bezugspunkte, und alle
@@ -115,6 +340,10 @@ struct KernVorschlaege {
     ohne_clip: Vec<TakeOhneAufnahme>,
     /// Takes, die Marlon als „ohne Aufnahme“ bestätigt hat.
     bestaetigt: HashSet<String>,
+    /// Zugeordneter Clip (gross), zu dem die Belege allein etwas anderes sagen.
+    widerspruch: HashMap<String, Widerspruch>,
+    /// Offener Clip (gross) → warum der Kern ihn nicht zuordnet.
+    hinweis: HashMap<String, String>,
 }
 
 fn kern_vorschlaege(
@@ -154,6 +383,7 @@ fn kern_vorschlaege(
         dateien: Vec<PathBuf>,
     }
     let mut lage: BTreeMap<String, KartenLage> = BTreeMap::new();
+    let platzhalter_ids = platzhalter_finden(drehs_json);
     let ohne_plates: HashSet<&String> = drehs.iter().filter(|d| d.plates.is_empty()).map(|d| &d.id).collect();
     // Clipnamen gelöschter Takes (auch unter gelöschter Plate oder gelöschtem Drehort), ohne Datum.
     let mut geloescht_namen: HashSet<(String, u32, String)> = HashSet::new();
@@ -228,6 +458,66 @@ fn kern_vorschlaege(
             ende: chrono::Utc::now(),
         };
         let a = soll::abgleichen(&kopie, &soll_karte, &zeilen);
+        // Gegenprobe der Zuordnungen in der Zusammenfassung: nur mit den Belegen der Clips (QR, Info 1, Name von der
+        // Kamera, Zeit), ohne die Zuordnungen selbst. Nennt ein sicherer Beleg einen anderen Take, ist es eine
+        // Unstimmigkeit (Treppenhaus, 17.10.2026: C010 von Hand bei Take 6, Info 1 und REC sagen Take 8).
+        let zeilen_rein: Vec<ingest_kern::ale::ClipZeile> = zeilen
+            .iter()
+            .zip(&k.inhalt.clips)
+            .map(|(z, c)| ingest_kern::ale::ClipZeile { kennung: c.info1.clone(), qr: c.qr.clone(), ..z.clone() })
+            .collect();
+        let rein = soll::abgleichen(&kopie, &soll_karte, &zeilen_rein);
+        let mut sicher_je_take: HashMap<(String, String), (String, &'static str)> = HashMap::new();
+        for (liste, grund) in [
+            (&rein.ueber_qr, "der QR der Klappe im Bild"),
+            (&rein.gefunden, "der Clipname von der Kamera"),
+            (&rein.ueber_kennung, "die Take-ID im Clip (Aufnahme bestätigt)"),
+            (&rein.ueber_timecode, "der Timecode des Takes"),
+            (&rein.ueber_zeitfenster, "die Zeit zwischen den Klappen"),
+        ] {
+            for (s, pfad) in liste {
+                let n = soll::ohne_endung(pfad).to_uppercase();
+                sicher_je_take.insert((s.take_id.to_uppercase(), n[..1].to_owned()), (n.clone(), grund));
+                let Some(c) = k.inhalt.clips.iter().find(|c| c.name.eq_ignore_ascii_case(&n)) else { continue };
+                let Some(x) = c.take_id.clone().or_else(|| zugeordnet.get(&n).cloned()) else { continue };
+                if !x.eq_ignore_ascii_case(&s.take_id) {
+                    kv.widerspruch.insert(n, Widerspruch::AndererTake(s.take_id.clone(), grund));
+                }
+            }
+        }
+        // Ein sicherer Beleg gibt dem Take einen anderen Clip derselben Kamera (Treppenhaus C012 von Hand bei Take 8,
+        // dessen REC mit C010 begann).
+        for c in &k.inhalt.clips {
+            let n = c.name.to_uppercase();
+            let Some(x) = c.take_id.clone().or_else(|| zugeordnet.get(&n).cloned()) else { continue };
+            if let Some((anderer, beleg)) = sicher_je_take.get(&(x.to_uppercase(), n[..1].to_owned())) {
+                if *anderer != n && !kv.widerspruch.contains_key(&n) {
+                    kv.widerspruch.insert(n, Widerspruch::AndererClip(anderer.clone(), beleg));
+                }
+            }
+        }
+        // Zeitlich unmöglich: Ohne die Zuordnung kommt der Clip nur für andere Takes in Frage (er beginnt nicht zwischen
+        // der Klappe seines Takes und der nächsten; Treppenhaus C011 von Hand bei Take 7, begann nach der Klappe von
+        // Take 8). Nur, wenn der Kern den Clip überhaupt einordnen kann.
+        let mut moeglich_rein: HashMap<String, Vec<&String>> = HashMap::new();
+        for (t, pfad) in &rein.offen_moeglich {
+            moeglich_rein.entry(soll::ohne_endung(pfad).to_uppercase()).or_default().push(t);
+        }
+        // Nur Takes mit eigener Klappe (nicht aus einem Clip angelegt, kein Platzhalter).
+        let im_soll: HashSet<&String> = soll_karte
+            .iter()
+            .filter(|s| !s.start_zeit.is_empty() && !platzhalter_ids.contains(&s.take_id))
+            .map(|s| &s.take_id)
+            .collect();
+        for c in &k.inhalt.clips {
+            let n = c.name.to_uppercase();
+            let Some(x) = c.take_id.clone().or_else(|| zugeordnet.get(&n).cloned()) else { continue };
+            let Some(m) = moeglich_rein.get(&n) else { continue };
+            if !kv.widerspruch.contains_key(&n) && im_soll.contains(&x) && !m.iter().any(|t| t.eq_ignore_ascii_case(&x))
+            {
+                kv.widerspruch.insert(n, Widerspruch::Unmoeglich);
+            }
+        }
         // Offen wie in „Zu klären“: ohne Take, und nicht einem Drehort ohne Plates zugeordnet (z. B. Produktionsbüro;
         // echte Daten 17.10.2026: solche Clips galten sonst als mögliche Aufnahme eines Takes an einem anderen Tag).
         let offen = |pfad: &str| {
@@ -303,6 +593,17 @@ fn kern_vorschlaege(
             }
         }
         let offen_namen: Vec<String> = k.inhalt.clips.iter().filter_map(|c| offen(&c.name)).collect();
+        for (pfad, text) in &a.pruefen {
+            if let Some(n) = offen(pfad).filter(|n| !kv.take.contains_key(n) && !kv.neuer_take.contains_key(n)) {
+                let h = kv.hinweis.entry(n).or_default();
+                if !h.contains(text.as_str()) {
+                    if !h.is_empty() {
+                        h.push_str(" · ");
+                    }
+                    h.push_str(text);
+                }
+            }
+        }
         // Für die Takes ohne Clip (nach allen Karten): wo die Takes ihre Clips haben, welche Takes ein offener Clip
         // sein könnte, und was über die Zeit dieser Karte bekannt ist.
         for c in &k.inhalt.clips {
@@ -357,10 +658,6 @@ fn kern_vorschlaege(
         .filter_map(|s| Some((chrono::DateTime::parse_from_rfc3339(&s.start_zeit).ok()?.to_utc(), s)))
         .collect();
     reihe.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.take_id.cmp(&b.1.take_id)));
-    let mut je_zeit: HashMap<&str, usize> = HashMap::new();
-    for (_, s) in &reihe {
-        *je_zeit.entry(s.start_zeit.as_str()).or_default() += 1;
-    }
     // Rolle einer ARRI-Karte (`A026R9QX` → A, 26).
     let rolle = |karte: &str| -> Option<(char, u32)> {
         let c = karte.chars().next().filter(char::is_ascii_alphabetic)?;
@@ -472,13 +769,11 @@ fn kern_vorschlaege(
             lage.values().filter(|x| x.datum == l.datum).flat_map(|x| &x.kameras).collect::<HashSet<_>>().len() == 1
         });
         let moeglich = moeglich_alle.contains(&s.take_id);
-        // Platzhalter (Build 32) tragen als Klappe den Zeitpunkt, an dem die App die Lücke bemerkte: Abschnitt ohne
-        // Aussage. Erkennbar am vollen Namen eines offenen Clips (von der Kamera, mit ihrem Datum), am Clip ohne
-        // bestätigtes REC (der letzte) oder an der gleichen Zeit wie andere Takes. Nicht am Zähler allein: Der
-        // Namensvorschlag der App trägt das Datum des iPhones (Treppenhaus, 17.10.2026: Takes 3, 4 und 6).
-        let platzhalter = offen_alle.iter().any(|n| n.eq_ignore_ascii_case(&s.clip))
-            || (s.name_geschaetzt && !s.start_tc.is_empty())
-            || je_zeit.get(s.start_zeit.as_str()).is_some_and(|n| *n > 1);
+        // Platzhalter: siehe `platzhalter_finden`; dazu der volle Name eines offenen Clips (von der Kamera, mit ihrem
+        // Datum). Nicht am Zähler allein: Der Namensvorschlag der App trägt das Datum des iPhones (Treppenhaus,
+        // 17.10.2026: Takes 3, 4 und 6).
+        let platzhalter =
+            offen_alle.iter().any(|n| n.eq_ignore_ascii_case(&s.clip)) || platzhalter_ids.contains(&s.take_id);
         let ohne_zeit = beteiligt.iter().any(|k| lage.get(*k).is_none_or(|l| l.ohne_zeit));
         let sicher = randlage.is_none()
             && !beteiligt.is_empty()
@@ -584,6 +879,8 @@ pub struct TakeStand {
     /// Kein Clip zugeordnet, obwohl die Karte zu seiner Klappe eingelesen ist, und nicht sicher ohne Aufnahme: ein
     /// offener Clip in „Zu klären“ könnte dazugehören.
     pub clip_offen: bool,
+    /// Ein Clip des Takes steht unter „Unstimmigkeiten“.
+    pub unstimmig: bool,
     /// Eingelesen: Karte und ob freigegeben.
     pub karte: Option<String>,
     pub freigegeben: bool,
@@ -615,6 +912,31 @@ fn flach(praefix: &str, v: &Value, aus: &mut std::collections::BTreeMap<String, 
                 aus.insert(name, w.clone());
             }
         }
+    }
+}
+
+/// Take-ID aus Info 1 für Zusammenfassungen vor 0.1.50 (ohne `info1`): aus dem Kopf der Clipdatei, einmal je Datei und
+/// Sitzung, nur im Speicher (die Zusammenfassung bleibt unverändert). Damit sieht die Gegenprobe der Zuordnungen auch
+/// ältere Karten (Treppenhaus, 17.10.2026: C010 von Hand bei Take 6, die Take-ID im Clip nennt Take 8).
+fn belege_nachholen(k: &mut GefundeneKarte) {
+    static GELESEN: std::sync::OnceLock<std::sync::Mutex<HashMap<PathBuf, Option<String>>>> =
+        std::sync::OnceLock::new();
+    let Some(kartenordner) = k
+        .datei
+        .parent()
+        .and_then(Path::parent)
+        .map(|d| d.join(ingest_kern::struktur::KAMERA).join(ingest_kern::struktur::ordnername(&k.inhalt.karte)))
+    else {
+        return;
+    };
+    let Ok(mut gelesen) = GELESEN.get_or_init(Default::default).lock() else { return };
+    for c in k.inhalt.clips.iter_mut().filter(|c| c.info1.is_none() && !c.pfad.is_empty()) {
+        let datei = kartenordner.join(&c.pfad);
+        if !gelesen.contains_key(&datei) {
+            let wert = datei.is_file().then(|| ingest_kern::kennung::schnell(&datei, 64 * 1024)).flatten();
+            gelesen.insert(datei.clone(), wert.map(|k| k.text()));
+        }
+        c.info1 = gelesen.get(&datei).cloned().flatten();
     }
 }
 
@@ -949,8 +1271,7 @@ pub fn zusammenfuehren(
                 }
                 // Über den Namen nur, wenn ihn die Kamera bestätigt hat (Stage: immer): Der Vorschlag der App gleicht mit
                 // gestellter Kamerauhr zufällig einem fremden Clip (Simulation 17.10.2026).
-                let bestaetigt =
-                    (!text(&t["clip"]["name"]).is_empty() && t["kamera"]["quelle"] == "cap") || t["studio"] == true;
+                let bestaetigt = crate::plate::name_bestaetigt(t);
                 let stand = nach_take
                     .get(&id)
                     .or_else(|| (bestaetigt && !clip.is_empty()).then(|| nach_clip.get(&clip)).flatten());
@@ -977,6 +1298,7 @@ pub fn zusammenfuehren(
                     ohne_aufnahme: false,
                     ungeprueft: stand.is_some_and(|s| s.ungeprueft),
                     clip_offen: false,
+                    unstimmig: false,
                     karte: stand.map(|s| s.karte.clone()),
                     freigegeben: stand.is_some_and(|s| s.freigegeben),
                     studio: t["studio"] == true,
@@ -1117,6 +1439,7 @@ pub fn zusammenfuehren(
                 vorschlag_dreh: None,
                 vorschlag_take: None,
                 vorschlag_grund: None,
+                hinweis: None,
                 dreh_id: c.dreh_id.clone(),
                 ohne_pruefung: c.ohne_pruefung,
                 pfad: c.pfad.clone(),
@@ -1136,6 +1459,12 @@ pub fn zusammenfuehren(
             o.vorschlag_grund = Some(grund.clone());
         }
     }
+    for o in &mut zu_klaeren {
+        if o.vorschlag_take.is_none() && o.vorschlag_plate.is_none() {
+            o.hinweis = kv.hinweis.get(&o.clip.to_uppercase()).cloned();
+        }
+    }
+    let unstimmigkeiten = unstimmigkeiten_finden(&karten, &drehs, &kv.widerspruch);
     let ohne_aufnahme: Vec<TakeOhneAufnahme> = kv.ohne_clip;
     // Clip offen: ein Vorschlag in „Zu klären“ nennt den Take, oder er steht dort ohne sichere Aussage.
     let vorgeschlagen: HashSet<&String> = kv.take.values().map(|(t, _, _)| t).collect();
@@ -1144,6 +1473,7 @@ pub fn zusammenfuehren(
         t.clip_offen = !t.ohne_aufnahme
             && t.karte.is_none()
             && (vorgeschlagen.contains(&t.id) || ohne_aufnahme.iter().any(|o| o.take_id == t.id));
+        t.unstimmig = unstimmigkeiten.iter().any(|u| u.take_id == t.id);
     }
     let einsortieren = einsortierbar(&karten, &drehs, &take_zu_dreh, &clip_zu_dreh);
     let ohne_datenbank = karten.iter().filter(|k| k.inhalt.karte_id.is_none()).map(|k| k.datei.clone()).collect();
@@ -1158,6 +1488,7 @@ pub fn zusammenfuehren(
         karten,
         zu_klaeren,
         ohne_aufnahme,
+        unstimmigkeiten,
         unlesbar,
         hinweis: None,
         einsortieren,
@@ -1228,6 +1559,7 @@ pub fn laden(plate: &Plate, zugang: Option<&Zugang>, projekt: Projekt, basis: &[
     karten.sort_by(|a, b| (&a.inhalt.karte, &b.inhalt.beginn).cmp(&(&b.inhalt.karte, &a.inhalt.beginn)));
     for k in &mut karten {
         ohne_eintrag_ergaenzen(k);
+        belege_nachholen(k);
     }
     let (drehs, jobs, hinweis) = match zugang {
         Some(z) => match plate.projekt_drehs(z, &projekt) {
@@ -1460,6 +1792,7 @@ mod tests {
         let (mut karten, unlesbar) = uebersicht::suchen(&o.join("nas"), &p.kurzname);
         for k in &mut karten {
             ohne_eintrag_ergaenzen(k);
+            belege_nachholen(k);
         }
         let u = zusammenfuehren(p, &drehs, &json!([]), karten, unlesbar, &db);
         let take_nr: HashMap<String, String> = u
@@ -1524,6 +1857,19 @@ mod tests {
                 c.vorschlag_plate,
                 c.vorschlag_grund
             );
+        }
+        println!("== Unstimmigkeiten ({})", u.unstimmigkeiten.len());
+        for x in &u.unstimmigkeiten {
+            println!(
+                "  {} {}: {} → umhängen auf {:?}",
+                x.clip,
+                x.karte,
+                x.text,
+                x.vorschlag_take.as_ref().map(|t| take_nr.get(t).cloned().unwrap_or_default())
+            );
+        }
+        for o in u.zu_klaeren.iter().filter(|o| o.hinweis.is_some()) {
+            println!("  Hinweis {}: {}", o.clip, o.hinweis.as_deref().unwrap_or_default());
         }
         println!("== Ohne Aufnahme ({})", u.ohne_aufnahme.len());
         for t in &u.ohne_aufnahme {
@@ -1592,6 +1938,7 @@ mod tests {
                 einsortiert: None,
                 geloescht: vec![],
                 ohne_aufnahme: vec![],
+                stimmt_so: vec![],
                 clips: vec![
                     ClipEintrag {
                         name: "A001C003_261028_R1AB".into(),

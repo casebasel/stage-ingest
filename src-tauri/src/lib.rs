@@ -1021,6 +1021,7 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
             einsortiert: None,
             geloescht: vec![],
             ohne_aufnahme: vec![],
+            stimmt_so: vec![],
             clips: clip_eintraege(&clips, &take_von, &auftrag.soll, &abweichend),
         };
         // Ergänzte Karte: Hand-Zuordnungen und Datenbank-ID der früheren Zusammenfassung bleiben.
@@ -1668,6 +1669,55 @@ async fn take_loeschen(
     let p = Arc::clone(&plate);
     im_hintergrund(move || {
         p.take_aendern(&zugang, take_aus_clip::take_loeschen(&take_id, chrono::Utc::now(), plate::ulid_aehnlich()))
+    })
+    .await
+}
+
+/// „Zu klären“: Take ohne Aufnahme bestätigen (Marlon, 17.10.2026: „Ich möchte immer alles behalten, es werden mir nie
+/// Takes gelöscht“). Der Take bleibt im Plate Assistant; die Bestätigung steht mit Zeit und Rechner in jeder
+/// Zusammenfassung der Karte (alle Kopien), so gilt sie auf Mac und Windows.
+#[tauri::command]
+async fn ohne_aufnahme_bestaetigen(dateien: Vec<PathBuf>, take_id: String) -> Result<(), String> {
+    im_hintergrund(move || {
+        let zeit = chrono::Local::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, false);
+        let rechner = gethostname::gethostname().to_string_lossy().into_owned();
+        let fehler: Vec<String> = dateien
+            .iter()
+            .filter_map(|d| {
+                ingest_kern::uebersicht::ohne_aufnahme_bestaetigen(d, &take_id, &zeit, &rechner)
+                    .err()
+                    .map(|e| format!("{}: {e}", d.display()))
+            })
+            .collect();
+        match (fehler.len(), dateien.len()) {
+            (0, _) => Ok(()),
+            (f, n) if f == n => Err(format!("Nicht gespeichert: {}", fehler.join("; "))),
+            _ => Err(format!("Nicht überall gespeichert: {}", fehler.join("; "))),
+        }
+    })
+    .await
+}
+
+/// „Zu klären“: eine Unstimmigkeit als „stimmt so“ bestätigen. Steht mit Zeit und Rechner in jeder Zusammenfassung der
+/// Karte; ändert sich die Lage, erscheint sie wieder (anderer Schlüssel).
+#[tauri::command]
+async fn stimmt_so(dateien: Vec<PathBuf>, schluessel: String) -> Result<(), String> {
+    im_hintergrund(move || {
+        let zeit = chrono::Local::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, false);
+        let rechner = gethostname::gethostname().to_string_lossy().into_owned();
+        let fehler: Vec<String> = dateien
+            .iter()
+            .filter_map(|d| {
+                ingest_kern::uebersicht::stimmt_so(d, &schluessel, &zeit, &rechner)
+                    .err()
+                    .map(|e| format!("{}: {e}", d.display()))
+            })
+            .collect();
+        match (fehler.len(), dateien.len()) {
+            (0, _) => Ok(()),
+            (f, n) if f == n => Err(format!("Nicht gespeichert: {}", fehler.join("; "))),
+            _ => Err(format!("Nicht überall gespeichert: {}", fehler.join("; "))),
+        }
     })
     .await
 }
@@ -2361,6 +2411,8 @@ pub fn run() {
             clip_zuordnen,
             clip_loeschen,
             take_loeschen,
+            ohne_aufnahme_bestaetigen,
+            stimmt_so,
             take_aus_clip,
             stage_projekt,
             projekt_uebersicht,

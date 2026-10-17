@@ -459,6 +459,7 @@ mod tests {
             einsortiert: None,
             geloescht: vec![],
             ohne_aufnahme: vec![],
+            stimmt_so: vec![],
         };
         crate::uebersicht::schreiben(&dreh.join("04_BERICHTE"), &z).unwrap();
         assert!(wegwerfen_erlaubt(&alt).is_err(), "nicht freigegeben");

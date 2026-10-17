@@ -193,6 +193,7 @@ mod tests {
             einsortiert: None,
             geloescht: vec![],
             ohne_aufnahme: vec![],
+            stimmt_so: vec![],
             clips: vec![
                 ClipEintrag {
                     name: "A001C003_261028_R1AB".into(),

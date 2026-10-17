@@ -945,12 +945,39 @@ fn drehs_aus(v: &Value) -> Vec<DrehKurz> {
 /// Takes → Soll-Liste (nur des Drehorts `dreh_id`). Ein Take zählt nur, wenn Take, Plate und Drehort nicht
 /// gelöscht sind. Clipname: von der Kamera (`clip.name`), sonst von Hand (`clip_name`); ohne Endung, gross.
 /// `v` enthält alle Drehorte des Tages, für das Zeitfenster bis zur nächsten Klappe.
+/// Den Clipnamen hat die Kamera bestätigt: Sie meldete für diesen Take das REC (`kamera.quelle = cap`) und nach dem
+/// Stopp den Clip (`take.clip`), und dessen Start-Timecode passt zum Timecode beim REC (`start_tc`; bei CAP stets gleich,
+/// echte Daten 17.10.2026). Ein Platzhalter (Build 32) trägt den Namen des letzten Clips ohne eigenes REC: nur ein
+/// Hinweis (Simulation 17.10.2026). Schreibt der Ingest `take.clip` beim Zuordnen von Hand, ist das keine Bestätigung,
+/// wenn der Clip woanders beginnt (Treppenhaus Take 8: REC 15:13:24:23, von Hand C012 mit 15:14:38:11). Studio-Takes:
+/// die Stage trägt den Namen nach der Aufnahme ein.
+pub(crate) fn name_bestaetigt(take: &Value) -> bool {
+    if take["studio"] == true {
+        return true;
+    }
+    if text(&take["clip"]["name"]).is_empty() || take["kamera"]["quelle"] != "cap" {
+        return false;
+    }
+    let sekunden = |tc: &str| -> Option<i64> {
+        let t: Vec<i64> = tc.split([':', ';', '.']).map(|x| x.trim().parse().ok()).collect::<Option<_>>()?;
+        let [h, m, s, _] = t[..] else { return None };
+        Some((h * 60 + m) * 60 + s)
+    };
+    match (sekunden(&text(&take["start_tc"])), sekunden(&text(&take["clip"]["startTc"]))) {
+        (Some(rec), Some(clip)) => {
+            let d = (rec - clip).rem_euclid(86_400);
+            d <= 2 || d >= 86_400 - 2
+        }
+        _ => true,
+    }
+}
+
 /// Take, den der Ingest aus einem Clip angelegt hat (`take_aus_clip`): Seine Startzeit ist der Timecode des Clips als
 /// Tageszeit, keine Klappe des iPhones. Geht die Kamerauhr falsch, verschöbe sie als Klappe die Zeitfenster der Takes
 /// davor (Simulation 17.10.2026, 100 000 Drehtage). Erkennbar an `kamera.quelle = ale` (ab 0.1.52 immer gesetzt), bei
-/// älteren an der Startzeit, die auf die Millisekunde dem Timecode entspricht, und am späteren Anlegen. Das iPhone legt
-/// den Take bei der Klappe an (`erstellt_am` = `start_zeit`, echte Daten 17.10.2026), bestätigte Takes tragen
-/// `quelle = cap`.
+/// älteren an der Startzeit, die auf die Millisekunde dem Timecode entspricht, zusammen mit dem späteren Anlegen. Das
+/// iPhone legt den Take bei der Klappe an (`erstellt_am` = `start_zeit`, echte Daten 17.10.2026), der Ingest erst beim
+/// Zuordnen; bestätigte Takes tragen `quelle = cap`.
 pub(crate) fn aus_clip_angelegt(take: &Value, drehtag: &str) -> bool {
     if take["kamera"]["quelle"] == "ale" {
         return true;
@@ -960,8 +987,10 @@ pub(crate) fn aus_clip_angelegt(take: &Value, drehtag: &str) -> bool {
     }
     let zeit =
         |f: &str| take[f].as_str().and_then(|z| chrono::DateTime::parse_from_rfc3339(z).ok()).map(|z| z.to_utc());
-    let Some(start) = zeit("start_zeit") else { return false };
-    if zeit("erstellt_am").is_some_and(|e| (e - start).num_seconds().abs() <= 60) {
+    // Nachweislich später angelegt: ohne `erstellt_am` oder beim Anlegen nicht mehr als 60 s nach der Startzeit (iPhone)
+    // ist es eine Klappe (Simulation 17.10.2026: eine Klappe traf auf die Sekunde genau den Timecode ihres Clips).
+    let (Some(start), Some(erstellt)) = (zeit("start_zeit"), zeit("erstellt_am")) else { return false };
+    if (erstellt - start).num_seconds() <= 60 {
         return false;
     }
     let tc = text(&take["start_tc"]).or_leer(text(&take["clip"]["startTc"]));
@@ -1019,6 +1048,8 @@ pub(crate) fn soll_aus(v: &Value, dreh_id: &str) -> Vec<SollClip> {
                     .find(|c| !c.is_empty())
                     .map(|c| ohne_endung(&c).to_uppercase())
                     .unwrap_or_default();
+                // Bestätigt nur, was die Kamera gemeldet hat (`name_bestaetigt`); jeder andere Name ist ein Hinweis.
+                let name_geschaetzt = !name_bestaetigt(take) && !clip.is_empty();
                 let art = take["art"].as_str().unwrap_or("take");
                 let bewertung = match take["bewertung"].as_str() {
                     Some("circle") => "Favorit",
@@ -1044,13 +1075,7 @@ pub(crate) fn soll_aus(v: &Value, dreh_id: &str) -> Vec<SollClip> {
                     start_zeit: if aus_clip { String::new() } else { text(&take["start_zeit"]) },
                     fenster_bis: if aus_clip { String::new() } else { naechste(&text(&take["start_zeit"])) },
                     drehtag: drehtag.clone(),
-                    // Bestätigt ist ein Name nur, wenn die Kamera für diesen Take das REC (`kamera.quelle = cap`) und nach dem
-                    // Stopp den Namen (`clip`) gemeldet hat. Ein Platzhalter (Build 32) trägt den Namen des letzten Clips ohne
-                    // eigenes REC: nur ein Hinweis (Simulation 17.10.2026). Studio-Takes: die Stage trägt den Namen nach der
-                    // Aufnahme ein.
-                    name_geschaetzt: !(take["studio"] == true
-                        || (!text(&take["clip"]["name"]).is_empty() && take["kamera"]["quelle"] == "cap"))
-                        && !text(&take["clip_name"]).is_empty(),
+                    name_geschaetzt,
                     // Die Kamera hat die Aufnahme dieses Takes bestätigt (Plate Assistant 16.10.2026: `kamera` mit
                     // `quelle = cap` nur beim bestätigten REC). Dann wurde der Slate für diesen Take geschrieben.
                     rec_bestaetigt: take["kamera"]["quelle"] == "cap"
@@ -1209,6 +1234,26 @@ mod tests {
         assert_eq!(s[0].fenster_bis, "2026-10-10T22:30:00+00:00");
         assert_eq!(s[1].drehtag, "2026-10-11", "Ortszeit Zürich: 00:30 am Folgetag");
         assert!(s[1].clip.is_empty() && s[1].fenster_bis.is_empty());
+    }
+
+    #[test]
+    fn name_nur_von_der_kamera_bestaetigt() {
+        let cap = |start_tc: &str, clip_tc: &str| {
+            json!({ "kamera": {"quelle": "cap"}, "start_tc": start_tc,
+                    "clip": {"name": "A009C012_120101_R132", "startTc": clip_tc, "bilder": 100} })
+        };
+        assert!(name_bestaetigt(&cap("15:09:23:15", "15:09:23:15")), "CAP: gleicher Timecode");
+        assert!(!name_bestaetigt(&cap("15:13:24:23", "15:14:38:11")), "von Hand, anderer Clip (Treppenhaus Take 8)");
+        assert!(name_bestaetigt(&cap("23:59:59:20", "00:00:00:05")), "über Mitternacht");
+        assert!(!name_bestaetigt(&json!({ "clip": {"name": "A009C012_120101_R132"} })), "Platzhalter ohne REC");
+        let s = soll_aus(
+            &json!([{ "id": "D", "datum": "2026-10-15", "plate": [{ "id": "P", "take": [
+                { "id": "T", "nummer": 8, "clip_name": null, "start_zeit": "2026-10-15T13:13:24.367Z",
+                  "kamera": {"quelle": "cap"}, "start_tc": "15:13:24:23",
+                  "clip": {"name": "A009C012_120101_R132", "startTc": "15:14:38:11", "bilder": 100} }] }] }]),
+            "D",
+        );
+        assert!(s[0].name_geschaetzt && s[0].rec_bestaetigt, "Name von Hand: nur ein Hinweis, REC bleibt bestätigt");
     }
 
     #[test]

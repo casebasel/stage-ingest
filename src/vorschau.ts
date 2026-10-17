@@ -193,6 +193,18 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
   studio_soll: () => [],
   plate_projekt_aendern: () => null,
   clip_zuordnen: () => null,
+  take_loeschen: async () => {
+    await warte(400);
+    return null;
+  },
+  stimmt_so: async () => {
+    await warte(400);
+    return null;
+  },
+  ohne_aufnahme_bestaetigen: async () => {
+    await warte(400);
+    return null;
+  },
   clip_loeschen: () => ({ kopien: 1, dateien: 2, bytes: 1, protokolle: [] }),
   plate_drehort_kurznamen: () => ["RHEINUFER", "BRUECKE"],
   plate_drehort_anlegen: (a) => `dreh-happy_end-${String(a.kurzname).toLowerCase()}`,
@@ -279,9 +291,18 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
     unlesbar: [],
     zuKlaeren: [
       { clip: "A001C014_261028_R132", karte: "A001R132", startTc: "14:22:05:10", drehOrdner: "2026-10-28_RHEINUFER", freigegeben: false, dateien: ["/a", "/b"], clipdateien: ["/Volumes/NAS/x.mxf"], vorschlagPlate: "p1", vorschlagDreh: "d1" },
-      { clip: "A001C015_120101_R132", karte: "A001R132", startTc: "14:31:40:02", drehOrdner: "2026-10-28_RHEINUFER", freigegeben: false, dateien: ["/a", "/b"], clipdateien: ["/Volumes/NAS/x.mxf"], vorschlagDreh: "d1", vorschlagTake: "t2", vorschlagGrund: "Take 2 · Name bis aufs Datum gleich" },
+      { clip: "A001C015_120101_R132", karte: "A001R132", startTc: "14:31:40:02", drehOrdner: "2026-10-28_RHEINUFER", freigegeben: false, dateien: ["/a", "/b"], clipdateien: ["/Volumes/NAS/x.mxf"], vorschlagDreh: "d1", vorschlagTake: "t2", vorschlagGrund: "Take 2 · Clipname von der Kamera" },
+      { clip: "A002C001_120101_R9QX", karte: "A002R9QX", startTc: "15:02:11:00", drehOrdner: "2026-10-28_RHEINUFER", freigegeben: false, dateien: ["/c"], clipdateien: ["/Volumes/NAS/y.mxf"], hinweis: "Take-ID PA:01JAB… im ersten Clip der Karte: der Slate kann von der vorigen Karte stammen" },
     ],
-    ohneAufnahme: [{ takeId: "t3", nummer: 3, plateId: "p1", drehId: "d1", clip: "A001C011_261028_R132", karte: "A001R132" }],
+    unstimmigkeiten: [
+      { schluessel: "w1", clip: "A001C011_261028_R132", karte: "A001R132", takeId: "t4", vorschlagTake: "t5", vorschlagDreh: "d1", text: "On Loc 2 · Brücke · Take 1 zugeordnet (von Hand), aber die Take-ID im Clip (Aufnahme bestätigt) nennt On Loc 2 · Brücke · Take 2", dateien: ["/a", "/b"], clipdateien: ["/Volumes/NAS/x.mxf"] },
+      { schluessel: "w2", clip: "A001C012_261028_R132", karte: "A001R132", takeId: "t5", text: "On Loc 2 · Brücke · Take 2 zugeordnet (von Hand), aber der Clip beginnt nicht zwischen dessen Klappe und der nächsten", dateien: ["/a", "/b"], clipdateien: ["/Volumes/NAS/x.mxf"] },
+    ],
+    ohneAufnahme: [
+      { takeId: "t6", nummer: 3, plateId: "p2", drehId: "d1", clip: "A001C013_261028_R132", karte: "A001R132", sicher: true, grund: "Keine Aufnahme auf der Karte (Klappe ohne REC)", dateien: ["/a", "/b"] },
+      { takeId: "t7", nummer: 4, plateId: "p2", drehId: "d1", clip: "A001C014_261028_R132", karte: "A001R132", sicher: false, grund: "Ein offener Clip kann zu diesem Take gehören: oben prüfen", dateien: ["/a", "/b"] },
+      { takeId: "t8", nummer: 5, plateId: "p2", drehId: "d1", clip: "A001C015_261028_R132", karte: "A001R132", sicher: true, grund: "Keine Aufnahme auf der Karte (Klappe ohne REC)", dateien: ["/a", "/b"] },
+    ],
     karten: [
       { drehOrdner: "2026-10-28_Rheinufer", datei: "a", inhalt: { karte: "A001R131", beginn: "", freigegeben: true, unabhaengigeKopien: 2, clips: Array(22) } },
       { drehOrdner: "2026-10-28_Rheinufer", datei: "b", inhalt: { karte: "A001R132", beginn: "", freigegeben: false, unabhaengigeKopien: 1, clips: Array(14) } },
@@ -305,9 +326,11 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
             fotos: [0, 1, 2].map((i) => ({ id: `g${i}`, art: "set", pfad: `p2/g${i}.jpg` })),
             hdri: [{ id: "h1", zustand: "uploaded", erstelltAm: "2026-10-28T10:40:00Z", job: "processed", vorschau: "h1/ergebnis.jpg", vorschauQuelle: "dienst" }],
             takes: [
-              { id: "t4", nummer: 1, art: "take", bewertung: "gut", clip: "A001C011_261028_R132", karte: "A001R132", freigegeben: false },
-              { id: "t5", nummer: 2, art: "graukugel", bewertung: "", clip: "A001C012_261028_R132", karte: "A001R132", freigegeben: false },
-              { id: "t6", nummer: 3, art: "take", bewertung: "", clip: "", karte: null, freigegeben: false },
+              { id: "t4", nummer: 1, art: "take", bewertung: "gut", clip: "A001C011_261028_R132", karte: "A001R132", freigegeben: false, unstimmig: true },
+              { id: "t5", nummer: 2, art: "graukugel", bewertung: "", clip: "A001C012_261028_R132", karte: "A001R132", freigegeben: false, unstimmig: true },
+              { id: "t6", nummer: 3, art: "take", bewertung: "", clip: "A001C013_261028_R132", karte: null, freigegeben: false, ohneAufnahme: true },
+              { id: "t7", nummer: 4, art: "take", bewertung: "", clip: "A001C014_261028_R132", karte: null, freigegeben: false, clipOffen: true },
+              { id: "t8", nummer: 5, art: "take", bewertung: "", clip: "A001C015_261028_R132", karte: null, freigegeben: false, ohneAufnahme: true },
             ] },
           { id: "p3", nummer: 3, slate: "", name: "Fähre", art: "plate", szene: "", fotos: [], hdri: [], takes: [] },
         ],

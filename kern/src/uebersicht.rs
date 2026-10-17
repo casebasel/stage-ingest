@@ -40,6 +40,19 @@ pub struct KartenZusammenfassung {
     /// Takes ohne Clip auf dieser Karte, als „ohne Aufnahme“ bestätigt.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ohne_aufnahme: Vec<OhneAufnahme>,
+    /// Unstimmigkeiten der Projektseite, die Marlon mit „Stimmt so“ bestätigt hat (Schlüssel der Unstimmigkeit).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stimmt_so: Vec<StimmtSo>,
+}
+
+/// Eine bestätigte Unstimmigkeit (17.10.2026: „Unstimmigkeiten müssen in Zu klären erscheinen“). Ändert sich die Lage,
+/// ändert sich der Schlüssel, und sie erscheint wieder.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StimmtSo {
+    pub schluessel: String,
+    pub zeit: String,
+    pub rechner: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -165,6 +178,17 @@ pub fn ohne_aufnahme_bestaetigen(datei: &Path, take_id: &str, zeit: &str, rechne
     Ok(())
 }
 
+/// Vermerkt eine Unstimmigkeit als „stimmt so“.
+pub fn stimmt_so(datei: &Path, schluessel: &str, zeit: &str, rechner: &str) -> std::io::Result<()> {
+    let mut z: KartenZusammenfassung = serde_json::from_slice(&std::fs::read(datei)?).map_err(std::io::Error::other)?;
+    if !z.stimmt_so.iter().any(|o| o.schluessel == schluessel) {
+        z.stimmt_so.push(StimmtSo { schluessel: schluessel.into(), zeit: zeit.into(), rechner: rechner.into() });
+        let text = serde_json::to_vec_pretty(&z).map_err(std::io::Error::other)?;
+        crate::sicher_schreiben(datei, &text)?;
+    }
+    Ok(())
+}
+
 /// Liest eine Zusammenfassung aus ihrer Datei (`None`, wenn unlesbar).
 pub fn lesen_datei(datei: &Path) -> Option<KartenZusammenfassung> {
     serde_json::from_slice(&std::fs::read(datei).ok()?).ok()
@@ -194,6 +218,17 @@ pub fn frueheres_uebernehmen(neu: &mut KartenZusammenfassung, alt: &KartenZusamm
     for g in &alt.geloescht {
         if !neu.clips.iter().any(|c| c.name.eq_ignore_ascii_case(g)) && !neu.geloescht.contains(g) {
             neu.geloescht.push(g.clone());
+        }
+    }
+    // Von Marlon bestätigt („ohne Aufnahme“, „stimmt so“): bleibt.
+    for o in &alt.ohne_aufnahme {
+        if !neu.ohne_aufnahme.iter().any(|n| n.take_id == o.take_id) {
+            neu.ohne_aufnahme.push(o.clone());
+        }
+    }
+    for o in &alt.stimmt_so {
+        if !neu.stimmt_so.iter().any(|n| n.schluessel == o.schluessel) {
+            neu.stimmt_so.push(o.clone());
         }
     }
 }
@@ -266,6 +301,7 @@ mod tests {
             einsortiert: None,
             geloescht: vec![],
             ohne_aufnahme: vec![],
+            stimmt_so: vec![],
             clips: vec![ClipEintrag {
                 name: "A001C003_261028_R1AB".into(),
                 pfad: "A001C003_261028_R1AB.mov".into(),
@@ -324,6 +360,7 @@ mod tests {
             einsortiert: None,
             geloescht: vec![],
             ohne_aufnahme: vec![],
+            stimmt_so: vec![],
             clips,
         };
         let mut alt = karte(vec![clip("A007C001", Some("T7"), "hand"), clip("A007C002", Some("T2"), "zeitfenster")]);

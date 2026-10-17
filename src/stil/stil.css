@@ -2345,3 +2345,10 @@ input[type="checkbox"][role="switch"]:checked::before {
 .zu-klaeren td {
   vertical-align: top;
 }
+/* Warum ein Clip offen bleibt: Prosa, nicht Daten; umbricht, statt die Tabelle zu verbreitern. */
+.zu-klaeren .hinweis-text {
+  display: block;
+  max-width: 48ch;
+  font-family: var(--schrift);
+  white-space: normal;
+}

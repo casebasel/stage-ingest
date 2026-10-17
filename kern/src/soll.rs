@@ -374,10 +374,28 @@ pub fn abgleichen(kopie: &Kopie, soll: &[SollClip], clips: &[crate::ale::ClipZei
         }
     }
 
-    // 4. Timecode-Überlappung mit dem Timecode des Takes (Takes ohne Clipnamen, z. B. Stage-CSV).
+    // 4. Timecode des Takes: Überlappung mit Start und Ende (Takes ohne Clipnamen, z. B. Stage-CSV), oder der Timecode
+    // beim REC, den die Kamera für diesen Take gemeldet hat (CAP), auf ±2 s am Start eines Clips, auch wenn der Name
+    // nicht ankam (Treppenhaus Take 8, 17.10.2026: REC 15:13:24:23, C010 beginnt 15:13:25:04). Der Timecode ist eine
+    // Tageszeit: nur, wenn die Klappe am Tag der Karte liegt.
     let frei = |zu: &BTreeMap<String, (usize, Art)>, c: &str| !zu.contains_key(c) && !gesperrt.contains(c);
     let mut vorschlaege: Vec<(usize, Vec<String>)> = Vec::new();
-    for (i, s) in soll.iter().enumerate().filter(|(i, s)| s.clip.trim().is_empty() && !strittig.contains(i)) {
+    let mit_tc = |s: &SollClip| s.clip.trim().is_empty() || (s.name_geschaetzt && s.rec_bestaetigt);
+    // Kamera mit CAP: Buchstabe aus dem Namensvorschlag des Takes, sonst der einzige der bestätigten Namen. Eine zweite
+    // Kamera läuft mit eigenem Timecode (Simulation 17.10.2026, Nr. 75874: B-Clip traf den REC-Timecode der A-Kamera).
+    let cap_kameras: BTreeSet<String> =
+        soll.iter().filter(|s| !s.name_geschaetzt && !s.clip.is_empty()).map(|s| kamera(&s.clip)).collect();
+    let cap_kamera = |s: &SollClip| -> Option<String> {
+        if !s.clip.trim().is_empty() {
+            return Some(kamera(&s.clip)).filter(|k| !k.is_empty());
+        }
+        match cap_kameras.iter().collect::<Vec<_>>()[..] {
+            [k] if !k.is_empty() => Some(k.clone()),
+            _ => None,
+        }
+    };
+    let am_tag = |s: &SollClip| s.start_zeit.is_empty() || ortsdatum(&s.start_zeit).is_none_or(|d| d == s.drehtag);
+    for (i, s) in soll.iter().enumerate().filter(|(i, s)| mit_tc(s) && am_tag(s) && !strittig.contains(i)) {
         if zu.values().any(|(j, _)| *j == i) {
             continue;
         }
@@ -389,16 +407,27 @@ pub fn abgleichen(kopie: &Kopie, soll: &[SollClip], clips: &[crate::ale::ClipZei
             }
             let Some(an) = c.angaben.as_ref() else { continue };
             let Some(fps) = an.fps else { continue };
-            let (Some(t0), Some(t1)) = (tc_bilder(&s.start_tc, fps), tc_bilder(&s.end_tc, fps)) else { continue };
             let (Some(c0), Some(c1)) = (
                 an.start_tc.as_deref().and_then(|t| tc_bilder(t, fps)),
                 an.end_tc.as_deref().and_then(|t| tc_bilder(t, fps)),
             ) else {
                 continue;
             };
-            let u = ueberlappung((t0, t1), (c0, c1), fps.round() as i64 * 86_400);
-            if u > 0 {
-                beste.push((stamm, u));
+            let tag = fps.round() as i64 * 86_400;
+            match (tc_bilder(&s.start_tc, fps), tc_bilder(&s.end_tc, fps)) {
+                (Some(t0), Some(t1)) => {
+                    let u = ueberlappung((t0, t1), (c0, c1), tag);
+                    if u > 0 {
+                        beste.push((stamm, u));
+                    }
+                }
+                (Some(t0), None) if s.rec_bestaetigt && cap_kamera(s).is_some_and(|k| k == kamera(&stamm)) => {
+                    let d = (c0 - t0).rem_euclid(tag);
+                    if d.min(tag - d) <= 2 * fps.round() as i64 {
+                        beste.push((stamm, i64::MAX));
+                    }
+                }
+                _ => {}
             }
         }
         let max = beste.iter().map(|b| b.1).max();

@@ -12,6 +12,8 @@
 //! 4. Kein Vorschlag in „Zu klären“ ist falsch („Alle Vorschläge übernehmen“ würde ihn übernehmen).
 //! 5. Kein Take mit Aufnahme wird als „ohne Aufnahme“ gemeldet.
 //! 6. Kein Take zeigt „Karte fehlt“ (alle Karten sind eingelesen): jeder ohne Clip steht in „Zu klären“.
+//! 7. Keine Unstimmigkeit ohne Grund; eine falsche Zuordnung von Hand wird gemeldet, wo ein sicherer Beleg dagegen
+//!    spricht (Quote wird ausgegeben).
 //!
 //! Nachgebildet wird, was im Studio und draussen vorkommt: das iPhone legt bei jeder Klappe einen Take an und schlägt
 //! einen Clipnamen vor (voriger Name plus eins, Datum des iPhones); mit Verbindung schreibt es den Slate (Info 1) und
@@ -232,7 +234,7 @@ pub(crate) fn drehtag(saat: u64) -> Drehtag {
                             let mut pl = json!({
                                 "id": pid, "nummer": nummer, "art": "take", "bewertung": "", "geloescht": false,
                                 "plate_id": plate_id, "start_zeit": zeit(t - Duration::seconds(2)), "clip_name": name,
-                                "clip": Value::Null,
+                                "clip": Value::Null, "erstellt_am": zeit(t),
                             });
                             nummer += 1;
                             // Der Clip gehört dem Platzhalter, wenn ihn kein Take aufgenommen hat (an der Kamera ausgelöst).
@@ -262,6 +264,7 @@ pub(crate) fn drehtag(saat: u64) -> Drehtag {
                 let mut take = json!({
                     "id": take_id, "nummer": nummer, "art": "take", "bewertung": "", "geloescht": false,
                     "plate_id": plate_id, "start_zeit": zeit(t), "clip_name": vorschlag, "clip": Value::Null,
+                    "erstellt_am": zeit(t),
                 });
                 if z.ja(lage.ohne_rec) {
                     ohne_rec.insert(take_id.clone());
@@ -311,7 +314,10 @@ pub(crate) fn drehtag(saat: u64) -> Drehtag {
                     // Mit Verbindung bestätigt die Kamera das REC (Kamerawerte, `quelle = cap`) und nach dem Stopp den
                     // Namen (CAP). Die Verbindung kann dazwischen abreissen.
                     if verbunden {
+                        // REC bestätigt: Kamerawerte und Timecode beim Start (wie CAP, auch wenn danach die Verbindung
+                        // abreisst und der Name nicht mehr ankommt).
                         take["kamera"] = json!({ "quelle": "cap" });
+                        take["start_tc"] = json!(start_tc);
                         verbunden = z.ja(0.93);
                     }
                     if verbunden {
@@ -462,6 +468,7 @@ pub(crate) fn durchrechnen(d: &Drehtag) -> Ergebnis {
             einsortiert: None,
             geloescht: vec![],
             ohne_aufnahme: vec![],
+            stimmt_so: vec![],
         };
         let ordner = format!("{DRHTAG}_{}", dreh.trim_start_matches("dreh-sim-").to_uppercase());
         gefunden.push(GefundeneKarte {
@@ -532,6 +539,7 @@ pub(crate) fn vorschlaege_uebernehmen(
             let mut take = json!({
                 "id": id, "nummer": nummer, "art": "take", "bewertung": "", "geloescht": false,
                 "plate_id": plate, "start_zeit": zeit(klappe), "clip_name": o.clip.to_uppercase(),
+                "erstellt_am": "2026-10-17T08:00:00.000Z",
                 "start_tc": an.start_tc, "end_tc": an.end_tc,
                 "clip": { "name": o.clip.to_uppercase(), "startTc": an.start_tc, "bilder": an.bilder },
             });
@@ -619,6 +627,10 @@ pub(crate) fn pruefen_mit(
             f_("Take zeigt „Karte fehlt“, obwohl alle Karten eingelesen sind", format!("Take {} ({})", t.id, t.clip));
         }
     }
+    // 7. Unstimmigkeiten nur mit Grund: Alle Zuordnungen hier stimmen (sonst meldet 1. sie schon).
+    for x in &u.unstimmigkeiten {
+        f_("Unstimmigkeit ohne Grund", format!("{} {}: {}", x.clip, x.karte, x.text));
+    }
     // 3. Jeder Clip bei seinem Take oder in „Zu klären“; 4. Vorschläge.
     let offen: HashMap<String, &crate::projekt::OffenerClip> =
         u.zu_klaeren.iter().map(|o| (o.clip.to_uppercase(), o)).collect();
@@ -643,6 +655,32 @@ pub(crate) fn pruefen_mit(
         }
     }
     f
+}
+
+/// Ein Clip der A-Kamera, beim Einlesen sicher zugeordnet, wird von Hand dem nächsten Take derselben Plate gegeben.
+pub(crate) fn falsch_von_hand(d: &Drehtag, gefunden: &[GefundeneKarte]) -> Option<(Vec<GefundeneKarte>, String)> {
+    let mut plate_von: HashMap<String, (String, i64)> = HashMap::new();
+    for p in d.drehs.as_array()?.iter().flat_map(|x| x["plate"].as_array().into_iter().flatten()) {
+        for t in p["take"].as_array().into_iter().flatten().filter(|t| t["geloescht"] != true) {
+            let id = t["id"].as_str().unwrap_or_default().to_owned();
+            plate_von.insert(id, (p["id"].as_str().unwrap_or_default().to_owned(), t["nummer"].as_i64().unwrap_or(0)));
+        }
+    }
+    for (ki, k) in gefunden.iter().enumerate() {
+        for (ci, c) in k.inhalt.clips.iter().enumerate().filter(|(_, c)| c.name.starts_with('A')) {
+            let Some(x) = &c.take_id else { continue };
+            let Some((plate, nummer)) = plate_von.get(x) else { continue };
+            let Some((y, _)) = plate_von.iter().find(|(id, (p, n))| p == plate && *n == nummer + 1 && *id != x) else {
+                continue;
+            };
+            let mut neu = gefunden.to_vec();
+            let eintrag = &mut neu[ki].inhalt.clips[ci];
+            eintrag.take_id = Some(y.clone());
+            eintrag.zuordnung = "hand".into();
+            return Some((neu, c.name.clone()));
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -693,6 +731,7 @@ mod tests {
         let mut je_art: BTreeMap<&str, (usize, u64, String)> = BTreeMap::new();
         let (mut clips, mut automatisch, mut offen, mut vorschlaege) = (0usize, 0usize, 0usize, 0usize);
         let (mut ohne_rec, mut ohne_sicher, mut ohne_unklar, mut uebernommen) = (0usize, 0usize, 0usize, 0usize);
+        let (mut hand_falsch, mut hand_erkannt) = (0usize, 0usize);
         for nr in einzeln.map_or(1..=anzahl, |n| n..=n) {
             let d = drehtag(nr);
             let e = durchrechnen(&d);
@@ -724,6 +763,27 @@ mod tests {
                     if einzeln.is_some() {
                         println!("— Runde {runde}: {n} Vorschläge übernommen");
                         ausgeben(&d, &e.zuordnung, &[], &u);
+                        for t in drehs
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .flat_map(|x| x["plate"].as_array().into_iter().flatten())
+                            .flat_map(|p| p["take"].as_array().into_iter().flatten())
+                        {
+                            println!(
+                                "  take {} T{} klappe={} start_tc={} clip={} kamera={} gelöscht={}",
+                                t["id"],
+                                t["nummer"],
+                                t["start_zeit"],
+                                t["start_tc"],
+                                t["clip"]["name"],
+                                t["kamera"]["quelle"],
+                                t["geloescht"]
+                            );
+                        }
+                        for x in &u.unstimmigkeiten {
+                            println!("  unstimmig {} {}", x.clip, x.text);
+                        }
                     }
                     fehler.extend(pruefen_mit(&wahr, &gefunden, &u).into_iter().map(|mut fe| {
                         fe.text = format!("Runde {runde}: {}", fe.text);
@@ -731,6 +791,17 @@ mod tests {
                     }));
                     if !fehler.is_empty() {
                         break;
+                    }
+                }
+            }
+            // Marlon ordnet einen Clip von Hand falsch zu (einem anderen Take derselben Plate): Erscheint das unter
+            // „Unstimmigkeiten“? Nur gezählt, nicht verlangt (ohne sicheren Beleg gibt es nichts zu melden).
+            if fehler.is_empty() {
+                if let Some((gefunden, clip)) = falsch_von_hand(&d, &e.gefunden) {
+                    let u = projektseite(&d.drehs, &gefunden);
+                    hand_falsch += 1;
+                    if u.unstimmigkeiten.iter().any(|x| x.clip.eq_ignore_ascii_case(&clip)) {
+                        hand_erkannt += 1;
                     }
                 }
             }
@@ -749,6 +820,7 @@ mod tests {
             "{ohne_rec} Klappen ohne REC; in „Zu klären“: {ohne_sicher} Takes sicher ohne Aufnahme, {ohne_unklar} unklar"
         );
         println!("{uebernommen} Vorschläge übernommen (Runden danach ohne neue Fehler)");
+        println!("{hand_falsch} falsche Zuordnungen von Hand, {hand_erkannt} davon unter „Unstimmigkeiten“ gemeldet");
         for (art, (n, nr, bsp)) in &je_art {
             println!("FEHLER {art}: {n}× (z. B. Nr. {nr}: {bsp})");
         }

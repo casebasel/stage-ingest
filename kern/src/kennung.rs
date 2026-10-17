@@ -103,6 +103,22 @@ pub fn aus_datei(pfad: &Path) -> Vec<Kennung> {
     aus
 }
 
+/// Take-ID aus dem Anfang einer Clipdatei, schnell: bei MXF nur die ersten `kopf` Bytes (ARRI legt Info 1 nach etwa
+/// 7 KB ab, echte Clips 17.10.2026), sonst wie `aus_datei`. Zum Nachholen für Zusammenfassungen ohne `info1`.
+pub fn schnell(pfad: &Path, kopf: u64) -> Option<Kennung> {
+    let mut anfang = [0u8; 4];
+    let ist_mxf =
+        std::fs::File::open(pfad).and_then(|mut f| f.read_exact(&mut anfang)).is_ok() && anfang == crate::mxf::PRAEFIX;
+    let gefunden = if ist_mxf {
+        let mut d = Vec::new();
+        std::fs::File::open(pfad).and_then(|f| f.take(kopf).read_to_end(&mut d)).ok()?;
+        in_bytes(&d)
+    } else {
+        aus_datei(pfad)
+    };
+    eindeutig(gefunden)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

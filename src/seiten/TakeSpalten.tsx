@@ -19,6 +19,10 @@ export type TakeMitWerten = {
   ohneAufnahme?: boolean;
   /** Clip aus einem abgebrochenen Einlesen, nie gegen die Karte geprüft. */
   ungeprueft?: boolean;
+  /** Karte eingelesen, der Clip ist aber offen oder fraglich: steht in „Zu klären“. */
+  clipOffen?: boolean;
+  /** Ein Clip des Takes steht unter „Unstimmigkeiten“. */
+  unstimmig?: boolean;
   karte: string | null;
   freigegeben: boolean;
   /** Studio-Take der Stage: Bewertung und Notiz im Ingest änderbar. */
