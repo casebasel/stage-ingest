@@ -23,6 +23,9 @@ pub struct Anfrage {
     pub clipdatei: PathBuf,
     /// Zusammenfassungen der Karte (`04_BERICHTE/*_ingest.json`) auf allen Zielen.
     pub dateien: Vec<PathBuf>,
+    /// Clip aus einem abgebrochenen Einlesen: Pfad in der Karte, wird vorher aufgenommen.
+    #[serde(default)]
+    pub aufnehmen: Option<String>,
 }
 
 /// Kamerawerte der Spalten (`technik`) → Schlüssel von `take.kamera` (Vertrag mit der Stage).
@@ -169,6 +172,7 @@ mod tests {
             clip: "A009C010_120101_R132".into(),
             clipdatei: "/x.mxf".into(),
             dateien: vec![],
+            aufnehmen: None,
         };
         let angaben = ingest_kern::clip::ClipAngaben {
             start_tc: Some("15:13:25:04".into()),

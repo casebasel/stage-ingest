@@ -993,6 +993,7 @@ fn soll_aus(v: &Value, dreh_id: &str) -> Vec<SollClip> {
                     start_zeit: text(&take["start_zeit"]),
                     fenster_bis: naechste(&text(&take["start_zeit"])),
                     drehtag: drehtag.clone(),
+                    name_geschaetzt: text(&take["clip"]["name"]).is_empty() && !text(&take["clip_name"]).is_empty(),
                 });
             }
         }
@@ -1042,6 +1043,7 @@ pub fn studio_soll_aus(v: &Value) -> Vec<SollClip> {
                     .unwrap_or_default(),
                 drehtag: ingest_kern::soll::ortsdatum(&start).unwrap_or_default(),
                 start_zeit: start,
+                name_geschaetzt: false,
             });
         }
     }

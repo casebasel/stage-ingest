@@ -290,6 +290,33 @@ pub fn zuordnung_aenderungen(
     )
 }
 
+/// Clip aus einem abgebrochenen Einlesen nachträglich anlegen (`clip` `_anlegen`, ohne Take; die Zuordnung folgt).
+#[allow(clippy::too_many_arguments)] // die Felder der Zeile flach, wie in `aenderungen`
+pub fn clip_anlegen_aenderung(
+    projekt_id: &str,
+    karte_id: &str,
+    clip: &str,
+    start_tc: Option<&str>,
+    end_tc: Option<&str>,
+    fps: Option<f64>,
+    jetzt: DateTime<Utc>,
+    neue_id: String,
+) -> Option<Value> {
+    let name = clipname(clip)?;
+    let wert = json!({
+        "projekt_id": projekt_id,
+        "karte_id": karte_id,
+        "name": name,
+        "kamera": kamera(&name),
+        "start_tc": start_tc,
+        "end_tc": end_tc,
+        "fps": fps,
+        "geloescht": false,
+        "erstellt_am": zeit(jetzt),
+    });
+    Some(aenderung(neue_id, "clip", &clip_id(karte_id, &name), "_anlegen", wert, jetzt))
+}
+
 /// Endgültig gelöschter Clip („Zu klären“): in der Datenbank nur weich löschen (`clip.geloescht`, Feldliste seit 0018;
 /// abgestimmt mit dem Plate Assistant 15.10.2026: nie hart entfernen, die App blendet ihn überall aus).
 pub fn loeschen_aenderung(karte_id: &str, clip: &str, jetzt: DateTime<Utc>, neue_id: String) -> Option<Value> {
@@ -299,6 +326,25 @@ pub fn loeschen_aenderung(karte_id: &str, clip: &str, jetzt: DateTime<Utc>, neue
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn clip_nachtraeglich_anlegen() {
+        let a = clip_anlegen_aenderung(
+            "projekt-happy_end_test",
+            "karte-happy_end_test-a007r132",
+            "A007C010_120101_R132",
+            Some("10:00:00:00"),
+            None,
+            Some(25.0),
+            Utc::now(),
+            "X".into(),
+        )
+        .unwrap();
+        assert_eq!((a["tabelle"].as_str(), a["feld"].as_str()), (Some("clip"), Some("_anlegen")));
+        assert_eq!(a["datensatz"], "clip-happy_end_test-a007r132-a007c010_120101_r132");
+        assert_eq!(a["wert"]["karte_id"], "karte-happy_end_test-a007r132");
+        assert!(a["wert"]["take_id"].is_null());
+    }
 
     #[test]
     fn geloescht_nur_weich() {

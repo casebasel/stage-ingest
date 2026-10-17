@@ -63,6 +63,10 @@ pub struct ClipEintrag {
     /// `take_id` ist ein Studio-Take der Stage (`studio_take.id`) → in der Datenbank `clip.studio_take_id`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub studio: bool,
+    /// Lag im Kartenordner, ohne dass ein Einlesen fertig wurde (abgebrochener Lauf, 15./16.10.2026): kopiert, aber
+    /// nicht gegen die Karte geprüft. Von Marlon in „Zu klären“ aufgenommen.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ohne_pruefung: bool,
 }
 
 /// Eine gefundene Karte mit Ort.
@@ -110,6 +114,23 @@ pub fn clip_entfernen(datei: &Path, clip: &str) -> std::io::Result<Option<String
         crate::sicher_schreiben(datei, &text)?;
     }
     Ok(z.karte_id)
+}
+
+/// Nimmt einen Clip auf, der im Kartenordner liegt, aber in der Zusammenfassung fehlt (`ohne_pruefung`). Steht er schon
+/// drin, bleibt alles. Gibt die ID der Karte in der Datenbank und die Projektangaben zurück.
+pub fn aufnehmen(
+    datei: &Path,
+    eintrag: ClipEintrag,
+) -> std::io::Result<(Option<String>, std::collections::BTreeMap<String, String>)> {
+    let mut z: KartenZusammenfassung = serde_json::from_slice(&std::fs::read(datei)?).map_err(std::io::Error::other)?;
+    if !z.clips.iter().any(|c| c.name.eq_ignore_ascii_case(&eintrag.name)) {
+        z.geloescht.retain(|g| !g.eq_ignore_ascii_case(&eintrag.name));
+        z.clips.push(eintrag);
+        z.clips.sort_by(|a, b| a.name.cmp(&b.name));
+        let text = serde_json::to_vec_pretty(&z).map_err(std::io::Error::other)?;
+        crate::sicher_schreiben(datei, &text)?;
+    }
+    Ok((z.karte_id, z.projekt))
 }
 
 /// Liest eine Zusammenfassung aus ihrer Datei (`None`, wenn unlesbar).
@@ -221,6 +242,7 @@ mod tests {
                 zuordnung: "zeitfenster".into(),
                 abweichungen: vec![],
                 studio: false,
+                ohne_pruefung: false,
                 dreh_id: None,
             }],
         };
@@ -247,6 +269,7 @@ mod tests {
             zuordnung: zuordnung.into(),
             abweichungen: vec![],
             studio: false,
+            ohne_pruefung: false,
             dreh_id: None,
         };
         let karte = |clips| KartenZusammenfassung {

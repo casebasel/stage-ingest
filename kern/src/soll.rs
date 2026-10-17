@@ -37,6 +37,10 @@ pub struct SollClip {
     /// Drehtag `JJJJ-MM-TT` (Ortszeit), um den Tageszeit-Timecode der Kamera in eine Uhrzeit umzurechnen.
     #[serde(default)]
     pub drehtag: String,
+    /// Der Clipname ist nur ein Vorschlag der App (`take.clip_name` ohne bestätigtes `take.clip`): Zähler und Datum
+    /// geschätzt. Dann gilt auch das Zeitfenster der Klappe (Marlon, 17.10.2026: „im Timecode seht ihr die Zeit“).
+    #[serde(default)]
+    pub name_geschaetzt: bool,
 }
 
 /// Spielraum zwischen iPhone-Uhr und Kamera-Timecode (laut Plate Assistant „um Sekunden“).
@@ -293,12 +297,14 @@ pub fn abgleichen(kopie: &Kopie, soll: &[SollClip], clips: &[crate::ale::ClipZei
     // eindeutig ist, in beide Richtungen.
     {
         let ordnung = |s: &SollClip| s.take.trim().parse::<i64>().ok();
+        // Reihe = Plate: Cleanplate und Kugeln tragen „<Szene> · Cleanplate“.
+        let reihe = |s: &SollClip| s.szene.split(" · ").next().unwrap_or_default().to_owned();
         let sicher: Vec<(String, i64, (String, u32, String))> = a
             .gefunden
             .iter()
             .chain(&a.ueber_kennung)
             .chain(&a.ueber_qr)
-            .filter_map(|(s, p)| Some((s.szene.clone(), ordnung(s)?, ohne_datum(p)?)))
+            .filter_map(|(s, p)| Some((reihe(s), ordnung(s)?, ohne_datum(p)?)))
             .collect();
         let frei: BTreeMap<(String, u32, String), String> = auf_karte
             .iter()
@@ -311,7 +317,7 @@ pub fn abgleichen(kopie: &Kopie, soll: &[SollClip], clips: &[crate::ale::ClipZei
             let Some(p) = frei.get(&k) else { continue };
             let feste: Vec<(i64, u32)> = sicher
                 .iter()
-                .filter(|(sz, _, kk)| *sz == s.szene && kk.0 == k.0 && kk.2 == k.2)
+                .filter(|(sz, _, kk)| *sz == reihe(s) && kk.0 == k.0 && kk.2 == k.2)
                 .map(|(_, o, kk)| (*o, kk.1))
                 .collect();
             if passt_in_reihe(&feste, o, k.1) {
@@ -370,11 +376,11 @@ pub fn abgleichen(kopie: &Kopie, soll: &[SollClip], clips: &[crate::ale::ClipZei
         .chain(a.mehrdeutig.iter().map(|(s, _)| s.take_id.clone()))
         .collect();
     let mut vorschlaege = Vec::new();
-    for (_, s) in soll
-        .iter()
-        .enumerate()
-        .filter(|(i, s)| s.clip.trim().is_empty() && !s.start_zeit.is_empty() && !erledigt.contains(i))
-    {
+    for (_, s) in soll.iter().enumerate().filter(|(i, s)| {
+        let offen = s.clip.trim().is_empty()
+            || (s.name_geschaetzt && a.fehlt.iter().any(|f| f.take_id == s.take_id && !f.take_id.is_empty()));
+        offen && !s.start_zeit.is_empty() && !erledigt.contains(i)
+    }) {
         if !s.take_id.is_empty() && zugeordnet.contains(&s.take_id) {
             continue;
         }
@@ -396,6 +402,9 @@ pub fn abgleichen(kopie: &Kopie, soll: &[SollClip], clips: &[crate::ale::ClipZei
         vorschlaege.push((s.clone(), treffer));
     }
     verteilen(vorschlaege, &mut bekannt, &mut a.ueber_zeitfenster, &mut a.mehrdeutig);
+    // Über das Zeitfenster gefunden: nicht mehr „fehlt“.
+    let im_fenster: BTreeSet<String> = a.ueber_zeitfenster.iter().map(|(s, _)| s.take_id.clone()).collect();
+    a.fehlt.retain(|s| s.take_id.is_empty() || !im_fenster.contains(&s.take_id));
 
     a.unerwartet = auf_karte.into_iter().filter(|(n, _)| !bekannt.contains(n)).map(|(_, p)| p).collect();
     a
@@ -512,6 +521,7 @@ pub fn stage_csv(text: &str) -> Result<Vec<SollClip>, String> {
             start_zeit: String::new(),
             fenster_bis: String::new(),
             drehtag: String::new(),
+            name_geschaetzt: false,
         });
     }
     Ok(aus)
@@ -601,6 +611,7 @@ mod tests {
             start_zeit: String::new(),
             fenster_bis: String::new(),
             drehtag: String::new(),
+            name_geschaetzt: false,
         };
         let soll = vec![
             take("1", "A009C008_120101_R132"),
@@ -720,6 +731,7 @@ mod timecode_tests {
             start_zeit: String::new(),
             fenster_bis: String::new(),
             drehtag: String::new(),
+            name_geschaetzt: false,
         }
     }
 
@@ -938,6 +950,32 @@ mod timecode_tests {
             a.ueber_zeitfenster.iter().map(|(s, p)| (s.take_id.as_str(), p.as_str())).collect();
         assert_eq!(paare, [("T1", "A001C003_261028_R1AB.mov"), ("T2", "A001C004_261028_R1AB.mov")]);
         assert!(a.unerwartet.is_empty() && a.mehrdeutig.is_empty());
+    }
+
+    #[test]
+    fn geschaetzter_name_ueber_das_zeitfenster() {
+        // Die App schätzte „A001C009_261016“, die Kamera (Uhr auf 2012) schrieb C004_120101; die Klappe passt zur
+        // Tageszeit im Timecode (Marlon, 17.10.2026).
+        let k = kopie(&["A001C004_120101_R1AB.mov"]);
+        let clips = [zeile("A001C004_120101_R1AB.mov", "10:50:30:00", "10:51:00:00")];
+        let s = SollClip {
+            take_id: "T2".into(),
+            clip: "A001C009_261016_R1AB".into(),
+            name_geschaetzt: true,
+            start_zeit: "2026-10-28T09:50:00+00:00".into(),
+            drehtag: "2026-10-28".into(),
+            start_tc: String::new(),
+            end_tc: String::new(),
+            ..soll("", "")
+        };
+        let a = abgleichen(&k, std::slice::from_ref(&s), &clips);
+        let paare: Vec<(&str, &str)> =
+            a.ueber_zeitfenster.iter().map(|(s, p)| (s.take_id.as_str(), p.as_str())).collect();
+        assert_eq!(paare, [("T2", "A001C004_120101_R1AB.mov")]);
+        assert!(a.fehlt.is_empty() && a.unerwartet.is_empty());
+        // Bestätigter Name (nicht geschätzt): kein Zeitfenster, er fehlt.
+        let b = abgleichen(&k, &[SollClip { name_geschaetzt: false, ..s }], &clips);
+        assert!(b.ueber_zeitfenster.is_empty() && b.fehlt.len() == 1);
     }
 
     #[test]

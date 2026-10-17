@@ -182,6 +182,30 @@ pub fn clip_endgueltig(
     if weg.is_empty() && schon_weg.is_empty() {
         return Ok(ergebnis);
     }
+    // Dateien in der Kopie, die die Historie nicht kennt (z. B. aus einem abgebrochenen Einlesen): Die neue Historie
+    // würde sie als geprüft führen, obwohl sie nie gegen die Karte gelesen wurden. Dann nichts löschen.
+    if generationen > 0 {
+        let wird_geloescht = |p: &Path| weg.iter().any(|w| p.starts_with(w));
+        let fremd: Vec<String> = walkdir::WalkDir::new(kartenordner)
+            .min_depth(1)
+            .into_iter()
+            .filter_entry(|e| {
+                (e.depth() != 1 || e.file_name() != mhl::ORDNER) && !vom_system(&e.file_name().to_string_lossy())
+            })
+            .filter_map(Result::ok)
+            .filter(|e| e.file_type().is_file() && !wird_geloescht(e.path()))
+            .map(|e| relativ(kartenordner, e.path()))
+            .filter(|r| !bekannt.contains_key(r))
+            .collect();
+        if !fremd.is_empty() {
+            return Err(io::Error::other(format!(
+                "In {} liegen Dateien, die die ASC-MHL-Historie nicht kennt ({}). Sie wurden nie gegen die Karte geprüft; \
+                 gelöscht wird hier nichts, bis sie aufgenommen oder geklärt sind.",
+                kartenordner.display(),
+                fremd.join(", ")
+            )));
+        }
+    }
     let karte_rel = relativ(drehordner, kartenordner);
     for (p, xxh) in &schon_weg {
         ergebnis.dateien.push(GeloeschteDatei {
@@ -411,6 +435,20 @@ mod tests {
         assert!(g.historie_alt.is_none(), "nur Metadaten gelöscht: Historie bleibt");
         assert!(!dreh.join("05_METADATEN/A008C003_X.csv").exists());
         assert!(mhl::nachpruefen(&karte, &Default::default(), |_| {}).unwrap().gut());
+    }
+
+    #[test]
+    fn fremde_dateien_sperren_das_loeschen() {
+        let t = tempfile::tempdir().unwrap();
+        let karte = t.path().join("D/01_KAMERA/A007R132");
+        kopie_anlegen(&karte, &[("A007R132/A007C001_X.mxf", b"weg"), ("A007R132/A007C003_X.mxf", b"bleibt")]);
+        fs::write(karte.join("A007R132/A007C010_X.mxf"), b"ohne Historie").unwrap();
+        let e = clip_endgueltig(&karte, "A007C001_X", &angaben(), Local::now()).unwrap_err();
+        assert!(e.to_string().contains("A007C010_X.mxf"), "{e}");
+        assert!(karte.join("A007R132/A007C001_X.mxf").exists(), "nichts gelöscht");
+        // Der fremde Clip selbst darf gelöscht werden.
+        let g = clip_endgueltig(&karte, "A007C010_X", &angaben(), Local::now()).unwrap();
+        assert_eq!(g.dateien.len(), 1);
     }
 
     #[test]

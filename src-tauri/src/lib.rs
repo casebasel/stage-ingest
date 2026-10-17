@@ -1052,6 +1052,7 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
                         abweichungen: abweichend.get(&name).cloned().unwrap_or_default(),
                         dreh_id: None, // nur von Hand gesetzt; sonst stünde der Clip nicht mehr unter „Zu klären“
                         studio,
+                        ohne_pruefung: false,
                         name,
                     }
                 })
@@ -1670,9 +1671,13 @@ async fn clip_zuordnen(
     dreh_id: Option<String>,
     clipdatei: Option<PathBuf>,
     take_hat_clip: Option<bool>,
+    aufnehmen: Option<String>,
 ) -> Result<(), String> {
     let p = Arc::clone(&plate);
     im_hintergrund(move || {
+        if let Some(pfad) = &aufnehmen {
+            aufnehmen_ueberall(&p, zugang.as_ref(), &dateien, &clip, pfad, clipdatei.as_deref())?;
+        }
         zuordnen_ueberall(&p, zugang.as_ref(), &dateien, &clip, take_id.as_deref(), dreh_id.as_deref())?;
         // Den Clip auch am Take eintragen, wenn der Take noch keinen bestätigten Clip hat (Marlon, 16.10.2026).
         if let (Some(z), Some(t), Some(d), Some(false)) = (&zugang, &take_id, &clipdatei, take_hat_clip) {
@@ -1788,6 +1793,59 @@ async fn clip_loeschen(
     .await
 }
 
+/// Clip aus einem abgebrochenen Einlesen aufnehmen (Marlon, 17.10.2026): in jede Zusammenfassung mit Vermerk
+/// `ohne_pruefung` und, wenn die Karte in der Datenbank steht, als Zeile `clip`. Danach wird wie sonst zugeordnet.
+fn aufnehmen_ueberall(
+    p: &plate::Plate,
+    zugang: Option<&plate::Zugang>,
+    dateien: &[PathBuf],
+    clip: &str,
+    pfad: &str,
+    clipdatei: Option<&Path>,
+) -> Result<(), String> {
+    let angaben = clipdatei.and_then(|d| ingest_kern::clip::lesen(d).ok());
+    let eintrag = ingest_kern::uebersicht::ClipEintrag {
+        name: soll::ohne_endung(clip).to_owned(),
+        pfad: pfad.to_owned(),
+        start_tc: angaben.as_ref().and_then(|a| a.start_tc.clone()),
+        end_tc: angaben.as_ref().and_then(|a| a.end_tc.clone()),
+        take_id: None,
+        zuordnung: String::new(),
+        dreh_id: None,
+        abweichungen: vec![],
+        studio: false,
+        ohne_pruefung: true,
+    };
+    let mut karte = None;
+    for d in dateien {
+        let (kid, projekt) =
+            ingest_kern::uebersicht::aufnehmen(d, eintrag.clone()).map_err(|e| format!("{}: {e}", d.display()))?;
+        karte = karte.or(kid.map(|k| (k, projekt)));
+    }
+    if let (Some(z), Some((kid, projekt))) = (zugang, karte) {
+        let projekt_id = projekt
+            .get("Kurzname")
+            .map(|k| format!("projekt-{}", k.to_lowercase()))
+            .ok_or("Projekt der Karte unbekannt (Kurzname fehlt in der Zusammenfassung)")?;
+        if let Some(a) = karte_db::clip_anlegen_aenderung(
+            &projekt_id,
+            &kid,
+            clip,
+            eintrag.start_tc.as_deref(),
+            eintrag.end_tc.as_deref(),
+            angaben.as_ref().and_then(|a| a.fps),
+            chrono::Utc::now(),
+            plate::ulid_aehnlich(),
+        ) {
+            let abgelehnt = p.karte_schreiben(z, vec![a])?;
+            if !abgelehnt.is_empty() {
+                return Err(format!("Datenbank: {}", abgelehnt.join("; ")));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Clip in allen Zusammenfassungen und (falls die Karte dort steht) in der Datenbank umhängen.
 fn zuordnen_ueberall(
     p: &plate::Plate,
@@ -1853,6 +1911,9 @@ async fn take_aus_clip(
             .and_then(|x| serde_json::to_value(x).ok());
         let angaben = ingest_kern::clip::lesen(&a.clipdatei).ok();
         // Frisch direkt vor dem Schreiben (Plate Assistant: keine Eindeutigkeit der Nummer auf dem Server).
+        if let Some(pfad) = &a.aufnehmen {
+            aufnehmen_ueberall(&p, Some(&zugang), &a.dateien, &a.clip, pfad, Some(&a.clipdatei))?;
+        }
         let nummer = p.naechste_take_nummer(&zugang, &a.plate_id)?;
         let take_id = plate::ulid_aehnlich();
         let aenderung = take_aus_clip::take_aenderung(

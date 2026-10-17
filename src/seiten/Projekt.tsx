@@ -63,6 +63,10 @@ type OffenerClip = {
   vorschlagGrund?: string | null;
   /** Schon von Hand einem Drehort zugeordnet (ohne Take). */
   drehId?: string | null;
+  /** Im Kartenordner, aber in keiner Zusammenfassung (abgebrochenes Einlesen): nicht gegen die Karte geprüft. */
+  ohnePruefung?: boolean;
+  /** Pfad in der Karte (relativ). */
+  pfad?: string;
 };
 type Uebersicht = {
   projekt: ProjektT;
@@ -1289,6 +1293,7 @@ function ZuKlaeren({
             clip: c.clip,
             clipdatei: c.clipdateien![0],
             dateien: c.dateien,
+            aufnehmen: c.ohnePruefung ? (c.pfad ?? null) : null,
           },
         });
         setStand((s) => ({ ...s, [schluessel]: { ton: "ok", text: "Take angelegt und zugeordnet" } }));
@@ -1303,6 +1308,7 @@ function ZuKlaeren({
           drehId: w.dreh,
           clipdatei: c.clipdateien?.[0] ?? null,
           takeHatClip: take ? Boolean(take.werte?.["take.clip.name"]) : null,
+          aufnehmen: c.ohnePruefung ? (c.pfad ?? null) : null,
         });
         setStand((s) => ({ ...s, [schluessel]: { ton: "ok", text: "Zugeordnet" } }));
       }
@@ -1478,6 +1484,11 @@ function ZuKlaeren({
                   <span className="unterzeile zahl leise">
                     {c.karte} · {c.startTc ?? "ohne TC"} · {c.drehOrdner}
                   </span>
+                  {c.ohnePruefung && (
+                    <span className="unterzeile">
+                      <Status ton="warn">Aus einem abgebrochenen Einlesen: kopiert, nicht gegen die Karte geprüft</Status>
+                    </span>
+                  )}
                   {c.vorschlagGrund && !st && (
                     <span className="unterzeile">
                       <Status ton="leise">Vorschlag: {c.vorschlagGrund}</Status>

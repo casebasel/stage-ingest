@@ -78,6 +78,10 @@ pub struct OffenerClip {
     pub vorschlag_grund: Option<String>,
     /// Schon von Hand einem Drehort zugeordnet (ohne Take).
     pub dreh_id: Option<String>,
+    /// Im Kartenordner, aber in keiner Zusammenfassung (abgebrochenes Einlesen): nicht gegen die Karte geprüft.
+    pub ohne_pruefung: bool,
+    /// Pfad in der Karte (relativ), zum Aufnehmen in die Zusammenfassung.
+    pub pfad: String,
 }
 
 /// Takes ohne Karte, deren Magazin und Kennung auf einer eingelesenen Karte liegen, deren Zähler dort aber fehlt und
@@ -153,16 +157,79 @@ fn vorschlaege_ohne_datum(
                     sicher.iter().filter(|(_, s)| s.0 == k.0 && s.2 == k.2).map(|(o, s)| (*o, s.1)).collect();
                 if passt_in_reihe(&feste, t.nummer, k.1) {
                     let clip = namen.iter().next().cloned().unwrap_or_default();
-                    treffer.push((
-                        clip,
-                        t.id.clone(),
-                        d.id.clone(),
-                        format!("Take {} · Name bis aufs Datum gleich", t.nummer),
-                    ));
+                    let grund = if clip.eq_ignore_ascii_case(&t.clip) {
+                        "gleicher Clipname"
+                    } else {
+                        "Name bis aufs Datum gleich"
+                    };
+                    treffer.push((clip, t.id.clone(), d.id.clone(), format!("Take {} · {grund}", t.nummer)));
                 }
             }
         }
     }
+    let mut aus = eindeutig(treffer);
+
+    // Sonst das Zeitfenster der Klappe: Tageszeit im Timecode des Clips (am Drehtag, Europe/Zurich) nach der Klappe und
+    // vor der nächsten Klappe im Projekt, höchstens 30 min (Marlon, 17.10.2026: „im Timecode seht ihr die Zeit“). Nur
+    // für Takes ohne bestätigten Clip und Clips ohne Take.
+    let zeit = |v: Option<&Value>| {
+        v.and_then(Value::as_str).and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()).map(|t| t.to_utc())
+    };
+    let mut klappen: Vec<chrono::DateTime<chrono::Utc>> = drehs
+        .iter()
+        .flat_map(|d| &d.plates)
+        .flat_map(|p| &p.takes)
+        .filter_map(|t| zeit(t.werte.get("take.start_zeit")))
+        .collect();
+    klappen.sort();
+    let vergeben: HashSet<String> = aus.values().map(|(t, _, _)| t.clone()).collect();
+    let mut treffer: Vec<(String, String, String, String)> = Vec::new();
+    for d in drehs.iter().filter(|d| !d.datum.is_empty()) {
+        for p in &d.plates {
+            for t in p.takes.iter().filter(|t| t.karte.is_none() && !vergeben.contains(&t.id)) {
+                if t.werte.contains_key("take.clip.name") {
+                    continue;
+                }
+                let Some(klappe) = zeit(t.werte.get("take.start_zeit")) else { continue };
+                let naechste = klappen.iter().find(|k| **k > klappe).copied();
+                let bis = naechste
+                    .map_or(klappe + chrono::Duration::minutes(30), |n| n.min(klappe + chrono::Duration::minutes(30)));
+                let von = klappe - chrono::Duration::seconds(20);
+                for c in karten.iter().flat_map(|k| k.inhalt.clips.iter()) {
+                    let name = c.name.to_uppercase();
+                    if c.take_id.is_some()
+                        || mit_take.contains(&name)
+                        || zugeordnet.contains(&name)
+                        || aus.contains_key(&name)
+                    {
+                        continue;
+                    }
+                    let Some(tc) = c.start_tc.as_deref() else { continue };
+                    let Some(beginn) = ingest_kern::soll::tc_als_zeit(&d.datum, tc, 25.0) else { continue };
+                    if beginn >= von && beginn < bis {
+                        treffer.push((
+                            name,
+                            t.id.clone(),
+                            d.id.clone(),
+                            format!("Take {} · Zeit der Klappe passt zum Timecode", t.nummer),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    // Eindeutig in beide Richtungen: ein Take mit genau einem Clip, ein Clip für genau einen Take.
+    let mut je_take: HashMap<String, usize> = HashMap::new();
+    for t in &treffer {
+        *je_take.entry(t.1.clone()).or_default() += 1;
+    }
+    treffer.retain(|t| je_take[&t.1] == 1);
+    aus.extend(eindeutig(treffer));
+    aus
+}
+
+/// Nur Clips, die genau ein Take beansprucht.
+fn eindeutig(treffer: Vec<(String, String, String, String)>) -> HashMap<String, (String, String, String)> {
     let mut je_clip: HashMap<&str, usize> = HashMap::new();
     for t in &treffer {
         *je_clip.entry(t.0.as_str()).or_default() += 1;
@@ -292,6 +359,54 @@ fn flach(praefix: &str, v: &Value, aus: &mut std::collections::BTreeMap<String, 
                 aus.insert(name, w.clone());
             }
         }
+    }
+}
+
+/// Clips im Kartenordner einer Kopie, die in ihrer Zusammenfassung fehlen (abgebrochenes Einlesen, Marlon 17.10.2026:
+/// A007C010–C013 lagen auf dem NAS, aber in keiner Zusammenfassung). Nur im Speicher als `ohne_pruefung` dazu, damit
+/// „Zu klären“ sie mit Vorschlag zeigt; in die Datei kommen sie erst, wenn Marlon sie zuordnet.
+fn ohne_eintrag_ergaenzen(k: &mut GefundeneKarte) {
+    let Some(kartenordner) = k
+        .datei
+        .parent()
+        .and_then(Path::parent)
+        .map(|d| d.join(ingest_kern::struktur::KAMERA).join(ingest_kern::struktur::ordnername(&k.inhalt.karte)))
+    else {
+        return;
+    };
+    let bekannt: HashSet<String> = k
+        .inhalt
+        .clips
+        .iter()
+        .map(|c| c.name.to_uppercase())
+        .chain(k.inhalt.geloescht.iter().map(|g| g.to_uppercase()))
+        .collect();
+    let mut neu: Vec<(String, PathBuf)> = clips_im_ordner(&kartenordner)
+        .into_iter()
+        .filter(|(n, _)| !bekannt.contains(n) && ingest_kern::soll::arri_reel(n).is_some())
+        .collect();
+    neu.sort();
+    for (_, datei) in neu {
+        let name = datei.file_name().map(|n| ingest_kern::soll::ohne_endung(&n.to_string_lossy()).to_owned());
+        let Some(name) = name else { continue };
+        let pfad = datei
+            .strip_prefix(&kartenordner)
+            .map(|p| p.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/"))
+            .unwrap_or_default();
+        // Timecode aus dem Kopf der Datei (wenige KB), für das Zeitfenster der Klappe.
+        let angaben = ingest_kern::clip::lesen(&datei).ok();
+        k.inhalt.clips.push(uebersicht::ClipEintrag {
+            name,
+            pfad,
+            start_tc: angaben.as_ref().and_then(|a| a.start_tc.clone()),
+            end_tc: angaben.as_ref().and_then(|a| a.end_tc.clone()),
+            take_id: None,
+            zuordnung: String::new(),
+            dreh_id: None,
+            abweichungen: vec![],
+            studio: false,
+            ohne_pruefung: true,
+        });
     }
 }
 
@@ -450,7 +565,8 @@ pub fn zusammenfuehren(
             .filter(|o| o.is_dir());
         // Ältere Zusammenfassungen ohne `pfad`: Clips einmal pro Karte über den Namen suchen.
         let mut nach_name: Option<HashMap<String, PathBuf>> = None;
-        for c in &k.inhalt.clips {
+        // Ungeprüfte Clips (abgebrochenes Einlesen) machen keinen Take „sicher“; sie stehen in „Zu klären“.
+        for c in k.inhalt.clips.iter().filter(|c| !c.ohne_pruefung) {
             let datei = ordner.as_ref().and_then(|o| {
                 let direkt = o.join(&c.pfad);
                 if !c.pfad.is_empty() && direkt.is_file() {
@@ -663,6 +779,8 @@ pub fn zusammenfuehren(
                 vorschlag_take: None,
                 vorschlag_grund: None,
                 dreh_id: c.dreh_id.clone(),
+                ohne_pruefung: c.ohne_pruefung,
+                pfad: c.pfad.clone(),
             }),
         }
     }
@@ -791,6 +909,9 @@ pub fn laden(plate: &Plate, zugang: Option<&Zugang>, projekt: Projekt, basis: &[
     // Alle Kopien bleiben drin (Einsortieren, Clip-Suche und „Zu klären“ brauchen jede Platte); nur die Kartenliste
     // der Anzeige fasst dieselbe Karte zusammen (in `zusammenfuehren`).
     karten.sort_by(|a, b| (&a.inhalt.karte, &b.inhalt.beginn).cmp(&(&b.inhalt.karte, &a.inhalt.beginn)));
+    for k in &mut karten {
+        ohne_eintrag_ergaenzen(k);
+    }
     let (drehs, jobs, hinweis) = match zugang {
         Some(z) => match plate.projekt_drehs(z, &projekt) {
             Ok(v) => {
@@ -934,6 +1055,46 @@ mod tests {
     }
 
     #[test]
+    fn clip_aus_abgebrochenem_einlesen_kommt_nach_zu_klaeren() {
+        // 4 stock, 17.10.2026: A007C010 liegt im Kartenordner, steht aber in keiner Zusammenfassung; der Take im Plate
+        // Assistant trägt genau diesen Namen. Er gilt nicht als sicher, sondern kommt mit Vorschlag und Vermerk.
+        let t = tempfile::tempdir().unwrap();
+        let dreh = t.path().join("2026-10-14_4_STOCK");
+        let ordner = dreh.join("01_KAMERA/A007R132/A007R132");
+        std::fs::create_dir_all(&ordner).unwrap();
+        std::fs::write(ordner.join("A007C009_120101_R132.mxf"), b"x").unwrap();
+        std::fs::write(ordner.join("A007C010_120101_R132.mxf"), b"y").unwrap();
+        let drehs = json!([{ "id": "D1", "name": "4 stock", "datum": "2026-10-14", "geloescht": false, "plate": [
+            { "id": "P5", "nummer": 5, "geloescht": false, "take": [
+                { "id": "T1", "nummer": 1, "clip_name": "A007C010_120101_R132", "geloescht": false } ] } ] }]);
+        let inhalt: KartenZusammenfassung = serde_json::from_value(json!({
+            "format": 1, "karte": "A007R132", "beginn": "", "version": "t", "freigegeben": true,
+            "unabhaengigeKopien": 1, "grund": "",
+            "clips": [{ "name": "A007C009_120101_R132", "pfad": "A007R132/A007C009_120101_R132.mxf", "startTc": null,
+                        "endTc": null, "takeId": "T0", "zuordnung": "info1" }]
+        }))
+        .unwrap();
+        let mut k = GefundeneKarte {
+            dreh_ordner: "2026-10-14_4_STOCK".into(),
+            datei: dreh.join("04_BERICHTE/A007R132_ingest.json"),
+            inhalt,
+        };
+        ohne_eintrag_ergaenzen(&mut k);
+        assert_eq!(k.inhalt.clips.len(), 2);
+        let p: Projekt =
+            serde_json::from_value(json!({"id": "projekt-x", "name": "X", "kurzname": "X", "aktiv": true})).unwrap();
+        let u = zusammenfuehren(p, &drehs, &json!([]), vec![k], vec![], &Value::Null);
+        assert!(u.drehs[0].plates[0].takes[0].karte.is_none(), "ungeprüft macht nicht sicher");
+        let o = &u.zu_klaeren[0];
+        assert_eq!(
+            (o.clip.as_str(), o.ohne_pruefung, o.pfad.as_str()),
+            ("A007C010_120101_R132", true, "A007R132/A007C010_120101_R132.mxf")
+        );
+        assert_eq!(o.vorschlag_take.as_deref(), Some("T1"));
+        assert!(u.ohne_aufnahme.is_empty());
+    }
+
+    #[test]
     fn rolle_und_clipnummer() {
         assert_eq!(rolle_und_nummer("A009C010_120101_R132"), Some(("A009".into(), 10)));
         assert_eq!(rolle_und_nummer("IMG_0001"), None);
@@ -1002,6 +1163,7 @@ mod tests {
                         zuordnung: String::new(),
                         abweichungen: vec![],
                         studio: false,
+                        ohne_pruefung: false,
                         dreh_id: None,
                     },
                     ClipEintrag {
@@ -1013,6 +1175,7 @@ mod tests {
                         zuordnung: "zeitfenster".into(),
                         abweichungen: vec![],
                         studio: false,
+                        ohne_pruefung: false,
                         dreh_id: None,
                     },
                     ClipEintrag {
@@ -1024,6 +1187,7 @@ mod tests {
                         zuordnung: String::new(),
                         abweichungen: vec![],
                         studio: false,
+                        ohne_pruefung: false,
                         dreh_id: None,
                     },
                 ],
