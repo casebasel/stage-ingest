@@ -1,12 +1,13 @@
 // Gerüst: Kopfleiste mit den Seiten (Einlesen · Protokoll · Projekt · Prüfen · Einrichtung) und dem Stand der
 // Verbindungen.
 // Der laufende Vorgang liegt über den Seiten (lauf.tsx): ein Seitenwechsel unterbricht nie eine Kopie.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { FolderKanban, HardDriveDownload, ListChecks, Moon, Settings, ShieldCheck, Sun, SunMoon } from "lucide-react";
 import { anwenden, gemerkteWahl, type Wahl } from "./thema";
 import { Aktualisierung, useAktualisierung } from "./Aktualisierung";
 import { EinstellungenGeben, useEinstellungen } from "./einstellungen";
-import { KontoGeben, useKonto } from "./konto";
+import { KontoGeben, useKonto, type AbgleichStand } from "./konto";
 import { LaufGeben, useLauf } from "./lauf";
 import { Status, zahl } from "./teile";
 import { Einlesen } from "./seiten/Einlesen";
@@ -53,6 +54,20 @@ function Gerust() {
   const lauf = useLauf();
   const konto = useKonto();
   const e = useEinstellungen();
+
+  // Vorgänge aller Ingest-Rechner (Marlon, 17.10.2026: „alle Ingest-Apps synchron“): einmal je Start voll nachtragen,
+  // nicht erst, wenn jemand das Protokoll öffnet (bis 0.1.63 kam sonst nichts in die Datenbank). Nie während einer Kopie.
+  const vollAbgeglichen = useRef(false);
+  useEffect(() => {
+    if (vollAbgeglichen.current || !konto.darfSchreiben || lauf.laeuft || e.ziele.length === 0) return;
+    const t = window.setTimeout(() => {
+      vollAbgeglichen.current = true;
+      invoke<AbgleichStand>("vorgaenge_abgleichen", { zugang: konto.zugang, basis: e.ziele, voll: true })
+        .then((st) => konto.setAbgleich(st))
+        .catch(() => (vollAbgeglichen.current = false));
+    }, 20_000);
+    return () => window.clearTimeout(t);
+  }, [konto.darfSchreiben, konto.zugang, lauf.laeuft, e.ziele]);
 
   const jetzt = WAHLEN.find((w) => w.wahl === wahl)!;
   const weiter = WAHLEN[(WAHLEN.indexOf(jetzt) + 1) % WAHLEN.length];

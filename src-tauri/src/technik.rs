@@ -160,8 +160,9 @@ fn gilt(spalte: &str, v: &str) -> bool {
     !v.trim().is_empty() && !(matches!(spalte, "blende" | "fokus") && artcmd::zahl(v) == Some(0.0))
 }
 
-/// Spaltenwerte aus den typisierten Kamerawerten, damit die Take-Tabelle dasselbe zeigt wie die Datenbank. Shutter wie
-/// CAP und ALE in Grad („180.0“), ND als Dichte, CDL in einer Zeile.
+/// Spaltenwerte aus den typisierten Kamerawerten, damit die Take-Tabelle dasselbe zeigt wie die Datenbank. Shutter und
+/// ND schreiben sie wie CAP am iPhone und die Stage („180.0“ in Grad, „ND 2.1“; Plate Assistant 17.10.2026), denn
+/// `take_aus_clip` legt sie so an `take.kamera`. CDL in einer Zeile.
 fn anzeige(k: &Map<String, Value>) -> Vec<(&'static str, String)> {
     let text = |s: &str| match k.get(s) {
         Some(Value::String(t)) => Some(t.clone()),
@@ -177,7 +178,6 @@ fn anzeige(k: &Map<String, Value>) -> Vec<(&'static str, String)> {
         ("ei", "iso"),
         ("weissK", "weissK"),
         ("tint", "tint"),
-        ("nd", "ndDichte"),
         ("sensorFps", "sensorFps"),
     ]
     .into_iter()
@@ -185,6 +185,9 @@ fn anzeige(k: &Map<String, Value>) -> Vec<(&'static str, String)> {
     .collect();
     if let Some(g) = k.get("shutterGrad").and_then(Value::as_f64) {
         aus.push(("shutter", format!("{g:.1}")));
+    }
+    if let Some(nd) = text("ndDichte") {
+        aus.push(("nd", format!("ND {nd}")));
     }
     if let Some(c) = k.get("cdl") {
         let drei = |t: &str| {
@@ -306,7 +309,7 @@ mod tests {
         let wert = |k: &str| w.get(k).map(String::as_str);
         assert_eq!(wert("kameramodell"), Some("ARRI ALEXA Mini"), "ART CMD vor dem MOV („ALEXA Mini“)");
         assert_eq!(wert("ei"), Some("800"), "was ART CMD nicht hat, kommt aus dem MOV");
-        assert_eq!((wert("shutter"), wert("nd")), (Some("180.0"), Some("0.6")));
+        assert_eq!((wert("shutter"), wert("nd")), (Some("180.0"), Some("ND 0.6")));
         assert_eq!((wert("blende"), wert("gamma")), (None, None), "kein roher Encoder, kein blackGamma");
         let db = fuer_datenbank(&w).unwrap();
         assert_eq!(db["kamerawerte"]["shutterGrad"], serde_json::json!(180));
