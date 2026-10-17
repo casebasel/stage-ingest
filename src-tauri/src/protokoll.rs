@@ -27,8 +27,9 @@ use ingest_kern::mhl::{self, Generation};
 use ingest_kern::struktur;
 use ingest_kern::uebersicht::KartenZusammenfassung;
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 
+use crate::vorgang::{self, DbVorgang, VorgangDatei, VorgangKopie};
 use crate::VerlaufEintrag;
 
 /// Eine Karte laut gemeinsamer Datenbank (`karte` mit den Namen ihrer Clips), von welchem Rechner auch immer.
@@ -51,6 +52,14 @@ pub struct DbKarte {
     pub speicherort: String,
     /// Clipnamen ohne Endung.
     pub clips: Vec<String>,
+}
+
+/// Was die gemeinsame Datenbank weiss: Karten (`karte`/`clip`) und Vorgänge aller Rechner (`ingest_vorgang`, für die
+/// Liste ohne Dateilisten).
+#[derive(Debug, Default)]
+pub struct Datenbank {
+    pub karten: Vec<DbKarte>,
+    pub vorgaenge: Vec<DbVorgang>,
 }
 
 /// `karte.ablage` zum Anzeigen: `nas` → „NAS“, `platte:<Kennung>` → „Platte“ mit den ersten Zeichen der Kennung.
@@ -159,12 +168,19 @@ pub struct ProtokollKopie {
     /// Nur aus der gemeinsamen Datenbank bekannt (Ablage hier nicht verbunden); `ordner` ist dann der Ort im
     /// Projektordner der Ablage.
     pub aus_datenbank: bool,
+    /// ID aus der Merkdatei der Ablage (auf jedem Rechner dieselbe).
+    pub ablage_id: Option<String>,
 }
 
 /// Alle Karten, neueste zuerst. `basis`: eingetragene Ziele; dazu die Ablagen auf allen Laufwerken und die Karten der
 /// gemeinsamen Datenbank (`db`, leer ohne Netz). `db` wird erst nach dem Durchsuchen der Ziele gefragt, damit die
 /// Abfrage nebenher laufen kann.
-pub fn liste(basis: &[PathBuf], verlauf: &[VerlaufEintrag], db: impl FnOnce() -> Vec<DbKarte>) -> Vec<ProtokollKarte> {
+pub fn liste(basis: &[PathBuf], verlauf: &[VerlaufEintrag], db: impl FnOnce() -> Datenbank) -> Vec<ProtokollKarte> {
+    liste_unter(&wurzeln(basis), verlauf, db)
+}
+
+/// Eingetragene Ziele und die Ablagen auf allen Laufwerken, ohne Doppel.
+fn wurzeln(basis: &[PathBuf]) -> Vec<PathBuf> {
     let mut wurzeln: Vec<PathBuf> = Vec::new();
     for b in basis.iter().cloned().chain(ingest_kern::ablage::finden()) {
         let echt = std::fs::canonicalize(&b).unwrap_or_else(|_| b.clone());
@@ -172,14 +188,37 @@ pub fn liste(basis: &[PathBuf], verlauf: &[VerlaufEintrag], db: impl FnOnce() ->
             wurzeln.push(b);
         }
     }
-    liste_unter(&wurzeln, verlauf, db)
+    wurzeln
+}
+
+/// Kartenordner aller eingelesenen Karten auf den erreichbaren Zielen (Abgleich der Vorgänge, `vorgang`).
+pub fn kartenordner(basis: &[PathBuf]) -> Vec<PathBuf> {
+    let mut aus: Vec<PathBuf> = Vec::new();
+    for w in wurzeln(basis) {
+        for p in unterordner(&w) {
+            for d in unterordner(&p) {
+                let Ok(liste) = std::fs::read_dir(d.join(struktur::BERICHTE)) else { continue };
+                for e in liste.flatten() {
+                    if !datei_name(&e.path()).ends_with(ingest_kern::uebersicht::ENDUNG) {
+                        continue;
+                    }
+                    let Some(z) = ingest_kern::uebersicht::lesen_datei(&e.path()) else { continue };
+                    let o = d.join(struktur::KAMERA).join(struktur::ordnername(&z.karte));
+                    if o.is_dir() && !aus.contains(&o) {
+                        aus.push(o);
+                    }
+                }
+            }
+        }
+    }
+    aus
 }
 
 /// [`liste`] unter gegebenen Wurzeln (für Tests).
 pub fn liste_unter(
     wurzeln: &[PathBuf],
     verlauf: &[VerlaufEintrag],
-    db: impl FnOnce() -> Vec<DbKarte>,
+    db: impl FnOnce() -> Datenbank,
 ) -> Vec<ProtokollKarte> {
     // Karte (gross) → (Zusammenfassungen mit Kartenordner, Projekt, Drehordner, Ablage).
     struct Fund {
@@ -188,11 +227,13 @@ pub fn liste_unter(
         projekt: String,
         dreh: String,
         ablage: Option<String>,
+        ablage_id: Option<String>,
         bericht: Option<PathBuf>,
     }
     let mut funde: BTreeMap<String, Vec<Fund>> = BTreeMap::new();
     for w in wurzeln {
-        let ablage = ingest_kern::ablage::lesen(w).map(|a| a.name);
+        let merk = ingest_kern::ablage::lesen(w);
+        let (ablage, ablage_id) = (merk.as_ref().map(|a| a.name.clone()), merk.map(|a| a.id));
         for p in unterordner(w) {
             for d in unterordner(&p) {
                 let berichte = d.join(struktur::BERICHTE);
@@ -210,6 +251,7 @@ pub fn liste_unter(
                         projekt: datei_name(&p),
                         dreh: datei_name(&d),
                         ablage: ablage.clone(),
+                        ablage_id: ablage_id.clone(),
                         bericht,
                         z,
                     });
@@ -226,23 +268,33 @@ pub fn liste_unter(
         }
     }
     let db = db();
-    let aus_db: HashMap<String, &DbKarte> = db.iter().map(|k| (k.karte.to_uppercase(), k)).collect();
+    let aus_db: HashMap<String, &DbKarte> = db.karten.iter().map(|k| (k.karte.to_uppercase(), k)).collect();
+    let mut vorgaenge_je: HashMap<String, Vec<&DbVorgang>> = HashMap::new();
+    for v in &db.vorgaenge {
+        vorgaenge_je.entry(v.karte.to_uppercase()).or_default().push(v);
+    }
     let mut namen: Vec<String> = funde.keys().cloned().collect();
-    namen.extend(laeufe.keys().filter(|k| !funde.contains_key(*k)).cloned());
-    namen.extend(aus_db.keys().filter(|k| !funde.contains_key(*k) && !laeufe.contains_key(*k)).cloned());
+    for n in laeufe.keys().chain(aus_db.keys()).chain(vorgaenge_je.keys()) {
+        if !namen.contains(n) {
+            namen.push(n.clone());
+        }
+    }
 
     let mut aus = Vec::new();
     for name in namen {
         let f = funde.get(&name).map(Vec::as_slice).unwrap_or_default();
         let lauf = laeufe.get(&name).copied();
         let dbk = aus_db.get(&name).copied();
+        let vorgaenge = vorgaenge_je.get(&name).map(Vec::as_slice).unwrap_or_default();
         let mut kopien: Vec<ProtokollKopie> = Vec::new();
         let gleich = |a: &Path, b: &Path| {
             a == b || std::fs::canonicalize(a).ok().is_some_and(|x| std::fs::canonicalize(b).ok() == Some(x))
         };
         for x in f {
             if !kopien.iter().any(|k| gleich(&k.ordner, &x.ordner)) {
-                kopien.push(kopie(&x.ordner, x.ablage.clone(), None, x.bericht.clone()));
+                let mut k = kopie(&x.ordner, x.ablage.clone(), None, x.bericht.clone());
+                k.ablage_id = x.ablage_id.clone();
+                kopien.push(k);
             }
         }
         if let Some(l) = lauf {
@@ -258,11 +310,59 @@ pub fn liste_unter(
                 }
             }
         }
-        // Die Hauptkopie laut Datenbank, wenn sie hier nicht schon gefunden ist (eingelesen auf einem anderen Rechner,
-        // Ablage hier nicht verbunden). Die Datenbank kennt nur die Art der Ablage, nicht ihre Merkdatei: dieselbe Kopie
-        // ist, was am selben Ort im Projektordner liegt. Bis 0.1.31 steht dort ein absoluter Pfad des Rechners, der
-        // eingelesen hat.
-        if let Some(d) = dbk.filter(|d| !d.speicherort.is_empty()) {
+        // Kopien laut den Vorgängen aller Rechner (`ingest_vorgang`): je Ablage der neueste Ort. Dieselbe Kopie ist, was
+        // auf derselben Ablage (Merkdatei-ID) liegt; nach dem Einsortieren steht sie an einem anderen Ort, bleibt aber
+        // dieselbe. Ohne Merkdatei (alte Kopien) zählt der Ort im Projektordner.
+        let mut je_ablage: Vec<(&VorgangKopie, &DbVorgang)> = Vec::new();
+        for v in vorgaenge {
+            for x in &v.kopien {
+                let gleiche = |(a, _): &&(&VorgangKopie, &DbVorgang)| match (&a.ablage_id, &x.ablage_id) {
+                    (Some(a), Some(b)) => a == b,
+                    (None, None) => a.pfad == x.pfad,
+                    _ => false,
+                };
+                match je_ablage.iter().position(|e| gleiche(&e)) {
+                    Some(i) if neuer(&v.zeit, &je_ablage[i].1.zeit) => je_ablage[i] = (x, v),
+                    Some(_) => {}
+                    None => je_ablage.push((x, v)),
+                }
+            }
+        }
+        for (x, v) in &je_ablage {
+            let kurz = v.projekt_id.as_deref().and_then(|p| p.strip_prefix("projekt-")).map(str::to_uppercase);
+            let ort = match (&kurz, Path::new(&x.pfad).is_absolute()) {
+                (Some(k), false) => PathBuf::from(format!("{k}/{}", x.pfad)),
+                _ => PathBuf::from(&x.pfad),
+            };
+            let schon = kopien.iter().any(|k| match (&k.ablage_id, &x.ablage_id) {
+                (Some(a), Some(b)) => a == b,
+                (None, _) => k.ordner.ends_with(&ort) || gleich(&k.ordner, &ort),
+                (Some(_), None) => false,
+            });
+            if !schon {
+                let mut k = kopie(&ort, x.ablage.clone(), None, None);
+                k.aus_datenbank = !k.erreichbar;
+                k.ablage_id = x.ablage_id.clone();
+                if k.aus_datenbank {
+                    // Die neueste bekannte Zahl dieser Ablage (ein Löschen ohne neue Historie nennt keine).
+                    let mut mit_zahl: Vec<&DbVorgang> = vorgaenge
+                        .iter()
+                        .copied()
+                        .filter(|w| w.kopien.iter().any(|y| y.ablage_id == x.ablage_id && y.dateien.is_some()))
+                        .collect();
+                    mit_zahl.sort_by_key(|w| std::cmp::Reverse(zeitpunkt(&w.zeit)));
+                    k.dateien = mit_zahl
+                        .first()
+                        .and_then(|w| w.kopien.iter().find(|y| y.ablage_id == x.ablage_id).and_then(|y| y.dateien));
+                }
+                kopien.push(k);
+            }
+        }
+        // Ohne Vorgänge die Hauptkopie laut `karte`, wenn sie hier nicht schon gefunden ist (eingelesen auf einem anderen
+        // Rechner, Ablage hier nicht verbunden). `karte.ablage` ist nur die Art der Ablage, nicht ihre Merkdatei:
+        // dieselbe Kopie ist, was am selben Ort im Projektordner liegt. Bis 0.1.31 steht dort ein absoluter Pfad des
+        // Rechners, der eingelesen hat.
+        if let Some(d) = dbk.filter(|d| !d.speicherort.is_empty() && je_ablage.is_empty()) {
             let absolut = Path::new(&d.speicherort).is_absolute();
             let ort = match (&d.projekt, absolut) {
                 (Some(p), false) => PathBuf::from(format!("{p}/{}", d.speicherort)),
@@ -283,6 +383,15 @@ pub fn liste_unter(
             .flatten()
             .max()
             .or_else(|| dbk.map(|d| d.eingelesen.clone()))
+            .or_else(|| {
+                vorgaenge.iter().filter(|v| v.art == "eingelesen").map(|v| v.zeit.clone()).reduce(|a, b| {
+                    if neuer(&b, &a) {
+                        b
+                    } else {
+                        a
+                    }
+                })
+            })
             .unwrap_or_default();
         let lauf_neuer = lauf.is_some_and(|l| neueste.is_none_or(|n| l.beginn > n.z.beginn));
         let (sicher, grund, unabhaengig) = match (neueste, lauf) {
@@ -336,7 +445,18 @@ fn kopie(ordner: &Path, ablage: Option<String>, gut: Option<bool>, bericht: Opti
         bytes: p.as_ref().map(|p| p.dateien.iter().map(|d| d.groesse).sum()),
         zuletzt: p.and_then(|p| p.generationen.last().cloned()),
         aus_datenbank: false,
+        ablage_id: None,
     }
+}
+
+/// Zeitpunkt in Mikrosekunden (RFC 3339), sonst `None`.
+fn zeitpunkt(x: &str) -> Option<i64> {
+    DateTime::parse_from_rfc3339(x).ok().map(|z| z.timestamp_micros())
+}
+
+/// Ist `a` später als `b` (RFC 3339)?
+fn neuer(a: &str, b: &str) -> bool {
+    zeitpunkt(a) > zeitpunkt(b)
 }
 
 fn unterordner(o: &Path) -> Vec<PathBuf> {
@@ -463,6 +583,9 @@ pub struct ProtokollDetail {
     pub dateien: Vec<DateiZeile>,
     /// Neueste zuerst.
     pub verlauf: Vec<Vorgang>,
+    /// Keine Kopie lesbar: Die Dateien kommen aus den Vorgängen der gemeinsamen Datenbank (beim Einlesen geprüft,
+    /// hier nicht verbunden).
+    pub dateien_aus_datenbank: bool,
 }
 
 /// Was eine Kopie über ihre Dateien weiss.
@@ -479,7 +602,88 @@ struct KopieStand {
 }
 
 /// Dateien einer Karte über alle Kopien: je Datei und Kopie der Stand, dazu der Verlauf.
+#[cfg(test)]
 pub fn detail(ordner: &[PathBuf]) -> ProtokollDetail {
+    detail_mit(ordner, &[], &[])
+}
+
+/// [`detail`] mit den Vorgängen der gemeinsamen Datenbank (alle Rechner, mit Dateilisten): Was hier nicht aus einer
+/// Historie kommt, steht zusätzlich im Verlauf (zugeordnet über die Merkdatei-ID `ablagen[i]` oder den Ort); ist keine
+/// Kopie lesbar, kommen die Dateien mit Prüfsumme aus den Vorgängen „eingelesen“ (Stand „Offline“).
+pub fn detail_mit(ordner: &[PathBuf], ablagen: &[Option<String>], db: &[DbVorgang]) -> ProtokollDetail {
+    let mut d = detail_lokal(ordner);
+    // Was die Historien hier schon zeigen, nicht nochmals aus der Datenbank.
+    let hier: HashSet<String> = ordner.iter().flat_map(|o| vorgaenge(o)).map(|v| v.id).collect();
+    let index = |x: &VorgangKopie| -> Option<usize> {
+        let mit_id = x.ablage_id.as_ref().and_then(|a| ablagen.iter().position(|b| b.as_ref() == Some(a)));
+        mit_id.or_else(|| ordner.iter().position(|o| !x.pfad.is_empty() && o.ends_with(&x.pfad)))
+    };
+    for v in db.iter().filter(|v| !hier.contains(&v.id)) {
+        let art = match v.art.as_str() {
+            "eingelesen" => VorgangArt::Eingelesen,
+            "nachgeprueft" => VorgangArt::Nachgeprueft,
+            "geloescht" => VorgangArt::Geloescht,
+            "bereinigt" => VorgangArt::Bereinigt,
+            _ => continue,
+        };
+        let Some(i) = v.kopien.first().and_then(index) else { continue };
+        let werkzeug = v.angaben["werkzeug"].as_str().unwrap_or("Stage Ingest");
+        d.verlauf.push(Vorgang {
+            zeit: v.zeit.clone(),
+            art,
+            rechner: v.rechner.clone(),
+            benutzer: v.benutzer.clone(),
+            werkzeug: format!("{werkzeug} {}", v.version).trim().to_owned(),
+            dateien: v.kopien.first().and_then(|k| k.dateien),
+            clip: v.angaben["clip"].as_str().map(str::to_owned),
+            historie_neu: v.angaben["historie_neu"] == true,
+            kopie: i,
+        });
+    }
+    let sekunde = |t: &str| DateTime::parse_from_rfc3339(t).ok().map(|z| z.timestamp());
+    d.verlauf.sort_by(|a, b| sekunde(&b.zeit).cmp(&sekunde(&a.zeit)).then(b.zeit.cmp(&a.zeit)));
+    // Keine Kopie lesbar: die Dateien laut den Vorgängen, der neueste Stand je Datei; von Hand gelöschte grau.
+    if d.kopien.iter().all(|k| !k.erreichbar || k.fehler.is_some()) && d.dateien.is_empty() {
+        let mut nach_zeit: Vec<&DbVorgang> = db.iter().collect();
+        nach_zeit.sort_by_key(|v| sekunde(&v.zeit));
+        let mut pfade: BTreeMap<String, (u64, Option<String>)> = BTreeMap::new();
+        for v in nach_zeit.iter().filter(|v| v.art == "eingelesen") {
+            for x in &v.dateien {
+                pfade.insert(x.pfad.clone(), (x.groesse, x.xxh3.clone()));
+            }
+        }
+        let mut geloescht: HashMap<String, Loeschvermerk> = HashMap::new();
+        for v in nach_zeit.iter().filter(|v| v.art == "geloescht") {
+            for x in &v.dateien {
+                pfade.entry(x.pfad.clone()).or_insert((x.groesse, x.xxh3.clone()));
+                geloescht.entry(x.pfad.clone()).or_insert(Loeschvermerk {
+                    clip: v.angaben["clip"].as_str().unwrap_or_default().to_owned(),
+                    zeit: v.zeit.clone(),
+                    benutzer: if v.rechner.is_empty() {
+                        v.benutzer.clone()
+                    } else {
+                        format!("{} auf {}", v.benutzer, v.rechner)
+                    },
+                });
+            }
+        }
+        d.dateien_aus_datenbank = !pfade.is_empty();
+        d.dateien = pfade
+            .into_iter()
+            .map(|(pfad, (groesse, xxh128))| DateiZeile {
+                je_kopie: vec![DateiStand::Unbekannt; d.kopien.len()],
+                geloescht: geloescht.remove(&pfad),
+                geaendert: String::new(),
+                pfad,
+                groesse,
+                xxh128,
+            })
+            .collect();
+    }
+    d
+}
+
+fn detail_lokal(ordner: &[PathBuf]) -> ProtokollDetail {
     let mut kopien = Vec::new();
     let mut staende = Vec::new();
     for o in ordner {
@@ -583,7 +787,7 @@ pub fn detail(ordner: &[PathBuf]) -> ProtokollDetail {
         })
         .collect();
     let verlauf = verlauf(&kopien, &staende);
-    ProtokollDetail { kopien, dateien, verlauf }
+    ProtokollDetail { kopien, dateien, verlauf, dateien_aus_datenbank: false }
 }
 
 fn datei_stand(pfad: &str, s: &KopieStand, alle: &[Eingriff], xxh128: Option<&str>) -> DateiStand {
@@ -690,6 +894,111 @@ fn verlauf(kopien: &[KopieDetail], staende: &[KopieStand]) -> Vec<Vorgang> {
     aus
 }
 
+/// Vorgänge einer Kopie für die gemeinsame Datenbank ([`vorgang`]): je Generation der Historie (aktuelle und
+/// beiseitegelegte) „eingelesen“ oder „nachgeprueft“ mit Dateiliste und Prüfsummen, je Lösch- oder
+/// Bereinigungsprotokoll „geloescht“ oder „bereinigt“, dazu die Entscheidungen in der Zusammenfassung. Wie im Verlauf
+/// gehört eine Generation, die beim Löschen oder Bereinigen entstand, zu diesem Vorgang. Liest nur Historie, Protokolle
+/// und Zusammenfassung, nicht die Dateien.
+pub fn vorgaenge(kartenordner: &Path) -> Vec<DbVorgang> {
+    if !(kartenordner.is_absolute() && kartenordner.is_dir()) {
+        return vec![];
+    }
+    let ort = vorgang::ort(kartenordner);
+    let ablage = ort.ablage_schluessel();
+    let projekt_id = vorgang::projekt_id(ort.kurzname.as_deref());
+    let ordnername = datei_name(kartenordner);
+    let zusammenfassung = kartenordner.parent().and_then(Path::parent).and_then(|dreh| {
+        let d = dreh.join(struktur::BERICHTE).join(format!("{ordnername}{}", ingest_kern::uebersicht::ENDUNG));
+        ingest_kern::uebersicht::lesen_datei(&d).map(|z| (z, d))
+    });
+    let karte = zusammenfassung.as_ref().map(|(z, _)| z.karte.clone()).unwrap_or_else(|| ordnername.clone());
+    let karte_gross = karte.to_uppercase();
+    let karte_id = zusammenfassung.as_ref().and_then(|(z, _)| z.karte_id.clone());
+    let neu = |art: &str, id: String, zeit: &str| DbVorgang {
+        id,
+        projekt_id: projekt_id.clone(),
+        karte_id: karte_id.clone(),
+        karte: karte.clone(),
+        art: art.into(),
+        zeit: zeit.into(),
+        rechner: String::new(),
+        benutzer: String::new(),
+        version: String::new(),
+        kopien: vec![],
+        dateien: vec![],
+        fingerabdruck: None,
+        angaben: json!({}),
+    };
+    let sekunde = |t: &str| DateTime::parse_from_rfc3339(t).ok().map(|z| z.timestamp());
+    let eingriffe = loeschen::eingriffe(kartenordner);
+    let mut historien = fruehere_ordner(kartenordner);
+    historien.push(kartenordner.to_path_buf());
+    let mut aus = Vec::new();
+    let mut erneuert: HashMap<i64, usize> = HashMap::new();
+    for h in &historien {
+        let Ok(gens) = mhl::generationen_lesen(h) else { continue };
+        for (g, eintraege) in gens {
+            if g.prozess != "in-place" && beim_eingriff(&g.zeit, &eingriffe) {
+                if let Some(z) = sekunde(&g.zeit) {
+                    erneuert.insert(z, g.dateien);
+                }
+                continue;
+            }
+            if !vorgang::zeit_gueltig(&g.zeit) {
+                continue;
+            }
+            let eingelesen = g.prozess != "in-place";
+            let art = if eingelesen { "eingelesen" } else { "nachgeprueft" };
+            let mut v = neu(art, vorgang::feste_id(&[art, &ablage, &karte_gross, &g.datei, &g.zeit]), &g.zeit);
+            v.rechner = g.rechner.clone();
+            v.version = g.version.clone();
+            v.kopien = vec![ort.kopie(Some(g.dateien), Some(g.datei.clone()))];
+            // Wie das Kartengedächtnis (Pfad und Grösse aller Dateien): gleich = dieselbe Karte.
+            v.fingerabdruck = eingelesen.then(|| {
+                let liste: BTreeMap<String, u64> = eintraege.iter().map(|e| (e.pfad.clone(), e.groesse)).collect();
+                ingest_kern::gedaechtnis::abdruck(&karte, &liste).fingerabdruck
+            });
+            v.dateien = eintraege
+                .into_iter()
+                .map(|e| VorgangDatei { pfad: e.pfad, groesse: e.groesse, xxh3: e.xxh128 })
+                .collect();
+            v.angaben = json!({ "werkzeug": g.werkzeug, "generation": g.nr, "prozess": g.prozess });
+            aus.push(v);
+        }
+    }
+    for e in &eingriffe {
+        if !vorgang::zeit_gueltig(&e.zeit) {
+            continue;
+        }
+        let (benutzer, rechner) = match e.benutzer.split_once(" auf ") {
+            Some((b, r)) => (b.to_owned(), r.to_owned()),
+            None => (e.benutzer.clone(), String::new()),
+        };
+        let erneuert = sekunde(&e.zeit).and_then(|z| erneuert.get(&z).copied());
+        let art = if e.art == EingriffArt::Geloescht { "geloescht" } else { "bereinigt" };
+        let mut v = neu(art, vorgang::feste_id(&[art, &ablage, &karte_gross, &e.zeit, &e.clip]), &e.zeit);
+        v.rechner = rechner;
+        v.benutzer = benutzer;
+        v.kopien = vec![ort.kopie(erneuert, None)];
+        v.dateien = e
+            .dateien
+            .iter()
+            .map(|d| VorgangDatei { pfad: d.pfad.clone(), groesse: d.groesse, xxh3: d.xxh128.clone() })
+            .collect();
+        v.angaben = json!({
+            "werkzeug": e.werkzeug,
+            "clip": (e.art == EingriffArt::Geloescht).then(|| e.clip.clone()),
+            "historie_neu": erneuert.is_some(),
+            "protokoll": datei_name(&e.protokoll),
+        });
+        aus.push(v);
+    }
+    if let Some((z, d)) = &zusammenfassung {
+        aus.extend(vorgang::aus_zusammenfassung(z, d));
+    }
+    aus
+}
+
 /// Dateien im Kartenordner (relativer Pfad mit `/` → Grösse), ohne `ascmhl/` und ohne Dateien des Betriebssystems.
 fn im_ordner(o: &Path) -> HashMap<String, u64> {
     walkdir::WalkDir::new(o)
@@ -766,7 +1075,7 @@ mod tests {
             .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
             .map(|v| db_karten(&v))
             .unwrap_or_default();
-        let l = liste_unter(&[PathBuf::from(&o).join("nas")], &[], || db);
+        let l = liste_unter(&[PathBuf::from(&o).join("nas")], &[], || Datenbank { karten: db, vorgaenge: vec![] });
         for k in &l {
             println!(
                 "{} {} {} Dateien {} B sicher={} kopien={} ({}) datenbank={:?}",
@@ -817,6 +1126,173 @@ mod tests {
         }
     }
 
+    /// Vorgänge echter Kopien ableiten und die Sicht eines Rechners ohne diese Kopien rechnen (nur von Hand:
+    /// `PROTOKOLL_PRUEFEN=<ordner mit nas/ und db_alle.json>` und `VORGAENGE=1`).
+    #[test]
+    fn echte_vorgaenge_pruefen() {
+        let (Ok(o), Ok(_)) = (std::env::var("PROTOKOLL_PRUEFEN"), std::env::var("VORGAENGE")) else { return };
+        let o = PathBuf::from(o);
+        let mut alle = Vec::new();
+        for k in kartenordner(&[o.join("nas")]) {
+            let v = vorgaenge(&k);
+            println!("== {} ({} Vorgänge)", k.display(), v.len());
+            for x in &v {
+                println!(
+                    "  {} {} {} rechner={} version={} kopien={:?} dateien={} fingerabdruck={} angaben={}",
+                    x.id,
+                    x.art,
+                    vorgang::zeit_fuer_server(&x.zeit),
+                    x.rechner,
+                    x.version,
+                    x.kopien.iter().map(|k| (k.pfad.clone(), k.dateien, k.generation.clone())).collect::<Vec<_>>(),
+                    x.dateien.len(),
+                    x.fingerabdruck.as_deref().unwrap_or("-"),
+                    x.angaben
+                );
+            }
+            alle.extend(v);
+        }
+        let ids: HashSet<&str> = alle.iter().map(|v| v.id.as_str()).collect();
+        println!("{} Vorgänge, {} verschiedene IDs", alle.len(), ids.len());
+        // Sicht ohne NAS: Liste und Ansicht nur aus der Datenbank.
+        let karten = std::fs::read(o.join("db_alle.json"))
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+            .map(|v| db_karten(&v))
+            .unwrap_or_default();
+        let ohne_dateien: Vec<DbVorgang> = alle
+            .iter()
+            .cloned()
+            .map(|mut v| {
+                v.dateien.clear();
+                v
+            })
+            .collect();
+        let leer = tempfile::tempdir().unwrap();
+        let l = liste_unter(&[leer.path().to_path_buf()], &[], || Datenbank { karten, vorgaenge: ohne_dateien });
+        for k in &l {
+            println!(
+                "LISTE {} {} Dateien sicher={} kopien={:?}",
+                k.karte,
+                k.dateien,
+                k.sicher,
+                k.kopien
+                    .iter()
+                    .map(|x| (x.ordner.display().to_string(), x.ablage.clone(), x.dateien, x.aus_datenbank))
+                    .collect::<Vec<_>>()
+            );
+            let mit: Vec<DbVorgang> = alle.iter().filter(|v| v.karte.eq_ignore_ascii_case(&k.karte)).cloned().collect();
+            let d = detail_mit(
+                &k.kopien.iter().map(|x| x.ordner.clone()).collect::<Vec<_>>(),
+                &k.kopien.iter().map(|x| x.ablage_id.clone()).collect::<Vec<_>>(),
+                &mit,
+            );
+            let geloescht = d.dateien.iter().filter(|z| z.geloescht.is_some()).count();
+            println!(
+                "  ANSICHT aus_datenbank={} dateien={} davon gelöscht={} verlauf={:?}",
+                d.dateien_aus_datenbank,
+                d.dateien.len(),
+                geloescht,
+                d.verlauf.iter().map(|v| format!("{:?} {} {}", v.art, v.zeit, v.rechner)).collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn vorgaenge_einer_kopie() {
+        let t = tempfile::tempdir().unwrap();
+        let (a, b) = einlesen(t.path());
+        std::fs::write(
+            t.path().join("nas").join(ingest_kern::ablage::DATEI),
+            serde_json::json!({ "id": "01ABLAGE", "name": "ingest · 01AB", "erstellt": "2026-10-15T00:00:00Z" })
+                .to_string(),
+        )
+        .unwrap();
+        let v = vorgaenge(&a);
+        assert_eq!(v.len(), 1, "{v:?}");
+        let e = &v[0];
+        assert_eq!(
+            (e.art.as_str(), e.karte.as_str(), e.projekt_id.as_deref()),
+            ("eingelesen", "A010R132", Some("projekt-happy_end"))
+        );
+        assert_eq!(e.dateien.len(), 3);
+        assert!(e.dateien.iter().all(|d| d.xxh3.as_ref().is_some_and(|x| x.len() == 32)));
+        let k = &e.kopien[0];
+        assert_eq!(
+            (k.ablage_id.as_deref(), k.pfad.as_str(), k.dateien),
+            (Some("01ABLAGE"), "2026-10-16_PREDIGERHOF/01_KAMERA/A010R132", Some(3))
+        );
+        // Derselbe Fingerabdruck wie das Kartengedächtnis beim Einstecken derselben Karte (Quelle des Einlesens).
+        let karte = ingest_kern::gedaechtnis::erfassen(&t.path().join("karte")).unwrap();
+        assert_eq!(e.fingerabdruck.as_deref(), Some(karte.fingerabdruck.as_str()));
+        // Auf jedem Rechner dieselbe ID; die zweite Kopie (ohne Merkdatei) hat eine andere.
+        assert_eq!(vorgaenge(&a)[0].id, e.id);
+        assert_ne!(vorgaenge(&b)[0].id, e.id);
+        // Nicht erreichbar oder relativ: nichts.
+        assert!(vorgaenge(Path::new("HAPPY_END/2026-10-16_PREDIGERHOF/01_KAMERA/A010R132")).is_empty());
+    }
+
+    #[test]
+    fn vorgaenge_aller_rechner_in_liste_und_ansicht() {
+        // Der i9 las A010R132 aufs NAS ein (Merkdatei „01AB“) und löschte später C002; das MacBook hat nur seine Platte.
+        let t = tempfile::tempdir().unwrap();
+        let (a, _) = einlesen(t.path());
+        let merk = |w: &str, id: &str| {
+            std::fs::write(
+                t.path().join(w).join(ingest_kern::ablage::DATEI),
+                serde_json::json!({ "id": id, "name": format!("{w} · {id}"), "erstellt": "2026-10-15T00:00:00Z" })
+                    .to_string(),
+            )
+            .unwrap()
+        };
+        merk("nas", "01AB");
+        merk("platte", "01PL");
+        let vom_nas = vorgaenge(&a);
+        assert_eq!(vom_nas.len(), 1);
+        let mut geloescht = vom_nas[0].clone();
+        geloescht.id = "v-geloescht-c002".into();
+        geloescht.art = "geloescht".into();
+        geloescht.zeit =
+            (DateTime::parse_from_rfc3339(&vom_nas[0].zeit).unwrap() + chrono::Duration::hours(1)).to_rfc3339();
+        geloescht.rechner = "i9".into();
+        geloescht.benutzer = "marlon".into();
+        geloescht.dateien.retain(|d| d.pfad.contains("C002"));
+        geloescht.angaben = serde_json::json!({ "clip": "A010C002_120101_R132", "werkzeug": "Stage Ingest" });
+        let db = || Datenbank { karten: vec![], vorgaenge: vec![vom_nas[0].clone(), geloescht.clone()] };
+
+        // Nur die Platte verbunden: die NAS-Kopie aus den Vorgängen, nicht verbunden, mit Name der Ablage.
+        let l = liste_unter(&[t.path().join("platte")], &[], db);
+        let k = &l[0];
+        assert_eq!(k.kopien.len(), 2, "{:?}", k.kopien);
+        let nas = k.kopien.iter().find(|x| x.aus_datenbank).unwrap();
+        assert_eq!((nas.ablage.as_deref(), nas.ablage_id.as_deref()), (Some("nas · 01AB"), Some("01AB")));
+        assert_eq!(nas.ordner, Path::new("HAPPY_END/2026-10-16_PREDIGERHOF/01_KAMERA/A010R132"));
+        // Beide verbunden: keine Kopie doppelt, auch wenn die Datenbank einen anderen Ort nennt (eingesortiert).
+        let mut verschoben = vom_nas[0].clone();
+        verschoben.kopien[0].pfad = "2026-10-16_OHNE_DREHORT/01_KAMERA/A010R132".into();
+        let l = liste_unter(&[t.path().join("nas"), t.path().join("platte")], &[], || Datenbank {
+            karten: vec![],
+            vorgaenge: vec![verschoben.clone()],
+        });
+        assert_eq!(l[0].kopien.len(), 2);
+        assert!(l[0].kopien.iter().all(|x| x.erreichbar && !x.aus_datenbank));
+
+        // Ansicht ohne lesbare Kopie: Verlauf und Dateien aus der Datenbank, C002 als gelöscht.
+        let ordner = [PathBuf::from("HAPPY_END/2026-10-16_PREDIGERHOF/01_KAMERA/A010R132")];
+        let d = detail_mit(&ordner, &[Some("01AB".into())], &[vom_nas[0].clone(), geloescht.clone()]);
+        assert!(d.dateien_aus_datenbank);
+        assert_eq!(d.dateien.len(), 3);
+        assert!(d.dateien.iter().all(|z| z.je_kopie == [DateiStand::Unbekannt] && z.xxh128.is_some()));
+        let c002 = d.dateien.iter().find(|z| z.pfad.contains("C002")).unwrap();
+        assert_eq!(c002.geloescht.as_ref().map(|g| g.benutzer.as_str()), Some("marlon auf i9"));
+        let arten: Vec<VorgangArt> = d.verlauf.iter().map(|v| v.art).collect();
+        assert_eq!(arten, [VorgangArt::Geloescht, VorgangArt::Eingelesen], "neueste zuerst");
+        // Mit der Kopie verbunden: der Verlauf aus der Historie, nicht doppelt aus der Datenbank.
+        let d = detail_mit(std::slice::from_ref(&a), &[Some("01AB".into())], &[vom_nas[0].clone()]);
+        assert_eq!(d.verlauf.len(), 1);
+        assert!(!d.dateien_aus_datenbank);
+    }
+
     #[test]
     fn karten_aus_der_datenbank() {
         // Marlon, 17.10.2026: Der i9 las A010R132 auf das NAS ein; das MacBook ohne NAS sah die Karte nicht.
@@ -854,7 +1330,7 @@ mod tests {
 
         // Ohne verbundenes NAS: beide Karten aus der Datenbank, mit Ablage, Ort und Freigabe; nichts erreichbar.
         let t = tempfile::tempdir().unwrap();
-        let l = liste_unter(&[t.path().join("leer")], &[], || db.clone());
+        let l = liste_unter(&[t.path().join("leer")], &[], || Datenbank { karten: db.clone(), vorgaenge: vec![] });
         assert_eq!(l.iter().map(|k| k.karte.as_str()).collect::<Vec<_>>(), ["A010R132", "A008R132"], "neueste zuerst");
         let k = &l[0];
         assert!(k.sicher && k.datenbank.as_ref() == Some(a010));
@@ -873,7 +1349,7 @@ mod tests {
         let (a, _) = einlesen(t.path());
         let mut db = db;
         db[1].projekt = Some("HAPPY_END".into());
-        let l = liste_unter(&[t.path().join("nas")], &[], || db);
+        let l = liste_unter(&[t.path().join("nas")], &[], || Datenbank { karten: db, vorgaenge: vec![] });
         let k = l.iter().find(|k| k.karte == "A010R132").unwrap();
         assert_eq!(k.kopien.len(), 1, "{:?}", k.kopien);
         assert!(k.kopien[0].erreichbar && !k.kopien[0].aus_datenbank && k.kopien[0].ordner == a);
@@ -883,7 +1359,7 @@ mod tests {
     fn karten_mit_kopien_und_dateien() {
         let t = tempfile::tempdir().unwrap();
         let (a, b) = einlesen(t.path());
-        let l = liste_unter(&[t.path().join("nas"), t.path().join("platte")], &[], Vec::new);
+        let l = liste_unter(&[t.path().join("nas"), t.path().join("platte")], &[], Datenbank::default);
         assert_eq!(l.len(), 1, "eine Karte, zwei Kopien");
         let k = &l[0];
         assert_eq!((k.karte.as_str(), k.dateien, k.bytes, k.sicher, k.kopien.len()), ("A010R132", 3, 12_003, true, 2));

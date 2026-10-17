@@ -152,7 +152,36 @@ Doppelklick auf einen Clip (Take-Tabellen, „Zu klären“) spielt ihn in der A
 **Alle Ingest-Rechner synchron (Marlon, 17.10.2026: „Es wäre einfach grandios, wenn alle Ingest-Apps synchron sind mit allem, was sie haben und gemacht haben. Die Files liegen ja auf dem NAS, sind ja nur Metadaten“; gewählt: „Alles über Datenbank“):** Anlass: Der i9 las A010R132 auf das NAS ein, das MacBook ohne verbundenes NAS sah die Karte im Protokoll nicht. Bis dahin lagen Verlauf (`verlauf.jsonl`) und Kartengedächtnis nur auf dem Rechner, der eingelesen hatte; Prüfsummen, Lösch- und Bereinigungsprotokolle und die Entscheidungen in „Zu klären“ nur bei den Kopien. Der Austausch läuft über die gemeinsame Datenbank, die auch ohne NAS erreichbar ist; die Dateien bleiben, wo sie sind.
 - **Stufe 1 (0.1.59, ohne Änderung an der Datenbank):** Das Protokoll zeigt mit Netz auch alle Karten aus `karte`/`clip`, die hier auf keinem Ziel liegen: Datum, Projekt, Drehordner, Freigabe, unabhängige Kopien, Art der Ablage (`karte.ablage`: „NAS“ oder „Platte …“; nicht der Name der Merkdatei) mit dem Ort im Projektordner als Kopie „nicht verbunden“, dazu die Clipnamen. Dieselbe Kopie ist, was hier am selben Ort im Projektordner liegt. Das Kartengedächtnis fragt nach dem eigenen Verlauf die Datenbank, unter dem Namen des Kartenlaufwerks und der Rolle (Reel): gleiche Clips heisst „schon eingelesen auf einem anderen Rechner (Kopie auf „NAS“)“, alle von damals da und neue dazu heisst „nicht formatiert“. Ohne Netz bleibt alles wie bisher. Echte Daten: ohne NAS alle sieben Karten der Datenbank (A010R132 mit 27 Clips), mit NAS-Spiegel keine doppelte Kopie.
 - **Lesen in Seiten:** Der Server liefert je Abfrage höchstens 1000 Zeilen (`PGRST_DB_MAX_ROWS`). Der Ingest fragt mit `Prefer: count=exact` und holt den Rest geordnet nach `id` in Seiten; eine Abfrage mit eigenem `limit` bleibt, wie sie ist (`plate.rs` `alle_seiten`, Test). Vorher hätte die Projektseite ab 1000 Clips je Projekt still Clips verloren.
-- **Stufe 2 (geplant, Migration 0030 des Plate Assistant, erst mit Marlons OK an ihn und nach dem Probelauf):** Tabelle `ingest_vorgang`, eine Zeile je Vorgang (eingelesen, ergänzt, Kaskade, nachgeprüft, gelöscht, bereinigt, einsortiert, Ohne Clip bestätigt, Beibehalten) mit Zeit, Rechner, Benutzer, Version, Kopien (`ablage_id` aus der Merkdatei, Name, Art, Pfad im Projektordner, Ergebnis), Dateiliste mit Grösse und XXH3, Fingerabdruck, Freigabe. Nur anhängen (danach ist nur `geloescht` änderbar), Schreiben über `aenderungen_anwenden` nur mit Ingest-Recht; ohne Netz in einem Ausgangskorb, der die Änderungs-ID behält (Wiederholung = „doppelt“); die Karte geht vor ihrem Vorgang hinaus. Damit zeigt jedes Protokoll Verlauf, Dateien und Prüfsummen aller Rechner auch ohne NAS, das Kartengedächtnis vergleicht genau, und „Zu klären“ lässt sich ohne verbundene Kopie bestätigen.
+- **Stufe 2 (0.1.60, Tabelle `ingest_vorgang`, Migration 0030 des Plate Assistant, live 17.10.2026):** Jeder Vorgang steht als eigene Zeile in der gemeinsamen Datenbank, nur angehängt (danach ist nur `geloescht` änderbar). Die Vorgänge entstehen aus dem, was bei der Kopie liegt (`protokoll::vorgaenge`):
+  - je Generation der ASC-MHL-Historie, auch der beiseitegelegten, „eingelesen“ oder „nachgeprueft“, mit Rechner, Version, Dateiliste samt XXH3 und Fingerabdruck wie im Kartengedächtnis; eine Generation, die beim Löschen oder Bereinigen entstand, gehört zu diesem Vorgang;
+  - je Lösch- oder Bereinigungsprotokoll „geloescht“ oder „bereinigt“, mit Benutzer, Rechner und den gelöschten Dateien;
+  - aus der Zusammenfassung „beibehalten“, „gehoert_nicht_dazu“ und „ohne_clip_bestaetigt“.
+
+  Die ID errechnet sich aus Merkdatei-ID der Ablage, Karte und Generation (ohne Merkdatei: voller Pfad), nicht aus dem Ort, damit Einsortieren nichts verdoppelt. Jeder Rechner kommt so für denselben Vorgang auf dieselbe ID; ein zweiter bekommt „Datensatz existiert bereits“, das gilt als „schon da“. Deshalb kann jeder Rechner mit NAS die alten Vorgänge nachtragen.
+
+  **Ausgangskorb** (`vorgang.rs`, im Datenordner der App): Nach Einlesen, Kaskade, Nachprüfen, Löschen, Bereinigen und Bestätigen kommen die Vorgänge der betroffenen Kopien hinein.
+  - Mit Verbindung und Ingest-Recht geht der Korb jede Minute hinaus, in Stapeln bis 20 Vorgänge oder 2 MB.
+  - Die Änderungs-ID bleibt fest; eine Wiederholung liefert dasselbe Ergebnis mit `wiederholt`.
+  - Ohne Ingest-Recht bleibt alles im Korb.
+  - Andere Ablehnungen kommen nach `ausgang_abgelehnt.jsonl`, eine neue App-Version versucht sie nochmals.
+  - Zeiten gehen mit höchstens 6 Nachkommastellen hinaus (der Server lehnt die 9 des ASC MHL ab; geprüft vom Plate Assistant mit SQL-Test V6).
+  - Dateilisten über 900 KB gehen ohne Liste hinaus, nur mit Zahl.
+
+  Beim Öffnen des Protokolls gleicht die App voll ab: Sie geht alle erreichbaren Kopien durch und merkt vor, was der Datenbank fehlt, aber nicht während eines Kopiervorgangs.
+
+  **Lesen:**
+  - Die Protokoll-Liste nimmt die Kopien aus den Vorgängen aller Rechner: dieselbe Ablage (Merkdatei-ID) heisst dieselbe Kopie, angezeigt am neuesten Ort und mit der neuesten bekannten Dateizahl.
+  - Die Ansicht einer Karte zeigt die Vorgänge, die hier nicht aus einer Historie kommen, zusätzlich im Verlauf. Ist keine Kopie lesbar, zeigt sie die Dateien mit Prüfsumme aus den Vorgängen („Beim Einlesen geprüft … laut gemeinsamer Datenbank“, Stand „Offline“, von Hand gelöschte grau).
+  - Das Kartengedächtnis vergleicht den Fingerabdruck genau.
+  - Die Projektseite übernimmt die Entscheidungen anderer Rechner aus „Zu klären“ in die Zusammenfassungen im Speicher.
+
+  **Echte Daten (NAS-Spiegel):** 11 Vorgänge aus 4 Karten, alle mit verschiedenen IDs:
+  - A008R56E: eingelesen am i9 (0.1.39, 24 Dateien), dazu 5 Löschvorgänge vom MacBook;
+  - A010R132: eingelesen am i9 (0.1.49, 29 Dateien);
+  - A007R132: eingelesen am MacBook (0.1.31), dazu 2 Löschvorgänge;
+  - A008R132: eingelesen am i9.
+
+  Ohne NAS zeigt die Ansicht genau diese Dateien, Löschungen und den Verlauf.
 
 **Löschen nacheinander, Historie bereinigen (17.10.2026):** Am 16.10.2026 liefen zwei Löschvorgänge auf derselben Kopie gleichzeitig (0.1.47, macOS über SMB). Der eine las die Historie, während der andere sie beiseitelegte: Die Historie von A008R56E nennt seither den gelöschten A008C001 noch, und in A007R132 liegt „0001“ zweimal im Ordner `ascmhl` (die Kette nennt eine; die Referenz liest beide). Ausserdem nahm das Löschen damals Dateien, die die Historie nicht kannte, aus der Kopie selbst in die neue Historie auf (seit 0.1.50 gesperrt); das Protokoll zeigt sie als ungeprüft. Seither: Im Kern läuft immer nur ein Lösch- oder Bereinigungslauf (Test `gleichzeitig_loeschen_laeuft_nacheinander`, ohne Sperre 6 von 6 Läufen falsch); die App belegt dafür denselben Zustand wie Kopieren und Prüfen, und die Projektseite reiht mehrere Löschaufträge nacheinander ein. „Bereinigen“ im Protokoll (`loeschen::historie_bereinigen`) bringt solche Kopien in Ordnung: Nennt die Historie von Hand gelöschte Dateien, wandert sie nach `05_METADATEN/frueher/<Karte>_<Zeit>_vor_bereinigen/` und die Kopie bekommt eine neue über das Verbleibende (Hashes aus der alten); sonst wandern nur Generationen ausserhalb der Kette nach `…_ausserhalb_kette/`. Nichts wird gelöscht oder neu gelesen; Protokoll `04_BERICHTE/<Karte>_BEREINIGT_<Zeit>.txt`. Fehlt eine Datei ohne Löschprotokoll oder liegt eine Datei da, die die Historie nicht kennt, geschieht nichts.
 

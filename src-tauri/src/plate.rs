@@ -16,8 +16,18 @@ use serde_json::{json, Value};
 
 /// Tabellen, die der Ingest ändern darf (Systemkarte 05dc71c, BESITZ.md). Der Server beschränkt ein persönliches
 /// Konto nicht mehr; diese Liste ist die Sperre. Nie: dreh, plate, take, foto.
-pub const DARF_AENDERN: &[&str] =
-    &["projekt", "ingest_meldung", "hdri_job", "dreh", "karte", "clip", "studio_take", "foto", "take"];
+pub const DARF_AENDERN: &[&str] = &[
+    "projekt",
+    "ingest_meldung",
+    "hdri_job",
+    "dreh",
+    "karte",
+    "clip",
+    "studio_take",
+    "foto",
+    "take",
+    "ingest_vorgang",
+];
 /// `take` (gehört dem Plate Assistant): der Ingest legt Takes aus Clips an (abgestimmt 15.10.2026), mit diesen Feldern.
 /// An bestehenden Takes nur `clip` (aus der Karte) und `geloescht` (Take ohne Aufnahme), siehe `aenderungen_pruefen`;
 /// dazu „Take wiederherstellen“ (Systemkarte 499a1fc): `geloescht = false` nur zusammen mit `clip_name` desselben Takes.
@@ -97,6 +107,10 @@ pub fn aenderungen_pruefen(body: &Value) -> Result<(), String> {
         }
         if t == "studio_take" && !STUDIO_TAKE_FELDER.contains(&feld) {
             return Err(format!("Stage Ingest ändert am Studio-Take „{feld}“ nicht (gehört der Stage)"));
+        }
+        // Vorgänge (0030): nur anhängen; danach ist nur `geloescht` änderbar (der Server sperrt es ebenso).
+        if t == crate::vorgang::TABELLE && !matches!(feld, "_anlegen" | "geloescht") {
+            return Err(format!("Stage Ingest hängt Vorgänge nur an; „{feld}“ ändert er nicht"));
         }
         if (t == "karte" && !KARTE_FELDER.contains(&feld)) || (t == "clip" && !CLIP_FELDER.contains(&feld)) {
             return Err(format!("Stage Ingest ändert an „{t}“ das Feld „{feld}“ nicht (nach dem Anlegen fest)"));
@@ -323,6 +337,32 @@ impl Plate {
         Ok(json!({ "karten": karten, "projekte": projekte, "clips": clips }))
     }
 
+    /// Vorgänge anlegen (`ingest_vorgang`, siehe `vorgang`): die Antwort des Servers je Änderung.
+    pub fn vorgaenge_senden(&self, z: &Zugang, aenderungen: &[Value]) -> Result<Vec<Value>, String> {
+        let body = json!({ "p_geraet": geraet_name(), "p_aenderungen": aenderungen });
+        Ok(self.anwenden(z, &body)?.as_array().cloned().unwrap_or_default())
+    }
+
+    /// IDs aller Vorgänge in der Datenbank (beim Abgleich nicht nochmals schicken, was schon da ist).
+    pub fn vorgang_ids(&self, z: &Zugang) -> Result<std::collections::HashSet<String>, String> {
+        let v = self.lesen(z, "ingest_vorgang?select=id")?;
+        Ok(v.as_array().into_iter().flatten().filter_map(|x| x["id"].as_str().map(str::to_owned)).collect())
+    }
+
+    /// Vorgänge lesen (ohne gelöschte), mit einer Bedingung wie `karte=ilike.A010R132`; die Dateilisten nur auf Wunsch.
+    pub fn vorgaenge(
+        &self,
+        z: &Zugang,
+        bedingung: &str,
+        mit_dateien: bool,
+    ) -> Result<Vec<crate::vorgang::DbVorgang>, String> {
+        let felder = "id,projekt_id,karte_id,karte,art,zeit,rechner,benutzer,version,kopien,fingerabdruck,angaben";
+        let auswahl = if mit_dateien { format!("{felder},dateien") } else { felder.to_owned() };
+        let und = if bedingung.is_empty() { String::new() } else { format!("&{bedingung}") };
+        let v = self.lesen(z, &format!("ingest_vorgang?geloescht=is.false{und}&select={auswahl}"))?;
+        serde_json::from_value(v).map_err(|e| format!("Vorgänge nicht lesbar: {e}"))
+    }
+
     /// Karten mit einem dieser Namen (Reel oder Name des Kartenlaufwerks) und ihre Clips, für das Kartengedächtnis.
     pub fn karten_namens(&self, z: &Zugang, namen: &[String]) -> Result<Value, String> {
         let mut karten: Vec<Value> = Vec::new();
@@ -490,7 +530,16 @@ impl Plate {
                 self.lesen(z, &format!("clip?projekt_id=eq.{p}&select=name,karte_id,take_id,zuordnung,geloescht"))
             })
             .unwrap_or(Value::Null);
-        serde_json::json!({ "karten": karten, "clips": clips })
+        // Entscheidungen aus „Zu klären“ aller Rechner (ab 0030; vorher leer).
+        let entscheidungen = self
+            .vorgaenge(
+                z,
+                &format!("projekt_id=eq.{p}&art=in.(beibehalten,gehoert_nicht_dazu,ohne_clip_bestaetigt)"),
+                false,
+            )
+            .map(|v| serde_json::to_value(v).unwrap_or(Value::Null))
+            .unwrap_or(Value::Null);
+        serde_json::json!({ "karten": karten, "clips": clips, "entscheidungen": entscheidungen })
     }
 
     /// Nächste Take-Nummer einer Plate: MAX(nummer) über alle Takes, auch gelöschte, plus 1 (wie die App; frisch
@@ -1333,7 +1382,7 @@ pub fn ulid_aehnlich() -> String {
     (0..26).rev().map(|i| Z[((n >> (i * 5)) & 31) as usize] as char).collect()
 }
 
-fn url_teil(s: &str) -> String {
+pub(crate) fn url_teil(s: &str) -> String {
     s.bytes()
         .map(|b| {
             if b.is_ascii_alphanumeric() || b"-._~".contains(&b) {
@@ -1515,6 +1564,11 @@ mod tests {
             assert!(aenderungen_pruefen(&json!({"p_aenderungen": [{"tabelle": "studio_take", "feld": f}]})).is_ok());
         }
         assert!(aenderungen_pruefen(&json!({"p_aenderungen": [{"tabelle": "einstellung", "feld": "notiz"}]})).is_err());
+        // Vorgänge: anlegen und `geloescht`, sonst nichts.
+        for (f, ok) in [("_anlegen", true), ("geloescht", true), ("art", false), ("dateien", false)] {
+            let body = json!({"p_aenderungen": [{"tabelle": "ingest_vorgang", "feld": f}]});
+            assert_eq!(aenderungen_pruefen(&body).is_ok(), ok, "ingest_vorgang.{f}");
+        }
         // Bestehender Take: nur `clip` wie CAP (alle drei Angaben) und weich löschen; sonst nichts.
         let take = |f: &str, w: Value| json!({"p_aenderungen": [{"tabelle": "take", "feld": f, "wert": w}]});
         assert!(aenderungen_pruefen(&take(

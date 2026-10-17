@@ -75,6 +75,8 @@ export const VORGABE_ADRESSE = (import.meta.env.VITE_SUPABASE_ADRESSE as string 
 export const VORGABE_ANON = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ?? "";
 
 export type Verbindung = "aus" | "verbindet" | "verbunden" | "fehler";
+/** Abgleich der Vorgänge mit der gemeinsamen Datenbank (`ingest_vorgang`, siehe `vorgang.rs`). */
+export type AbgleichStand = { neu: number; gesendet: number; offen: number; abgelehnt: number; fehler: string | null };
 
 function useKontoHalten() {
   // Adresse und Schlüssel: der eingebaute Satz gilt, ausser jemand hat unter „Andere Adresse …“ bewusst einen
@@ -110,6 +112,24 @@ function useKontoHalten() {
   const [projekte, setProjekte] = useState<Projekt[]>(() => gemerkt<Projekt[]>("vorrat.projekte", []));
   const [drehs, setDrehs] = useState<DrehKurz[]>(() => gemerkt<DrehKurz[]>("vorrat.drehs", []));
   const vollstaendig = !!(zugang.adresse.trim() && zugang.anonKey.trim() && zugang.email.trim());
+  // Vorgänge aller Ingest-Rechner (Marlon, 17.10.2026: „alle Ingest-Apps synchron“): mit Verbindung und Ingest-Recht
+  // den Ausgangskorb jede Minute schicken; ohne Netz bleibt er gemerkt. Das volle Nachtragen macht die Protokoll-Seite.
+  const [abgleich, setAbgleich] = useState<AbgleichStand | null>(null);
+  const darfSchreiben = verbindung === "verbunden" && !!konto?.ingestRecht;
+  useEffect(() => {
+    if (!darfSchreiben) return;
+    let aus = false;
+    const einmal = () =>
+      invoke<AbgleichStand>("vorgaenge_abgleichen", { zugang, basis: [], voll: false })
+        .then((st) => !aus && setAbgleich(st))
+        .catch(() => {});
+    void einmal();
+    const t = window.setInterval(einmal, 60_000);
+    return () => {
+      aus = true;
+      window.clearInterval(t);
+    };
+  }, [darfSchreiben, zugang]);
 
   async function laden(z: Zugang = zugang) {
     try {
@@ -202,6 +222,9 @@ function useKontoHalten() {
     konto,
     verbindung,
     meldung,
+    abgleich,
+    setAbgleich,
+    darfSchreiben,
     projekte,
     drehs,
     laden: () => laden(),

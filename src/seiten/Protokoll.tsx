@@ -51,7 +51,8 @@ import {
   type Vorgang,
 } from "../kern";
 import { gemerkt, merken, useEinstellungen } from "../einstellungen";
-import { useKonto } from "../konto";
+import { invoke } from "@tauri-apps/api/core";
+import { useKonto, type AbgleichStand } from "../konto";
 import { useLauf } from "../lauf";
 import { Pfad, Status, datumZeit, type Ton } from "../teile";
 import { abweichungText } from "./Einlesen";
@@ -137,7 +138,14 @@ export function Protokoll({ kopieErgaenzen }: { kopieErgaenzen: (ordner: string)
     } finally {
       setLaedt(false);
     }
-  }, [e.ziele, lauf.ergebnis, zugang]);
+    // Im Hintergrund nachtragen, was der gemeinsamen Datenbank von den Kopien hier fehlt (auch was andere Rechner
+    // eingelesen haben), dann den Ausgangskorb schicken. Nicht während eines Kopiervorgangs (liest alle Historien).
+    if (konto.darfSchreiben && !lauf.laeuft) {
+      invoke<AbgleichStand>("vorgaenge_abgleichen", { zugang, basis: e.ziele, voll: true })
+        .then((st) => konto.setAbgleich(st))
+        .catch(() => {});
+    }
+  }, [e.ziele, lauf.ergebnis, lauf.laeuft, zugang, konto.darfSchreiben]);
   useEffect(() => {
     void laden();
   }, [laden]);
@@ -162,6 +170,7 @@ export function Protokoll({ kopieErgaenzen }: { kopieErgaenzen: (ordner: string)
           </button>
         </div>
         {fehler && <Status ton="fehler">{fehler}</Status>}
+        <AbgleichZeile st={konto.abgleich} />
         {liste === null ? (
           <p className="leer-zeile">Sucht eingelesene Karten auf den Zielen …</p>
         ) : gefiltert.length === 0 ? (
@@ -225,6 +234,8 @@ export function Protokoll({ kopieErgaenzen }: { kopieErgaenzen: (ordner: string)
 
 function KarteDetail({ k, kopieErgaenzen }: { k: ProtokollKarte; kopieErgaenzen: (ordner: string) => void }) {
   const lauf = useLauf();
+  const konto = useKonto();
+  const zugang = konto.verbindung === "verbunden" ? konto.zugang : null;
   const [d, setD] = useState<ProtokollDetail | null>(null);
   const [fehler, setFehler] = useState<string | null>(null);
   const [prueft, setPrueft] = useState<string | null>(null);
@@ -234,13 +245,18 @@ function KarteDetail({ k, kopieErgaenzen }: { k: ProtokollKarte; kopieErgaenzen:
     let aktiv = true;
     setD(null);
     setFehler(null);
-    protokollKarte(k.kopien.map((x) => x.ordner))
+    protokollKarte(
+      k.kopien.map((x) => x.ordner),
+      k.kopien.map((x) => x.ablageId ?? null),
+      k.karte,
+      zugang,
+    )
       .then((x) => aktiv && setD(x))
       .catch((x) => aktiv && setFehler(String(x)));
     return () => {
       aktiv = false;
     };
-  }, [k, neu]);
+  }, [k, neu, zugang]);
 
   // Erreichbare Kopien mit lesbarer Historie zählen; je Kopie die geprüften Dateien.
   const lesbar = d ? d.kopien.map((x, i) => (x.erreichbar && !x.fehler ? i : -1)).filter((i) => i >= 0) : [];
@@ -253,8 +269,10 @@ function KarteDetail({ k, kopieErgaenzen }: { k: ProtokollKarte; kopieErgaenzen:
   const unsauber = d ? d.kopien.filter((x) => x.nenntGeloeschte.length > 0 || x.ausserhalb.length > 0) : [];
   const gute = k.kopien.find((x) => x.erreichbar && x.gut !== false);
   const urteil = !d || lesbar.length === 0 ? "leise" : rot.length ? "rot" : auffaellig.length || unsauber.length ? "warn" : "ok";
-  // Keine Kopie lesbar, aber die gemeinsame Datenbank kennt die Karte (z. B. von einem anderen Rechner eingelesen).
-  const db = d && lesbar.length === 0 ? (k.datenbank ?? null) : null;
+  // Keine Kopie lesbar, aber die gemeinsame Datenbank kennt die Karte (z. B. von einem anderen Rechner eingelesen):
+  // mit Vorgängen (ab 0.1.60) die Dateien mit Prüfsumme, sonst nur die Clipnamen aus `clip`.
+  const ausDb = !!d?.dateienAusDatenbank && lesbar.length === 0;
+  const db = d && lesbar.length === 0 && !ausDb ? (k.datenbank ?? null) : null;
   const dbAblagen = [...new Set(k.kopien.filter((x) => !x.erreichbar && x.ablage).map((x) => `„${x.ablage}“`))];
 
   async function bereinigen(x: ProtokollKopie, det: KopieDetail) {
@@ -321,6 +339,19 @@ function KarteDetail({ k, kopieErgaenzen }: { k: ProtokollKarte; kopieErgaenzen:
           <Status ton="fehler">{fehler}</Status>
         ) : !d ? (
           <Status ton="laeuft">Liest die Historie der Kopien …</Status>
+        ) : ausDb ? (
+          <Status ton="leise">
+            <strong>
+              Beim Einlesen geprüft: {vorhanden.length} {vorhanden.length === 1 ? "Datei" : "Dateien"} laut gemeinsamer
+              Datenbank
+            </strong>
+            {geloescht > 0 && ` · ${geloescht} von Hand gelöscht`}
+            {" · "}
+            {dbAblagen.length > 0
+              ? `${dbAblagen.join(", ")} ${dbAblagen.length === 1 ? "ist" : "sind"} an diesem Rechner nicht verbunden`
+              : "Keine Kopie hier verbunden"}
+            : Ob die Kopie heute noch vollständig ist, zeigt sich, sobald sie verbunden ist (dann neu laden).
+          </Status>
         ) : db ? (
           <Status ton="leise">
             <strong>
@@ -1202,6 +1233,29 @@ function NameMitUmbruch({ text }: { text: string }) {
           {t}
         </Fragment>
       ))}
+    </>
+  );
+}
+
+/** Stand des Abgleichs mit der gemeinsamen Datenbank, nur wenn etwas zu sagen ist. */
+function AbgleichZeile({ st }: { st: AbgleichStand | null }) {
+  if (!st) return null;
+  const vorgaenge = (n: number) => (n === 1 ? "1 Vorgang" : `${n} Vorgänge`);
+  return (
+    <>
+      {st.offen > 0 && (
+        <Status ton="warn" title={st.fehler ?? undefined}>
+          {vorgaenge(st.offen)} {st.offen === 1 ? "wartet" : "warten"} auf die gemeinsame Datenbank
+        </Status>
+      )}
+      {st.abgelehnt > 0 && (
+        <Status ton="rot" title="Liegen im Datenordner der App (ausgang_abgelehnt.jsonl)">
+          {vorgaenge(st.abgelehnt)} von der Datenbank abgelehnt
+        </Status>
+      )}
+      {st.offen === 0 && st.gesendet > 0 && (
+        <Status ton="ok">{vorgaenge(st.gesendet)} mit den anderen Rechnern abgeglichen</Status>
+      )}
     </>
   );
 }

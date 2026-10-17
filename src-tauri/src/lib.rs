@@ -15,6 +15,7 @@ mod simulation;
 mod stage;
 mod take_aus_clip;
 mod technik;
+mod vorgang;
 mod vorschaubilder;
 mod zuordnung;
 
@@ -605,6 +606,72 @@ fn verlauf_pfad(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(ordner.join("verlauf.jsonl"))
 }
 
+/// Führt beim Verlassen des Blocks aus (auch nach einem Fehler mit `?`).
+struct Nachher<F: FnMut()>(F);
+
+impl<F: FnMut()> Drop for Nachher<F> {
+    fn drop(&mut self) {
+        (self.0)()
+    }
+}
+
+/// Ausgangskorb der Vorgänge im Datenordner der App (siehe `vorgang`).
+fn ausgang(app: &AppHandle) -> Result<vorgang::Ausgang, String> {
+    let ordner = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(vorgang::Ausgang::neu(ordner, &app.package_info().version.to_string()))
+}
+
+/// Vorgänge dieser Kopien und Zusammenfassungen in den Ausgangskorb, nach Einlesen, Kaskade, Nachprüfen, Löschen,
+/// Bereinigen und Bestätigen. Geht hier etwas schief, holt der nächste volle Abgleich es nach; am Vorgang selbst
+/// ändert es nichts.
+fn vorgaenge_vormerken(app: &AppHandle, kartenordner: &[PathBuf], zusammenfassungen: &[PathBuf]) {
+    let Ok(a) = ausgang(app) else { return };
+    let mut v: Vec<vorgang::DbVorgang> = kartenordner.iter().flat_map(|o| protokoll::vorgaenge(o)).collect();
+    for d in zusammenfassungen {
+        if let Some(z) = ingest_kern::uebersicht::lesen_datei(d) {
+            v.extend(vorgang::aus_zusammenfassung(&z, d));
+        }
+    }
+    if let Err(e) = a.vormerken(&v, &std::collections::HashSet::new(), plate::ulid_aehnlich, chrono::Utc::now()) {
+        eprintln!("Vorgänge nicht vorgemerkt: {e}");
+    }
+}
+
+/// Abgleich mit der gemeinsamen Datenbank (Marlon, 17.10.2026: „alle Ingest-Apps synchron“): wartende Vorgänge
+/// schicken. Mit `voll` vorher alle erreichbaren Kopien durchgehen und vormerken, was der Datenbank fehlt; so kommen
+/// auch Karten hinein, die vor 0.1.60 oder auf einem anderen Rechner eingelesen wurden.
+#[tauri::command]
+async fn vorgaenge_abgleichen(
+    app: AppHandle,
+    plate: State<'_, Arc<plate::Plate>>,
+    zugang: plate::Zugang,
+    basis: Vec<PathBuf>,
+    voll: bool,
+) -> Result<vorgang::Stand, String> {
+    let a = ausgang(&app)?;
+    let p = Arc::clone(&plate);
+    im_hintergrund(move || {
+        let mut neu = 0;
+        if voll {
+            let v: Vec<vorgang::DbVorgang> =
+                protokoll::kartenordner(&basis).iter().flat_map(|o| protokoll::vorgaenge(o)).collect();
+            // Was die Datenbank schon hat, nicht nochmals schicken (ohne Antwort: schicken, der Server sagt „schon da“).
+            let schon = p.vorgang_ids(&zugang).unwrap_or_default();
+            neu = a.vormerken(&v, &schon, plate::ulid_aehnlich, chrono::Utc::now()).map_err(|e| e.to_string())?;
+        }
+        let mut stand = a.senden(|liste| p.vorgaenge_senden(&zugang, liste));
+        stand.neu = neu;
+        Ok(stand)
+    })
+    .await
+}
+
+/// Wie viele Vorgänge warten oder abgelehnt wurden.
+#[tauri::command]
+fn ausgang_stand(app: AppHandle) -> Result<vorgang::Stand, String> {
+    Ok(ausgang(&app)?.stand())
+}
+
 fn verlauf_anhaengen(app: &AppHandle, e: &KartenErgebnis) -> Result<(), String> {
     use std::io::Write;
     let karte = e.kopie.quelle.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -679,6 +746,31 @@ async fn karte_wiedererkennen(
         let Ok(v) = p.karten_namens(&z, &namen) else { return Ok(None) };
         let mut db = protokoll::db_karten(&v);
         db.sort_by(|a, b| b.eingelesen.cmp(&a.eingelesen));
+        // Genau wie hier: Fingerabdruck und Clips der Vorgänge „eingelesen“ aller Rechner (ab 0.1.60).
+        let oder: Vec<String> = namen.iter().map(|n| format!("karte.ilike.{}", plate::url_teil(n))).collect();
+        let mut vorgaenge: Vec<vorgang::DbVorgang> = p
+            .vorgaenge(&z, &format!("art=eq.eingelesen&or=({})", oder.join(",")), true)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|v| namen.iter().any(|n| v.karte.eq_ignore_ascii_case(n)))
+            .collect();
+        vorgaenge.sort_by(|a, b| b.zeit.cmp(&a.zeit));
+        let freigegeben = |k: &str| db.iter().find(|d| d.karte.eq_ignore_ascii_case(k)).is_some_and(|d| d.freigegeben);
+        for v in &vorgaenge {
+            let clips: Vec<String> =
+                v.dateien.iter().map(|d| d.pfad.clone()).filter(|c| ingest_kern::ale::ist_clip(c)).collect();
+            let frueher = ingest_kern::gedaechtnis::Frueher {
+                karte: &jetzt.karte,
+                fingerabdruck: v.fingerabdruck.as_deref().unwrap_or_default(),
+                clips: &clips,
+                beginn: &v.zeit,
+                sicher: freigegeben(&v.karte),
+            };
+            if let Some(w) = ingest_kern::gedaechtnis::vergleichen(&jetzt, [frueher]) {
+                return Ok(Some(antwort(&w, true, v.kopien.first().and_then(|k| k.ablage.clone()))));
+            }
+        }
+        // Sonst nach den Clipnamen der Karte (`clip`), für Karten von vor 0.1.60.
         Ok(db.iter().find_map(|k| {
             ingest_kern::gedaechtnis::vergleichen_namen(&jetzt, &k.clips, &k.eingelesen, k.freigegeben)
                 .map(|w| antwort(&w, true, k.ablage.clone()))
@@ -704,7 +796,10 @@ async fn protokoll_liste(
         match zugang {
             Some(z) => {
                 std::thread::spawn(move || {
-                    let _ = tx.send(p.karten_alle(&z).map(|v| protokoll::db_karten(&v)));
+                    let karten = p.karten_alle(&z).map(|v| protokoll::db_karten(&v));
+                    // Vorgänge aller Rechner ohne Dateilisten (die holt die Ansicht einer Karte).
+                    let vorgaenge = p.vorgaenge(&z, "", false).unwrap_or_default();
+                    let _ = tx.send(karten.map(|karten| protokoll::Datenbank { karten, vorgaenge }));
                 });
             }
             // Ohne Zugang gleich schliessen, sonst wartete die Liste vergeblich.
@@ -720,10 +815,30 @@ async fn protokoll_liste(
     .await
 }
 
-/// Protokoll einer Karte: je Datei und Kopie der Stand laut ASC-MHL-Historie und Ordner.
+/// Protokoll einer Karte: je Datei und Kopie der Stand laut ASC-MHL-Historie und Ordner; mit Netz dazu die Vorgänge
+/// aller Rechner aus der gemeinsamen Datenbank (`ablagen`: Merkdatei-ID je Kopie, wie in der Liste).
 #[tauri::command]
-async fn protokoll_karte(ordner: Vec<PathBuf>) -> Result<protokoll::ProtokollDetail, String> {
-    im_hintergrund(move || Ok(protokoll::detail(&ordner))).await
+async fn protokoll_karte(
+    plate: State<'_, Arc<plate::Plate>>,
+    ordner: Vec<PathBuf>,
+    ablagen: Option<Vec<Option<String>>>,
+    karte: Option<String>,
+    zugang: Option<plate::Zugang>,
+) -> Result<protokoll::ProtokollDetail, String> {
+    let p = Arc::clone(&plate);
+    im_hintergrund(move || {
+        let db = match (&zugang, &karte) {
+            (Some(z), Some(k)) => {
+                p.vorgaenge(z, &format!("karte=ilike.{}", plate::url_teil(k)), true).unwrap_or_default()
+            }
+            _ => vec![],
+        };
+        // `ilike` liest `_` als Platzhalter: nur diese Karte.
+        let db: Vec<_> =
+            db.into_iter().filter(|v| karte.as_ref().is_some_and(|k| v.karte.eq_ignore_ascii_case(k))).collect();
+        Ok(protokoll::detail_mit(&ordner, &ablagen.unwrap_or_default(), &db))
+    })
+    .await
 }
 
 /// Protokoll: die ASC-MHL-Historie einer Kopie nach einem Löschen in Ordnung bringen (`ingest_kern::loeschen::
@@ -741,8 +856,10 @@ async fn historie_bereinigen(
         // Derselbe Zeitpunkt für Generation und Protokoll: Daran erkennt das Protokoll, dass die Generation dazugehört.
         let jetzt = chrono::Utc::now();
         let angaben = mhl::Angaben { werkzeug: "Stage Ingest".into(), version, zeit: jetzt, nur_pruefen: false };
-        ingest_kern::loeschen::historie_bereinigen(&ordner, &angaben, jetzt.with_timezone(&chrono::Local))
-            .map_err(|e| e.to_string())
+        let b = ingest_kern::loeschen::historie_bereinigen(&ordner, &angaben, jetzt.with_timezone(&chrono::Local))
+            .map_err(|e| e.to_string())?;
+        vorgaenge_vormerken(&app, &[ordner], &[]);
+        Ok(b)
     })
     .await
 }
@@ -1270,6 +1387,7 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
     if let Err(e) = verlauf_anhaengen(app, &ergebnis) {
         eprintln!("Verlauf nicht geschrieben: {e}"); // die Karte ist trotzdem kopiert und belegt
     }
+    vorgaenge_vormerken(app, &ergebnis.urteile.iter().map(|u| u.ordner.clone()).collect::<Vec<_>>(), &[]);
     Ok(ergebnis)
 }
 
@@ -1337,6 +1455,7 @@ async fn kopie_aus_kopie(
     let aktiv = Arc::clone(&laufend.aktiv);
     let abbruch = Arc::clone(&laufend.abbruch);
     let p = Arc::clone(&plate);
+    let app2 = app.clone();
     let ergebnis = tauri::async_runtime::spawn_blocking(move || {
         kaskade_ausfuehren(&app, &p, &quelle, &ziel_basis, mindest_kopien, zugang.as_ref(), projekt.as_ref(), &abbruch)
     })
@@ -1344,6 +1463,9 @@ async fn kopie_aus_kopie(
     .map_err(|e| e.to_string())
     .and_then(|r| r);
     aktiv.store(false, Ordering::SeqCst);
+    if let Ok(e) = &ergebnis {
+        vorgaenge_vormerken(&app2, &[e.ziel.clone(), e.quelle.clone()], &[]);
+    }
     ergebnis
 }
 
@@ -1651,6 +1773,7 @@ async fn ziel_nachpruefen(
     laufend.abbruch.store(false, Ordering::SeqCst);
     let aktiv = Arc::clone(&laufend.aktiv);
     let abbruch = Arc::clone(&laufend.abbruch);
+    let (app2, ordner2) = (app.clone(), ordner.clone());
     let ergebnis = tauri::async_runtime::spawn_blocking(move || {
         mhl::nachpruefen(&ordner, &abbruch, |pfad| {
             let _ = app.emit(FORTSCHRITT, Fortschritt::Nachpruefen { pfad: pfad.to_string() });
@@ -1661,6 +1784,9 @@ async fn ziel_nachpruefen(
     .map_err(|e| e.to_string())
     .and_then(|r| r);
     aktiv.store(false, Ordering::SeqCst);
+    if ergebnis.is_ok() {
+        vorgaenge_vormerken(&app2, &[ordner2], &[]);
+    }
     ergebnis
 }
 
@@ -1895,8 +2021,9 @@ async fn take_loeschen(
 /// Takes gelöscht“). Der Take bleibt im Plate Assistant; die Bestätigung steht mit Zeit und Rechner in jeder
 /// Zusammenfassung der Karte (alle Kopien), so gilt sie auf Mac und Windows.
 #[tauri::command]
-async fn ohne_aufnahme_bestaetigen(dateien: Vec<PathBuf>, take_id: String) -> Result<(), String> {
+async fn ohne_aufnahme_bestaetigen(app: AppHandle, dateien: Vec<PathBuf>, take_id: String) -> Result<(), String> {
     im_hintergrund(move || {
+        let _vormerken = Nachher(|| vorgaenge_vormerken(&app, &[], &dateien));
         let zeit = chrono::Local::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, false);
         let rechner = gethostname::gethostname().to_string_lossy().into_owned();
         let fehler: Vec<String> = dateien
@@ -1919,8 +2046,9 @@ async fn ohne_aufnahme_bestaetigen(dateien: Vec<PathBuf>, take_id: String) -> Re
 /// „Zu klären“: eine Unstimmigkeit als „stimmt so“ bestätigen. Steht mit Zeit und Rechner in jeder Zusammenfassung der
 /// Karte; ändert sich die Lage, erscheint sie wieder (anderer Schlüssel).
 #[tauri::command]
-async fn stimmt_so(dateien: Vec<PathBuf>, schluessel: String) -> Result<(), String> {
+async fn stimmt_so(app: AppHandle, dateien: Vec<PathBuf>, schluessel: String) -> Result<(), String> {
     im_hintergrund(move || {
+        let _vormerken = Nachher(|| vorgaenge_vormerken(&app, &[], &dateien));
         let zeit = chrono::Local::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, false);
         let rechner = gethostname::gethostname().to_string_lossy().into_owned();
         let fehler: Vec<String> = dateien
@@ -1978,6 +2106,7 @@ async fn clip_loeschen(
         let lokal = jetzt.with_timezone(&chrono::Local);
         let mut aus = ClipGeloescht { kopien: 0, dateien: 0, bytes: 0, protokolle: vec![] };
         let mut fehler: Vec<String> = Vec::new();
+        let mut kopien: Vec<PathBuf> = Vec::new();
         for d in &dateien {
             let Some(z) = ingest_kern::uebersicht::lesen_datei(d) else {
                 fehler.push(format!("{}: Zusammenfassung nicht lesbar", d.display()));
@@ -1985,6 +2114,7 @@ async fn clip_loeschen(
             };
             let Some(drehordner) = d.parent().and_then(Path::parent) else { continue };
             let kartenordner = drehordner.join(struktur::KAMERA).join(struktur::ordnername(&z.karte));
+            kopien.push(kartenordner.clone());
             match ingest_kern::loeschen::clip_endgueltig(&kartenordner, &stamm, &angaben, lokal) {
                 Ok(g) => {
                     if !g.dateien.is_empty() {
@@ -2007,6 +2137,7 @@ async fn clip_loeschen(
                 Err(e) => fehler.push(format!("{}: {e}", d.display())),
             }
         }
+        vorgaenge_vormerken(&app, &kopien, &[]);
         // In der gemeinsamen Datenbank nur weich löschen (der Plate Assistant blendet ihn dann aus).
         if let (Some(z), Some(kid)) = (&zugang, &karte_id) {
             match karte_db::loeschen_aenderung(kid, &clip, chrono::Utc::now(), plate::ulid_aehnlich()) {
@@ -2665,6 +2796,8 @@ pub fn run() {
             karten_nachtragen,
             zuordnungen_nachtragen,
             take_wiederherstellen,
+            vorgaenge_abgleichen,
+            ausgang_stand,
             zur_seite_liste,
             studio_take_bewerten,
             zur_seite_wegwerfen,

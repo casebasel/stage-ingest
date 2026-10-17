@@ -227,8 +227,10 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
     const weg = karte === "A001R131" ? `A${n}C002_261028_${r}` : null;
     const loesch = weg ? { clip: weg, zeit: "2026-10-28T19:40:12+01:00", benutzer: "marlon auf MAC-STUDIO" } : null;
     const da = (o: string) => o.startsWith("/");
-    // Keine Kopie lesbar: keine Dateien und kein Verlauf (wie `protokoll::detail`).
+    // Keine Kopie lesbar: Dateien und Verlauf nur aus den Vorgängen der gemeinsamen Datenbank (wie `protokoll::detail_mit`),
+    // hier für A001R133, die ein anderer Rechner aufs NAS eingelesen hat.
     const keine = !ordner.some(da);
+    const ausDb = keine && karte === "A001R133";
     const generationen = [
       { nr: 1, datei: "0001.mhl", zeit: "2026-10-28T13:55:00Z", rechner: "WIN-EDIT", werkzeug: "Stage Ingest", version: "0.1.55", prozess: "transfer", dateien: pfade.length },
       { nr: 2, datei: "0002.mhl", zeit: "2026-10-29T08:12:00Z", rechner: "MAC-STUDIO", werkzeug: "Stage Ingest", version: "0.1.55", prozess: "in-place", dateien: pfade.length },
@@ -245,7 +247,8 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
         nenntGeloeschte: weg && i === 0 ? [`${reel}/${weg}.mxf`] : [],
         ausserhalb: [],
       })),
-      dateien: (keine ? [] : pfade).map(([pfad, groesse, geaendert], i) => {
+      dateienAusDatenbank: ausDb,
+      dateien: (keine && !ausDb ? [] : pfade).map(([pfad, groesse, geaendert], i) => {
         const geloescht = weg !== null && pfad.includes(weg);
         return {
           pfad,
@@ -259,6 +262,7 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
         };
       }),
       verlauf: [
+        ...(ausDb ? [vorgang("2026-10-29T06:45:00Z", "eingelesen", "WIN-I9", 0)] : []),
         ...ordner.flatMap((o, i) => (da(o) && i === 0 ? [vorgang("2026-10-29T08:12:00Z", "nachgeprueft", "MAC-STUDIO", i)] : [])),
         ...(loesch ? [vorgang(loesch.zeit, "geloescht", "MAC-STUDIO", 0, { benutzer: "marlon", dateien: null, clip: weg })] : []),
         ...ordner.flatMap((o, i) => (da(o) ? [vorgang("2026-10-28T13:55:00Z", "eingelesen", "WIN-EDIT", i)] : [])),
@@ -293,6 +297,11 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
     await warte(400);
     return null;
   },
+  vorgaenge_abgleichen: async () => {
+    await warte(800);
+    return { neu: 14, gesendet: 14, offen: 0, abgelehnt: 0, fehler: null };
+  },
+  ausgang_stand: () => ({ neu: 0, gesendet: 0, offen: 0, abgelehnt: 0, fehler: null }),
   take_wiederherstellen: async () => {
     await warte(600);
     return null;

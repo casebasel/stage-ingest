@@ -149,6 +149,41 @@ pub struct TakeOhneAufnahme {
 
 /// Karten aus der gemeinsamen Datenbank, deren Zusammenfassung auf keinem erreichbaren Ziel liegt: Clips mit Timecode
 /// und Zuordnung, Drehordner aus `speicherort` bzw. `ordner_datum` (ab 0029). Ohne Datei (`datei` leer).
+/// Entscheidungen aus „Zu klären“, die irgendein Rechner getroffen hat (`ingest_vorgang`, ab 0.1.60; `db["entscheidungen"]`),
+/// in die Zusammenfassungen im Speicher: „Beibehalten“ und „Gehört nicht dazu“ als `stimmt_so`, „Ohne Clip bestätigt“
+/// als `ohne_aufnahme`. So gilt eine Entscheidung auf jedem Rechner, auch wenn die Karte hier nicht verbunden ist
+/// (Marlon, 17.10.2026: „alle Ingest-Apps synchron“).
+fn entscheidungen_einsetzen(karten: &mut [GefundeneKarte], db: &Value) {
+    for e in db["entscheidungen"].as_array().into_iter().flatten() {
+        let (karte, zeit, rechner) = (text(&e["karte"]), text(&e["zeit"]), text(&e["rechner"]));
+        for k in karten.iter_mut().filter(|k| k.inhalt.karte.eq_ignore_ascii_case(&karte)) {
+            match text(&e["art"]).as_str() {
+                "beibehalten" | "gehoert_nicht_dazu" => {
+                    let s = text(&e["angaben"]["schluessel"]);
+                    if !s.is_empty() && !k.inhalt.stimmt_so.iter().any(|x| x.schluessel == s) {
+                        k.inhalt.stimmt_so.push(ingest_kern::uebersicht::StimmtSo {
+                            schluessel: s,
+                            zeit: zeit.clone(),
+                            rechner: rechner.clone(),
+                        });
+                    }
+                }
+                "ohne_clip_bestaetigt" => {
+                    let t = text(&e["angaben"]["take_id"]);
+                    if !t.is_empty() && !k.inhalt.ohne_aufnahme.iter().any(|x| x.take_id == t) {
+                        k.inhalt.ohne_aufnahme.push(ingest_kern::uebersicht::OhneAufnahme {
+                            take_id: t,
+                            zeit: zeit.clone(),
+                            rechner: rechner.clone(),
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
 fn karten_aus_datenbank(db: &Value, karten: &[GefundeneKarte]) -> Vec<GefundeneKarte> {
     let gilt = |x: &Value| x["geloescht"] != true;
     let da: HashSet<String> = karten.iter().map(|k| k.inhalt.karte.to_uppercase()).collect();
@@ -1329,10 +1364,11 @@ pub fn zusammenfuehren(
     projekt: Projekt,
     drehs_json: &Value,
     jobs_json: &Value,
-    karten: Vec<GefundeneKarte>,
+    mut karten: Vec<GefundeneKarte>,
     unlesbar: Vec<PathBuf>,
     db: &Value,
 ) -> Uebersicht {
+    entscheidungen_einsetzen(&mut karten, db);
     let gilt = |x: &Value| x["geloescht"] != true;
     // HDRI-Jobs nach HDRI-ID (Tabelle `hdri_job`, fehlt vor 0019 oder ohne Leserecht: leer).
     let jobs: HashMap<String, &Value> =
@@ -1607,7 +1643,9 @@ pub fn zusammenfuehren(
     // Sonst stünde ein Take ohne Aufnahme als „Karte fehlt“ da (Marlon, 17.10.2026, Mac ohne NAS). Schreiben lässt
     // sich auf ihnen nichts; sie fehlen in „Zu klären“ bei den offenen Clips und den Unstimmigkeiten.
     let mut fuer_abgleich = karten.clone();
-    fuer_abgleich.extend(karten_aus_datenbank(db, &karten));
+    let mut aus_db = karten_aus_datenbank(db, &karten);
+    entscheidungen_einsetzen(&mut aus_db, db);
+    fuer_abgleich.extend(aus_db);
     let kv = kern_vorschlaege(drehs_json, &drehs, &fuer_abgleich, &zugeordnete_clips);
     let mut zu_klaeren: Vec<OffenerClip> = Vec::new();
     for (k, c) in karten.iter().flat_map(|k| k.inhalt.clips.iter().map(move |c| (k, c))) {
@@ -1735,7 +1773,6 @@ pub fn zusammenfuehren(
     let nachzutragen = nachtraege(ueber_namen, &karten, db, &unstimmigkeiten);
     // Anzeige: dieselbe Karte auf mehreren Zielen einmal (neuester Durchgang gewinnt). Vorher wurde schon beim Laden
     // zusammengefasst, dann sah das Einsortieren nur eine Kopie (Prüfung der Systemkarte, 10.10.2026).
-    let mut karten = karten;
     karten.sort_by(|a, b| (&a.inhalt.karte, &b.inhalt.beginn).cmp(&(&b.inhalt.karte, &a.inhalt.beginn)));
     karten.dedup_by(|a, b| a.inhalt.karte == b.inhalt.karte);
     Uebersicht {
@@ -2107,10 +2144,17 @@ mod tests {
             zeit: String::new(),
             rechner: String::new(),
         });
-        let u = zusammenfuehren(p, &drehs, &json!([]), karten, vec![], &Value::Null);
+        let u = zusammenfuehren(p.clone(), &drehs, &json!([]), karten.clone(), vec![], &Value::Null);
         let oben: Vec<&str> = u.unstimmigkeiten.iter().map(|x| x.clip.as_str()).collect();
         assert_eq!(oben, ["A009C002_120101_R132"]);
         assert!(u.zu_klaeren.iter().any(|o| o.clip == "A009C003_120101_R132"));
+        // Dieselbe Entscheidung auf einem anderen Rechner getroffen (gemeinsame Datenbank, ab 0.1.60): gilt hier auch.
+        karten[0].inhalt.stimmt_so.clear();
+        let db = json!({ "entscheidungen": [{ "karte": "a009r132", "art": "gehoert_nicht_dazu", "zeit": "2026-10-17T20:00:00+02:00",
+                                              "rechner": "i9", "angaben": { "schluessel": "entfernt:A009C003_120101_R132:T3" } }] });
+        let u = zusammenfuehren(p, &drehs, &json!([]), karten, vec![], &db);
+        let oben: Vec<&str> = u.unstimmigkeiten.iter().map(|x| x.clip.as_str()).collect();
+        assert_eq!(oben, ["A009C002_120101_R132"]);
     }
 
     #[test]
