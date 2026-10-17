@@ -447,6 +447,18 @@ export function SpaltenZellen({ spalten, t, technik }: { spalten: Spalte[]; t: T
 // Vorschaubilder nacheinander rechnen (ART CMD braucht pro Bild einige Sekunden; nie alle Clips gleichzeitig).
 const vorschauGemerkt = new Map<string, Promise<string[]>>();
 let vorschauKette: Promise<unknown> = Promise.resolve();
+const mittelbildGemerkt = new Map<string, Promise<string>>();
+/** Nur das mittlere Bild (Symbolansicht im Protokoll): ein Lauf von ART CMD statt drei, in derselben Reihe. */
+export function mittelbildLaden(datei: string, artCmd: string): Promise<string> {
+  const schluessel = `${datei}|${artCmd}`;
+  let p = mittelbildGemerkt.get(schluessel);
+  if (!p) {
+    p = vorschauKette.then(() => invoke<string>("clip_mittelbild", { datei, artCmd: artCmd || null }));
+    vorschauKette = p.catch(() => {});
+    mittelbildGemerkt.set(schluessel, p);
+  }
+  return p;
+}
 export function vorschauLaden(datei: string, artCmd: string): Promise<string[]> {
   const schluessel = `${datei}|${artCmd}`;
   let p = vorschauGemerkt.get(schluessel);

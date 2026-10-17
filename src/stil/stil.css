@@ -2612,6 +2612,136 @@ th.finder-name .finder-kopf {
     transition: none;
   }
 }
+/* Gewählte Zeile wie im Finder; Doppelklick öffnet. */
+.finder tbody tr[aria-selected="true"],
+.finder tbody tr[aria-selected="true"]:hover {
+  background: var(--auswahl);
+}
+.finder tbody tr:focus-visible {
+  outline: 2px solid var(--akzent-text);
+  outline-offset: -2px;
+}
+.finder-ansicht {
+  margin-left: 6px;
+}
+.finder-ansicht button {
+  padding: 0 8px;
+}
+.finder-meldung {
+  margin: 0;
+  padding: 8px 12px 0;
+}
+
+/* Symbolansicht: je Ordner Kacheln mit Mittelbild, Name, Grösse und Stand (Marlon, 17.10.2026: „so wie bei macOS“). */
+.finder-pfad {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 40px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--linie);
+}
+.finder-pfad-teil {
+  padding: 3px 6px;
+  border-radius: var(--rund-klein);
+  color: var(--text-2);
+}
+.finder-pfad-teil:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.finder-pfad-teil[aria-current="page"] {
+  color: var(--text);
+  font-weight: 600;
+}
+.finder-pfad-zahl {
+  margin-left: auto;
+  padding-right: 4px;
+  font-size: 12px;
+}
+.finder-kacheln {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 6px;
+  padding: 12px;
+}
+.kachel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px 8px 10px;
+  border-radius: var(--rund);
+  text-align: center;
+  cursor: default;
+  user-select: none;
+}
+.kachel:hover {
+  background: color-mix(in oklch, var(--hover) 70%, transparent);
+}
+.kachel[aria-selected="true"] {
+  background: var(--auswahl);
+}
+.kachel:focus-visible {
+  outline: 2px solid var(--akzent-text);
+  outline-offset: -2px;
+}
+.kachel-bild {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  margin-bottom: 4px;
+  border-radius: var(--rund-klein);
+  overflow: hidden;
+}
+.kachel-bild-voll {
+  background: oklch(0.1 0 0);
+  box-shadow: 0 1px 2px oklch(0 0 0 / 0.35);
+}
+.kachel-bild img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.kachel-zeichen {
+  color: var(--text-3);
+}
+.kachel-zeichen.finder-symbol-ordner {
+  color: var(--text-2);
+}
+.kachel-name {
+  display: -webkit-box;
+  max-width: 100%;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: 12.5px;
+  line-height: 1.3;
+  overflow-wrap: break-word;
+}
+.kachel-info {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kachel-stand {
+  font-size: 12px;
+}
+.kachel-weg .kachel-name {
+  color: var(--text-3);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in oklch, var(--text-3) 60%, transparent);
+}
+.finder-mehr {
+  margin: 0;
+  padding: 0 12px 12px;
+  font-size: 12px;
+}
 .protokoll-erklaerung {
   margin: 0;
   padding: 10px 12px 12px;

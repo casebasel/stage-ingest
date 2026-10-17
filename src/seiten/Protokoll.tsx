@@ -10,6 +10,8 @@ import { openPath } from "@tauri-apps/plugin-opener";
 import { ask } from "@tauri-apps/plugin-dialog";
 import {
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ChevronUp,
   ChevronsDownUp,
   ChevronsUpDown,
@@ -25,6 +27,8 @@ import {
   FileVideo,
   Folder,
   FolderOpen,
+  LayoutGrid,
+  List,
   Play,
   RefreshCw,
   ShieldCheck,
@@ -45,10 +49,12 @@ import {
   type ProtokollKopie,
   type Vorgang,
 } from "../kern";
-import { useEinstellungen } from "../einstellungen";
+import { gemerkt, merken, useEinstellungen } from "../einstellungen";
 import { useLauf } from "../lauf";
 import { Pfad, Status, datumZeit, type Ton } from "../teile";
 import { abweichungText } from "./Einlesen";
+import { Abspieler, type AbspielEintrag } from "./Abspieler";
+import { mittelbildLaden } from "./TakeSpalten";
 
 /** Je Stand: Signal, Zeichen, kurzes Wort für die Zelle, Erklärung für den Hinweis. */
 const STAND: Record<DateiStand, { ton: Ton; zeichen: LucideIcon; wort: string; text: string }> = {
@@ -86,7 +92,9 @@ function kopieName(k: ProtokollKopie): string {
   if (mac) return mac[1];
   const win = k.ordner.match(/^([A-Za-z]:)[\\/]/);
   if (win) return win[1];
-  return k.ordner.split(/[\\/]/).filter(Boolean)[0] ?? k.ordner;
+  // Lokal (z. B. /Users/<name>/Downloads/ingest/<Projekt>/<Drehort>/01_KAMERA/<Karte>): der Ordner über dem Projekt.
+  const teile = k.ordner.split(/[\\/]/).filter(Boolean);
+  return teile.length > 4 ? teile[teile.length - 5] : (teile[0] ?? k.ordner);
 }
 
 const datumKurz = (iso: string) => {
@@ -645,8 +653,45 @@ const zeitwert = (iso: string) => {
   return Number.isNaN(t) ? 0 : t;
 };
 
-/** Dateien der Karte als Liste wie im Finder: Ordner mit Dreieck zum Aufklappen, je Datei Änderungszeit, Grösse, Art und
- * je Kopie der Stand mit Zeichen und Wort. Ordner mit vielen Dateien (ARRIRAW-Bilder) sind zu. */
+/** Datei auf der ersten verbundenen Kopie, auf der sie liegt (geprüft zuerst); sonst `null`. */
+function dateiPfad(z: DateiZeile, d: ProtokollDetail): string | null {
+  const liegt: DateiStand[] = ["geprueft", "ungeprueft", "anders", "fehlgeschlagen"];
+  for (const s of liegt) {
+    const i = z.jeKopie.findIndex((x, j) => x === s && d.kopien[j]?.erreichbar);
+    if (i >= 0) {
+      const o = d.kopien[i].ordner;
+      const trenner = o.includes("\\") && !o.includes("/") ? "\\" : "/";
+      return `${o}${trenner}${z.pfad.split("/").join(trenner)}`;
+    }
+  }
+  return null;
+}
+
+/** Spielt der Player der App (Projektseite: Leertaste); alles andere öffnet das Standardprogramm. */
+const abspielbar = (n: string) => FILM.has(endung(n)) || endung(n) === "ari" || endung(n) === "arx";
+
+/** Über alle lesbaren Kopien zusammengefasst: das Schlimmste zuerst (für die Kacheln der Symbolansicht). */
+function gesamtStand(z: DateiZeile, lesbar: number[]): DateiStand {
+  const je = lesbar.map((i) => z.jeKopie[i]);
+  if (je.length === 0) return "unbekannt";
+  const rot = je.find((s) => STAND[s].ton === "rot");
+  if (rot) return rot;
+  if (je.includes("ungeprueft")) return "ungeprueft";
+  if (je.every((s) => s === "geloescht")) return "geloescht";
+  return je.includes("geprueft") ? "geprueft" : "geloescht";
+}
+
+/** ARRIRAW-Clip: Ordner nur mit Bildern (`.ari`/`.arx`), ohne Unterordner. */
+const istArriClip = (k: Knoten) =>
+  k.kinder.length === 0 && k.dateien.length > 0 && k.dateien.every((z) => ["ari", "arx"].includes(endung(name(z))));
+
+type Ansicht = "liste" | "symbole";
+
+/** Dateien der Karte wie im Finder, als Liste oder als Symbole (Marlon, 17.10.2026: „eine Listenansicht und eine
+ * Symbolansicht mit der Bildvorschau … so wie bei macOS“). Liste: Ordner mit Dreieck, je Datei Änderungszeit, Grösse,
+ * Art und je Kopie der Stand; Ordner mit vielen Dateien (ARRIRAW-Bilder) sind zu. Symbole: je Ordner eine Ansicht mit
+ * Mittelbild je Clip. Doppelklick (oder Eingabetaste) öffnet: Clips im Player der App, Ordner in der Symbolansicht,
+ * alles andere im Standardprogramm. */
 function Dateibaum({ d, k, geloescht, anzahl }: { d: ProtokollDetail; k: ProtokollKarte; geloescht: number; anzahl: number }) {
   const wurzel = useMemo(() => baumBauen(d.dateien), [d]);
   const alleOrdner = useMemo(() => {
@@ -655,6 +700,11 @@ function Dateibaum({ d, k, geloescht, anzahl }: { d: ProtokollDetail; k: Protoko
     gehen(wurzel);
     return aus;
   }, [wurzel]);
+  const [ansicht, setAnsicht] = useState<Ansicht>(() => gemerkt<Ansicht>("protokoll.ansicht", "liste"));
+  const ansichtWaehlen = (a: Ansicht) => {
+    setAnsicht(a);
+    merken("protokoll.ansicht", a);
+  };
   const [offen, setOffen] = useState<Set<string>>(() => {
     const s = new Set<string>();
     const gehen = (n: Knoten, tiefe: number) => {
@@ -667,6 +717,10 @@ function Dateibaum({ d, k, geloescht, anzahl }: { d: ProtokollDetail; k: Protoko
     return s;
   });
   const [sortierung, setSortierung] = useState<{ spalte: Spalte; ab: boolean }>({ spalte: "name", ab: false });
+  const [gewaehlt, setGewaehlt] = useState<string | null>(null);
+  const [spieler, setSpieler] = useState<{ liste: AbspielEintrag[]; index: number } | null>(null);
+  const [meldung, setMeldung] = useState<string | null>(null);
+  const lesbar = d.kopien.map((x, i) => (x.erreichbar && !x.fehler ? i : -1)).filter((i) => i >= 0);
   const umschalten = (p: string) =>
     setOffen((s) => {
       const n = new Set(s);
@@ -690,18 +744,153 @@ function Dateibaum({ d, k, geloescht, anzahl }: { d: ProtokollDetail; k: Protoko
     return sortierung.spalte === "name" && sortierung.ab ? -r : r;
   };
 
+  /** Öffnen wie im Finder: Clips im Player der App (mit den übrigen Clips daneben zum Weiterschalten), sonst das
+   * Standardprogramm des Systems. */
+  async function oeffnen(z: DateiZeile, daneben: DateiZeile[]) {
+    const pfad = dateiPfad(z, d);
+    if (!pfad) {
+      setMeldung(`${name(z)}: Keine Kopie mit dieser Datei ist verbunden.`);
+      return;
+    }
+    setMeldung(null);
+    if (abspielbar(name(z))) {
+      const liste = daneben
+        .filter((x) => abspielbar(name(x)))
+        .flatMap((x) => {
+          const p = dateiPfad(x, d);
+          return p ? [{ id: x.pfad, datei: p, titel: `${k.karte} · ${name(x)}`, clip: name(x).replace(/\.[^.]+$/, "") }] : [];
+        });
+      const index = liste.findIndex((e) => e.id === z.pfad);
+      if (index >= 0) setSpieler({ liste, index });
+      return;
+    }
+    try {
+      await openPath(pfad);
+    } catch (e) {
+      setMeldung(`${name(z)} lässt sich nicht öffnen: ${String(e)}`);
+    }
+  }
+
+  return (
+    <section className="protokoll-abschnitt" aria-labelledby="t-dateien">
+      <h3 id="t-dateien">
+        Dateien auf der Karte <span className="leise zahl">{anzahl}</span>
+        {geloescht > 0 && <span className="leise">· {geloescht} von Hand gelöscht</span>}
+        <span className="finder-knoepfe">
+          {ansicht === "liste" && (
+            <>
+              <button className="knopf-symbol" onClick={() => setOffen(new Set(alleOrdner.map((o) => o.pfad)))} title="Alle Ordner aufklappen" aria-label="Alle Ordner aufklappen">
+                <ChevronsUpDown size={15} strokeWidth={1.75} />
+              </button>
+              <button className="knopf-symbol" onClick={() => setOffen(new Set())} title="Alle Ordner zuklappen" aria-label="Alle Ordner zuklappen">
+                <ChevronsDownUp size={15} strokeWidth={1.75} />
+              </button>
+            </>
+          )}
+          <span className="segment finder-ansicht" role="group" aria-label="Darstellung">
+            <button aria-pressed={ansicht === "symbole"} onClick={() => ansichtWaehlen("symbole")} title="Als Symbole" aria-label="Als Symbole">
+              <LayoutGrid size={14} strokeWidth={1.75} />
+            </button>
+            <button aria-pressed={ansicht === "liste"} onClick={() => ansichtWaehlen("liste")} title="Als Liste" aria-label="Als Liste">
+              <List size={14} strokeWidth={1.75} />
+            </button>
+          </span>
+        </span>
+      </h3>
+      {meldung && (
+        <p className="finder-meldung">
+          <Status ton="warn">{meldung}</Status>
+        </p>
+      )}
+      {ansicht === "liste" ? (
+        <FinderListe
+          d={d}
+          k={k}
+          wurzel={wurzel}
+          offen={offen}
+          umschalten={umschalten}
+          sortierung={sortierung}
+          sortieren={sortieren}
+          vergleich={vergleich}
+          ordnerFolge={ordnerFolge}
+          gewaehlt={gewaehlt}
+          waehlen={setGewaehlt}
+          oeffnen={oeffnen}
+        />
+      ) : (
+        <FinderSymbole
+          d={d}
+          wurzel={wurzel}
+          lesbar={lesbar}
+          vergleich={vergleich}
+          ordnerFolge={ordnerFolge}
+          gewaehlt={gewaehlt}
+          waehlen={setGewaehlt}
+          oeffnen={oeffnen}
+          kopien={k.kopien}
+        />
+      )}
+      <p className="leise protokoll-erklaerung">
+        <span>
+          Geprüft heisst: beim Einlesen ohne Cache zurückgelesen und mit der Prüfsumme der Karte (XXH3-128) verglichen,
+          festgehalten in der ASC-MHL-Historie der Kopie, und die Datei liegt heute mit gleicher Grösse da. Ungeprüft: liegt
+          da, aber kein Einlesen hat sie mit der Karte verglichen. „Nachprüfen“ liest jede Datei nochmals. Doppelklick öffnet
+          eine Datei: Clips im Player, alles andere im Standardprogramm.
+        </span>
+      </p>
+      {spieler && (
+        <Abspieler liste={spieler.liste} index={spieler.index} setIndex={(i) => setSpieler(i === null ? null : { ...spieler, index: i })} />
+      )}
+    </section>
+  );
+}
+
+type FinderTeile = {
+  d: ProtokollDetail;
+  wurzel: Knoten;
+  vergleich: (a: DateiZeile, b: DateiZeile) => number;
+  ordnerFolge: (a: Knoten, b: Knoten) => number;
+  gewaehlt: string | null;
+  waehlen: (p: string | null) => void;
+  oeffnen: (z: DateiZeile, daneben: DateiZeile[]) => void;
+};
+
+function FinderListe({
+  d,
+  k,
+  wurzel,
+  offen,
+  umschalten,
+  sortierung,
+  sortieren,
+  vergleich,
+  ordnerFolge,
+  gewaehlt,
+  waehlen,
+  oeffnen,
+}: FinderTeile & {
+  k: ProtokollKarte;
+  offen: Set<string>;
+  umschalten: (p: string) => void;
+  sortierung: { spalte: Spalte; ab: boolean };
+  sortieren: (s: Spalte) => void;
+}) {
+  // Alle Dateien in der Reihenfolge der Liste: der Player schaltet darin weiter.
+  const reihe: DateiZeile[] = [];
   const zeilen: ReactElement[] = [];
   const gehen = (n: Knoten, tiefe: number) => {
     for (const c of [...n.kinder].sort(ordnerFolge)) {
       const auf = offen.has(c.pfad);
       const da = c.alle.filter((z) => !z.geloescht);
+      const arri = istArriClip(c);
       zeilen.push(
-        <tr key={`o:${c.pfad}`} className="finder-ordner">
+        <tr key={`o:${c.pfad}`} className="finder-ordner" aria-selected={gewaehlt === `o:${c.pfad}`} onClick={() => waehlen(`o:${c.pfad}`)}>
           <td className="finder-name">
             <button
               className="finder-auf"
               style={{ paddingLeft: 6 + tiefe * 16 }}
-              onClick={() => umschalten(c.pfad)}
+              // Der zweite Klick eines Doppelklicks klappt nicht gleich wieder zu.
+              onClick={(ev) => ev.detail <= 1 && umschalten(c.pfad)}
               aria-expanded={auf}
               title={c.pfad}
             >
@@ -713,7 +902,7 @@ function Dateibaum({ d, k, geloescht, anzahl }: { d: ProtokollDetail; k: Protoko
           <td className="finder-zahl leise">–</td>
           <td className="finder-zahl leise">{bytesText(da.reduce((s, z) => s + z.groesse, 0))}</td>
           <td className="finder-art leise">
-            Ordner · {da.length} {da.length === 1 ? "Datei" : "Dateien"}
+            {arri ? "ARRIRAW-Clip" : "Ordner"} · {da.length} {arri ? (da.length === 1 ? "Bild" : "Bilder") : da.length === 1 ? "Datei" : "Dateien"}
           </td>
           {d.kopien.map((_, i) => (
             <td key={i} className="finder-stand-zelle">
@@ -725,13 +914,28 @@ function Dateibaum({ d, k, geloescht, anzahl }: { d: ProtokollDetail; k: Protoko
       if (auf) gehen(c, tiefe + 1);
     }
     for (const z of [...n.dateien].sort(vergleich)) {
+      reihe.push(z);
       const n2 = name(z);
       const Z = dateiZeichen(n2);
       const titel = [z.pfad, z.xxh128 && `XXH3-128 ${z.xxh128}`, z.geloescht && `Von Hand gelöscht ${geloeschtText(z.geloescht)}`]
         .filter(Boolean)
         .join("\n");
+      const weg = z.geloescht && z.jeKopie.every((s) => s === "geloescht" || s === "unbekannt");
       zeilen.push(
-        <tr key={z.pfad} className={z.geloescht && z.jeKopie.every((s) => s === "geloescht" || s === "unbekannt") ? "finder-weg" : undefined}>
+        <tr
+          key={z.pfad}
+          className={weg ? "finder-weg" : undefined}
+          aria-selected={gewaehlt === z.pfad}
+          tabIndex={0}
+          onClick={() => waehlen(z.pfad)}
+          onDoubleClick={() => oeffnen(z, reihe)}
+          onKeyDown={(ev) => {
+            if (ev.key === "Enter" || (ev.key === " " && abspielbar(n2))) {
+              ev.preventDefault();
+              oeffnen(z, reihe);
+            }
+          }}
+        >
           <td className="finder-name" title={titel}>
             <span className="finder-datei" style={{ paddingLeft: 6 + tiefe * 16 + 13 }}>
               <Z size={16} strokeWidth={1.6} className="finder-symbol" aria-hidden />
@@ -766,49 +970,245 @@ function Dateibaum({ d, k, geloescht, anzahl }: { d: ProtokollDetail; k: Protoko
   };
 
   return (
-    <section className="protokoll-abschnitt" aria-labelledby="t-dateien">
-      <h3 id="t-dateien">
-        Dateien auf der Karte <span className="leise zahl">{anzahl}</span>
-        {geloescht > 0 && <span className="leise">· {geloescht} von Hand gelöscht</span>}
-        <span className="finder-knoepfe">
-          <button className="knopf-symbol" onClick={() => setOffen(new Set(alleOrdner.map((o) => o.pfad)))} title="Alle Ordner aufklappen" aria-label="Alle Ordner aufklappen">
-            <ChevronsUpDown size={15} strokeWidth={1.75} />
-          </button>
-          <button className="knopf-symbol" onClick={() => setOffen(new Set())} title="Alle Ordner zuklappen" aria-label="Alle Ordner zuklappen">
-            <ChevronsDownUp size={15} strokeWidth={1.75} />
-          </button>
-        </span>
-      </h3>
-      <div className="finder-rahmen">
-        <table className="finder">
-          <thead>
-            <tr>
-              {kopf("name", "Name", "finder-name")}
-              {kopf("geaendert", "Geändert", "finder-zahl")}
-              {kopf("groesse", "Grösse", "finder-zahl")}
-              {kopf("art", "Art")}
-              {k.kopien.map((x) => (
-                <th key={x.ordner} className="finder-stand-zelle" title={x.ordner}>
-                  <span className="finder-kopf-text">{kopieName(x)}</span>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {zeilen.map((z, i) => (
-              <Fragment key={i}>{z}</Fragment>
+    <div className="finder-rahmen">
+      <table className="finder">
+        <thead>
+          <tr>
+            {kopf("name", "Name", "finder-name")}
+            {kopf("geaendert", "Geändert", "finder-zahl")}
+            {kopf("groesse", "Grösse", "finder-zahl")}
+            {kopf("art", "Art")}
+            {k.kopien.map((x) => (
+              <th key={x.ordner} className="finder-stand-zelle" title={x.ordner}>
+                <span className="finder-kopf-text">{kopieName(x)}</span>
+              </th>
             ))}
-          </tbody>
-        </table>
-      </div>
-      <p className="leise protokoll-erklaerung">
-        <span>
-          Geprüft heisst: beim Einlesen ohne Cache zurückgelesen und mit der Prüfsumme der Karte (XXH3-128) verglichen,
-          festgehalten in der ASC-MHL-Historie der Kopie, und die Datei liegt heute mit gleicher Grösse da. Ungeprüft: liegt
-          da, aber kein Einlesen hat sie mit der Karte verglichen. „Nachprüfen“ liest jede Datei nochmals.
+          </tr>
+        </thead>
+        <tbody>
+          {zeilen.map((z, i) => (
+            <Fragment key={i}>{z}</Fragment>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Höchstens so viele Kacheln je Ordner (ARRIRAW: Tausende Bilder); den Rest zeigt die Liste. */
+const KACHELN_HOECHSTENS = 240;
+
+function FinderSymbole({
+  d,
+  wurzel,
+  lesbar,
+  vergleich,
+  ordnerFolge,
+  gewaehlt,
+  waehlen,
+  oeffnen,
+  kopien,
+}: FinderTeile & { lesbar: number[]; kopien: ProtokollKopie[] }) {
+  // Start wie im Finder an der Wurzel der Karte; liegt dort nur ein Ordner (die Rolle), gleich in ihm.
+  const [ort, setOrt] = useState(() => (wurzel.dateien.length === 0 && wurzel.kinder.length === 1 ? wurzel.kinder[0].pfad : ""));
+  const knoten = (pfad: string): Knoten => {
+    let n = wurzel;
+    for (const teil of pfad ? pfad.split("/") : []) {
+      const c = n.kinder.find((x) => x.name === teil);
+      if (!c) return wurzel;
+      n = c;
+    }
+    return n;
+  };
+  const hier = knoten(ort);
+  const ordner = [...hier.kinder].sort(ordnerFolge);
+  const dateien = [...hier.dateien].sort(vergleich);
+  const teile = ort ? ort.split("/") : [];
+  const hoch = () => setOrt(teile.slice(0, -1).join("/"));
+  const zahl = ordner.length + dateien.length;
+
+  const standZeile = (s: DateiStand, titel: string) => {
+    const { ton, zeichen: Z, wort } = STAND[s];
+    return (
+      <span className={`status status-${ton} kachel-stand`} title={titel}>
+        <Z size={13} strokeWidth={2} aria-hidden />
+        <span>{wort}</span>
+      </span>
+    );
+  };
+  const jeKopie = (z: DateiZeile) => lesbar.map((i) => `${kopieName(kopien[i])}: ${STAND[z.jeKopie[i]].wort}`).join("\n");
+
+  return (
+    <div className="finder-symbole">
+      <nav className="finder-pfad" aria-label="Ordner">
+        <button className="knopf-symbol" onClick={hoch} disabled={!ort} title="Übergeordneter Ordner" aria-label="Übergeordneter Ordner">
+          <ChevronLeft size={15} strokeWidth={1.75} />
+        </button>
+        <button className="finder-pfad-teil" onClick={() => setOrt("")} aria-current={!ort ? "page" : undefined}>
+          Karte
+        </button>
+        {teile.map((t, i) => (
+          <Fragment key={i}>
+            <ChevronRight size={13} strokeWidth={1.75} className="leise" aria-hidden />
+            <button
+              className="finder-pfad-teil zahl"
+              onClick={() => setOrt(teile.slice(0, i + 1).join("/"))}
+              aria-current={i === teile.length - 1 ? "page" : undefined}
+            >
+              {t}
+            </button>
+          </Fragment>
+        ))}
+        <span className="leise finder-pfad-zahl">
+          {zahl} {zahl === 1 ? "Objekt" : "Objekte"}
         </span>
-      </p>
-    </section>
+      </nav>
+      <div className="finder-kacheln" role="list">
+        {ordner.map((c) => {
+          const arri = istArriClip(c);
+          const mitte = arri ? [...c.dateien].sort(vergleich)[Math.floor(c.dateien.length / 2)] : null;
+          const da = c.alle.filter((z) => !z.geloescht);
+          const offen = c.alle.filter((z) => lesbar.some((i) => !inOrdnung(z.jeKopie[i])));
+          const schluessel = `o:${c.pfad}`;
+          return (
+            <div
+              key={schluessel}
+              role="listitem"
+              tabIndex={0}
+              className="kachel"
+              aria-selected={gewaehlt === schluessel}
+              onClick={() => waehlen(schluessel)}
+              onDoubleClick={() => setOrt(c.pfad)}
+              onKeyDown={(ev) => ev.key === "Enter" && setOrt(c.pfad)}
+              title={c.pfad}
+            >
+              <Kachelbild datei={mitte ? dateiPfad(mitte, d) : null} zeichen={Folder} ordner />
+              <span className="kachel-name">
+                <NameMitUmbruch text={c.name} />
+              </span>
+              <span className="kachel-info">
+                {arri ? "ARRIRAW-Clip" : "Ordner"} · {da.length} {arri ? "Bilder" : da.length === 1 ? "Datei" : "Dateien"}
+              </span>
+              {lesbar.length === 0 ? (
+                standZeile("unbekannt", "Keine Kopie verbunden")
+              ) : offen.length === 0 ? (
+                standZeile(c.alle.every((z) => z.geloescht) ? "geloescht" : "geprueft", "Alle Dateien in Ordnung")
+              ) : (
+                <ZuKlaerenZeile anzahl={offen.length} rot={offen.some((z) => lesbar.some((i) => STAND[z.jeKopie[i]].ton === "rot"))} />
+              )}
+            </div>
+          );
+        })}
+        {dateien.slice(0, Math.max(0, KACHELN_HOECHSTENS - ordner.length)).map((z) => {
+          const n2 = name(z);
+          const s = gesamtStand(z, lesbar);
+          const bild = FILM.has(endung(n2)) || BILD.has(endung(n2));
+          return (
+            <div
+              key={z.pfad}
+              role="listitem"
+              tabIndex={0}
+              className={`kachel${s === "geloescht" ? " kachel-weg" : ""}`}
+              aria-selected={gewaehlt === z.pfad}
+              onClick={() => waehlen(z.pfad)}
+              onDoubleClick={() => oeffnen(z, dateien)}
+              onKeyDown={(ev) => {
+                if (ev.key === "Enter" || (ev.key === " " && abspielbar(n2))) {
+                  ev.preventDefault();
+                  oeffnen(z, dateien);
+                }
+              }}
+              title={[z.pfad, z.xxh128 && `XXH3-128 ${z.xxh128}`, z.geloescht && `Von Hand gelöscht ${geloeschtText(z.geloescht)}`]
+                .filter(Boolean)
+                .join("\n")}
+            >
+              <Kachelbild datei={bild && s !== "geloescht" ? dateiPfad(z, d) : null} zeichen={dateiZeichen(n2)} />
+              <span className="kachel-name">
+                <NameMitUmbruch text={n2} />
+              </span>
+              <span className="kachel-info">
+                {z.groesse > 0 ? bytesText(z.groesse) : artVon(n2)}
+                {z.geaendert && ` · ${datumKurz(z.geaendert)}`}
+              </span>
+              {standZeile(s, s === "geloescht" && z.geloescht ? `Von Hand gelöscht ${geloeschtText(z.geloescht)}` : jeKopie(z))}
+            </div>
+          );
+        })}
+      </div>
+      {zahl > KACHELN_HOECHSTENS && (
+        <p className="leise finder-mehr">
+          {zahl - KACHELN_HOECHSTENS} weitere Dateien in diesem Ordner zeigt die Liste.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Clipnamen wie im Finder umbrechen: nach „_“ und vor der Endung, nicht mitten in „R132“. */
+function NameMitUmbruch({ text }: { text: string }) {
+  const teile = text.split(/(?<=_)|(?=\.[^.]+$)/);
+  return (
+    <>
+      {teile.map((t, i) => (
+        <Fragment key={i}>
+          {i > 0 && <wbr />}
+          {t}
+        </Fragment>
+      ))}
+    </>
+  );
+}
+
+function ZuKlaerenZeile({ anzahl, rot }: { anzahl: number; rot: boolean }) {
+  const Z = rot ? CircleX : CircleAlert;
+  return (
+    <span className={`status status-${rot ? "rot" : "warn"} kachel-stand`} title={`${anzahl} Dateien nicht geprüft`}>
+      <Z size={13} strokeWidth={2} aria-hidden />
+      <span>{anzahl} zu klären</span>
+    </span>
+  );
+}
+
+/** Bild einer Kachel: das Mittelbild des Clips (ART CMD, sonst Quick Look), erst wenn die Kachel sichtbar wird; sonst
+ * das Zeichen der Art. */
+function Kachelbild({ datei, zeichen: Z, ordner = false }: { datei: string | null; zeichen: LucideIcon; ordner?: boolean }) {
+  const artCmd = useEinstellungen().artCmd.trim();
+  const ref = useRef<HTMLSpanElement>(null);
+  const [sichtbar, setSichtbar] = useState(false);
+  const [bild, setBild] = useState<string | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!datei || !el) return;
+    const io = new IntersectionObserver(
+      (e) => {
+        if (e.some((x) => x.isIntersecting)) {
+          setSichtbar(true);
+          io.disconnect();
+        }
+      },
+      { rootMargin: "300px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [datei]);
+  useEffect(() => {
+    if (!sichtbar || !datei) return;
+    let aus = false;
+    mittelbildLaden(datei, artCmd)
+      .then((b) => !aus && setBild(b))
+      .catch(() => {});
+    return () => {
+      aus = true;
+    };
+  }, [sichtbar, datei, artCmd]);
+  return (
+    <span ref={ref} className={`kachel-bild${bild ? " kachel-bild-voll" : ""}`}>
+      {bild ? (
+        <img src={bild} alt="" />
+      ) : (
+        <Z size={ordner ? 46 : 38} strokeWidth={1.3} className={ordner ? "finder-symbol-ordner kachel-zeichen" : "kachel-zeichen"} aria-hidden />
+      )}
+    </span>
   );
 }
 

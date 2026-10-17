@@ -356,6 +356,12 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
     await warte(2500);
     return { pfad: "/Volumes/NAS/Footage/HAPPY_END/2026-10-28_RHEINUFER/06_EXPORT/ProRes_HQ_709Look/A001C002_261028_R131_709Look_HQ.mov", hinweis: null };
   },
+  clip_mittelbild: async (a) => {
+    await warte(150);
+    const n = String(a.datei).length;
+    const farbe = ["#3a4250", "#6b5a3e", "#2f3d33", "#4a3550", "#35504a"][n % 5];
+    return `data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="480" height="270"><rect width="480" height="270" fill="${farbe}"/><circle cx="${140 + (n % 7) * 30}" cy="135" r="60" fill="#c8b48a"/></svg>`)}`;
+  },
   clip_vorschaubilder: () =>
     ["#3a4250", "#6b5a3e", "#2f3d33"].map(
       (farbe) =>

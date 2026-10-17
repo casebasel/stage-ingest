@@ -117,6 +117,30 @@ pub fn erzeugen(datei: &Path, art_cmd: Option<&Path>, cache: &Path) -> Result<Ve
     Ok(vec![eins])
 }
 
+/// Nur das mittlere Bild (Symbolansicht im Protokoll): ein Lauf von ART CMD statt drei, dieselbe Datei im
+/// Zwischenspeicher wie bei [`erzeugen`]. Ohne ART CMD oder bei fremden Clips Quick Look (macOS).
+pub fn mittelbild(datei: &Path, art_cmd: Option<&Path>, cache: &Path) -> Result<PathBuf, String> {
+    let k = schluessel(datei).ok_or_else(|| format!("Datei nicht erreichbar: {}", datei.display()))?;
+    let ordner = cache.join("clip-vorschau");
+    std::fs::create_dir_all(&ordner).map_err(|e| e.to_string())?;
+    let tmp = ordner.join(format!("{k}.tmp"));
+    let bilder = ingest_kern::clip::lesen(datei).ok().and_then(|c| c.bilder).unwrap_or(1).max(1);
+    let ziel = ordner.join(format!("{k}_{}.jpg", bilder / 2));
+    if ziel.is_file() {
+        return Ok(ziel);
+    }
+    if let Some(art) = art_cmd {
+        if mit_art_cmd(art, datei, bilder / 2, &tmp, &ziel).is_ok() {
+            return Ok(ziel);
+        }
+    }
+    let eins = ordner.join(format!("{k}_ql.jpg"));
+    if !eins.is_file() {
+        mit_quick_look(datei, &tmp, &eins)?;
+    }
+    Ok(eins)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

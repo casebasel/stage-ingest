@@ -2289,6 +2289,20 @@ async fn clip_vorschaubilder(app: AppHandle, datei: PathBuf, art_cmd: Option<Pat
     .await
 }
 
+/// Mittleres Bild eines Clips als JPEG-Daten-URL (Symbolansicht im Protokoll), im Zwischenspeicher gemerkt.
+#[tauri::command]
+async fn clip_mittelbild(app: AppHandle, datei: PathBuf, art_cmd: Option<PathBuf>) -> Result<String, String> {
+    use base64::Engine;
+    let cache = app.path().app_cache_dir().map_err(|e| e.to_string())?;
+    let art = art_cmd.filter(|p| !p.as_os_str().is_empty());
+    im_hintergrund(move || {
+        let p = vorschaubilder::mittelbild(&datei, art.as_deref(), &cache)?;
+        let b = std::fs::read(p).map_err(|e| e.to_string())?;
+        Ok(format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(b)))
+    })
+    .await
+}
+
 /// Einen Clip exportieren (ProRes MOV, MP4, EXR; siehe `export`). Immer nur ein Export zugleich.
 #[tauri::command]
 async fn clip_exportieren(
@@ -2539,6 +2553,7 @@ pub fn run() {
             projekt_uebersicht,
             take_technik,
             clip_vorschaubilder,
+            clip_mittelbild,
             clip_freigeben,
             ablage_pruefen,
             clip_exportieren,
