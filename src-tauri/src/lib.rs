@@ -403,8 +403,8 @@ async fn kamera_nachfuehren(
 }
 
 /// Projektseite: `clip.technik` für ältere Karten nachtragen, deren Kopie hier erreichbar ist (Marlon, 17.10.2026: „Also
-/// alles kommt in die Datenbank“). Nur Clips ohne Wert, höchstens 100 je Aufruf (liest die Köpfe der Clipdateien).
-/// Gibt die Zahl der geschriebenen zurück.
+/// alles kommt in die Datenbank“). Nur Clips ohne Wert oder mit älterer Lesart (`technik::LESART`), höchstens 100 je
+/// Aufruf (liest die Köpfe der Clipdateien). Gibt die Zahl der geschriebenen zurück.
 #[tauri::command]
 async fn technik_nachtragen(
     plate: State<'_, Arc<plate::Plate>>,
@@ -420,7 +420,7 @@ async fn technik_nachtragen(
         let ohne: std::collections::HashSet<String> = p
             .technik_lesen(&zugang, &projekt.id)?
             .into_iter()
-            .filter(|(_, _, w)| w.is_null())
+            .filter(|(_, _, w)| technik::veraltet(w))
             .map(|(id, _, _)| id)
             .collect();
         let mut soll: Vec<(String, serde_json::Value)> = Vec::new();

@@ -205,6 +205,15 @@ fn anzeige(k: &Map<String, Value>) -> Vec<(&'static str, String)> {
 /// Höchstens so gross darf `clip.technik` sein (Server: 64 KB als Text; etwas Luft).
 const TECHNIK_HOECHSTENS: usize = 60 * 1024;
 
+/// Wie die Werte gelesen werden (`clip.technik.lesart`). Steigt, wenn sich die Zuordnung ändert; ältere Einträge schreibt
+/// die Projektseite dann neu. 2 = ab 0.1.64: Kamerawerte fest je Spalte von ART CMD, ND als „ND 2.1“ (0.1.63 ohne).
+pub const LESART: u64 = 2;
+
+/// Fehlt der Eintrag in `clip.technik` oder stammt er aus einer älteren Lesart?
+pub fn veraltet(w: &Value) -> bool {
+    w["lesart"].as_u64() != Some(LESART)
+}
+
 /// Die Werte eines Clips für `clip.technik` (Marlon, 17.10.2026: „Also alles kommt in die Datenbank“; Migration 0031):
 /// ein Objekt mit allen Werten als Text, dazu `kamerawerte` typisiert (Zahlen, siehe `artcmd::kamerawerte`). Wird es zu
 /// gross, fallen zuerst die Rohwerte der CSV (`artcmd:`), dann die der Datei (`datei:`) weg; die Spaltenwerte bleiben.
@@ -224,7 +233,11 @@ pub fn fuer_datenbank(w: &BTreeMap<String, String>) -> Option<Value> {
         }
         m.retain(|k, _| !k.starts_with(weg));
     }
-    (!m.is_empty() && groesse(&m) <= TECHNIK_HOECHSTENS).then_some(Value::Object(m))
+    if m.is_empty() || groesse(&m) > TECHNIK_HOECHSTENS {
+        return None;
+    }
+    m.insert("lesart".into(), LESART.into());
+    Some(Value::Object(m))
 }
 
 #[cfg(test)]
@@ -257,7 +270,9 @@ mod tests {
         let mut w: BTreeMap<String, String> = BTreeMap::new();
         w.insert("aufloesung".into(), "3840x2160".into());
         w.insert("tilt".into(), "1.9".into());
-        assert_eq!(fuer_datenbank(&w), Some(serde_json::json!({"aufloesung": "3840x2160", "tilt": "1.9"})));
+        let v = fuer_datenbank(&w);
+        assert_eq!(v, Some(serde_json::json!({"aufloesung": "3840x2160", "tilt": "1.9", "lesart": LESART})));
+        assert!(!veraltet(&v.unwrap()) && veraltet(&Value::Null) && veraltet(&serde_json::json!({"nd": "2.1"})));
         // Zu viele Rohwerte: Sie fallen weg, die Spaltenwerte bleiben.
         for i in 0..3000 {
             w.insert(format!("artcmd:feld{i:04}"), "x".repeat(20));

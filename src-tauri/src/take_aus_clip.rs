@@ -51,7 +51,9 @@ fn kamera(w: &std::collections::BTreeMap<String, String>) -> Value {
     let zahl = |s: &str| s.replace(',', ".").trim().parse::<f64>().ok().map(|f| json!(f));
     for (von, nach, als_zahl) in KAMERA {
         if let Some(v) = w.get(von).map(|v| v.trim()).filter(|v| !v.is_empty() && !v.contains('…')) {
-            let wert = if als_zahl { zahl(v) } else { Some(json!(v)) };
+            // ND wie CAP und die Stage „ND 0.6“, auch aus einem `clip.technik` von 0.1.63 („0.6“).
+            let nd = (nach == "nd" && ingest_kern::artcmd::zahl(v).is_some()).then(|| format!("ND {v}"));
+            let wert = if als_zahl { zahl(v) } else { Some(json!(nd.as_deref().unwrap_or(v))) };
             if let Some(wert) = wert {
                 k.insert(nach.into(), wert);
             }
@@ -305,15 +307,19 @@ mod tests {
             json!({ "id": "WEG", "kamera": { "quelle": "ale", "blende": "0" }, "geloescht": true }),
             // Eine Blende von Hand am Take aus einem Clip bleibt stehen.
             json!({ "id": "HAND", "kamera": { "quelle": "ale", "blende": "T2.8", "nd": "ND 1.2" } }),
+            json!({ "id": "ALT", "kamera": { "quelle": "ale", "nd": "ND 1.2" } }),
         ];
         let clip = |take: &str, name: &str, t: &Value| json!({ "take_id": take, "name": name, "technik": t, "geaendert_am": "2026-10-17T20:00:00Z" });
         let b_kamera = json!({ "nd": "ND 2.1", "shutter": "172.8" });
+        // `clip.technik` von 0.1.63 schrieb ND ohne „ND “: an den Take trotzdem wie CAP.
+        let technik_alt = json!({ "nd": "1.2" });
         let clips = vec![
             clip("T7", "B003C001_120101_R1AB", &b_kamera),
             clip("T7", "A010C027_120101_R132", &technik),
             clip("CAP", "A010C001_120101_R132", &technik),
             clip("WEG", "A010C002_120101_R132", &technik),
             clip("HAND", "A010C003_120101_R132", &json!({ "nd": "ND 1.2" })),
+            clip("ALT", "A010C004_120101_R132", &technik_alt),
         ];
         let mut a = kamera_abweichungen(&takes, &clips);
         a.sort_by(|x, y| (&x.0, &x.1).cmp(&(&y.0, &y.1)));

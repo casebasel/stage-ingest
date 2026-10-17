@@ -128,7 +128,7 @@ Ohne verbundenes Ziel folgt `02_PLATES` beim nächsten Einlesen. Der Plate Assis
 - **Grösse:** über 60 KB fallen zuerst die Rohwerte weg. Echte CSV von A010C022: 153 Werte, 7,8 KB.
 - **Wann geschrieben:**
   - nach dem Einlesen aus der Hauptkopie, nur was sich geändert hat (jedes Schreiben ändert `geaendert_am` am Clip);
-  - für ältere Karten mit erreichbarer Kopie im Hintergrund der Projektseite, je Sitzung und Projekt einmal, höchstens 100 Clips je Durchgang, nur Clips ohne Wert.
+  - für ältere Karten mit erreichbarer Kopie im Hintergrund der Projektseite, je Sitzung und Projekt einmal, höchstens 100 Clips je Durchgang, nur Clips ohne Wert oder mit älterer Lesart (`lesart`; 2 ab 0.1.64, die Einträge von 0.1.63 haben keine und werden neu geschrieben).
 - **Vorbedingung:** Der Ingest fragt je Sitzung, ob die Spalte da ist. Ohne sie schreibt und liest er nichts.
 - **Anzeige:** Ohne erreichbare Datei nimmt die Take-Tabelle alle Werte aus `clip.technik`, auf jedem Rechner. Plate Assistant und Stage dürfen sie lesen.
 
