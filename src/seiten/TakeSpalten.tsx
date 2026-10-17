@@ -23,6 +23,8 @@ export type TakeMitWerten = {
   clipOffen?: boolean;
   /** Ein Clip des Takes steht unter „Unstimmigkeiten“. */
   unstimmig?: boolean;
+  /** Clipname am Take von der Kamera bestätigt (beim Zuordnen von Hand nie überschreiben). */
+  clipBestaetigt?: boolean;
   karte: string | null;
   freigegeben: boolean;
   /** Studio-Take der Stage: Bewertung und Notiz im Ingest änderbar. */

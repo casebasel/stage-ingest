@@ -1370,7 +1370,8 @@ function ZuKlaeren({
         });
         setStand((s) => ({ ...s, [schluessel]: { ton: "ok", text: "Take angelegt und zugeordnet" } }));
       } else {
-        // Bestehender Take ohne bestätigten Clip: den Clip von der Karte auch am Take eintragen (Marlon, 16.10.2026).
+        // Bestehender Take ohne von der Kamera bestätigten Clip: den Clip von der Karte auch am Take eintragen (Marlon,
+        // 16.10.2026); ein früher von Hand geschriebener Name wird dabei ersetzt.
         const take = alleTakes.find((x) => x.t.id === w.take)?.t;
         await invoke("clip_zuordnen", {
           zugang,
@@ -1379,7 +1380,7 @@ function ZuKlaeren({
           takeId: w.take || null,
           drehId: w.dreh,
           clipdatei: c.clipdateien?.[0] ?? null,
-          takeHatClip: take ? Boolean(take.werte?.["take.clip.name"]) : null,
+          takeHatClip: take ? Boolean(take.clipBestaetigt) : null,
           aufnehmen: c.ohnePruefung ? (c.pfad ?? null) : null,
         });
         setStand((s) => ({ ...s, [schluessel]: { ton: "ok", text: "Zugeordnet" } }));
@@ -1505,7 +1506,7 @@ function ZuKlaeren({
           takeId: art === "umhaengen" ? x.vorschlagTake : null,
           drehId: art === "umhaengen" ? x.vorschlagDreh : null,
           clipdatei: x.clipdateien[0] ?? null,
-          takeHatClip: ziel ? Boolean(ziel.werte?.["take.clip.name"]) : null,
+          takeHatClip: ziel ? Boolean(ziel.clipBestaetigt) : null,
           aufnehmen: null,
         });
       }

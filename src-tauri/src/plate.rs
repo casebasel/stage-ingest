@@ -945,6 +945,31 @@ fn drehs_aus(v: &Value) -> Vec<DrehKurz> {
 /// Takes → Soll-Liste (nur des Drehorts `dreh_id`). Ein Take zählt nur, wenn Take, Plate und Drehort nicht
 /// gelöscht sind. Clipname: von der Kamera (`clip.name`), sonst von Hand (`clip_name`); ohne Endung, gross.
 /// `v` enthält alle Drehorte des Tages, für das Zeitfenster bis zur nächsten Klappe.
+/// `take.clip` hat der Ingest beim Zuordnen von Hand geschrieben (`take_aus_clip::clip_am_take`): ohne bestätigtes REC
+/// und ohne Timecode beim REC. Die Kamera (CAP) setzt beides, der Platzhalter des Plate Assistant den Timecode, ein Take
+/// aus einem Clip trägt `kamera.quelle = ale`.
+pub(crate) fn clip_von_hand(take: &Value) -> bool {
+    !text(&take["clip"]["name"]).is_empty()
+        && take["kamera"]["quelle"] != "cap"
+        && take["kamera"]["quelle"] != "ale"
+        && text(&take["start_tc"]).is_empty()
+}
+
+/// Clipname eines Takes für den Abgleich und als geplanter Name: `take.clip` (Kamera), sonst der Vorschlag der App
+/// (`clip_name`). Ein von Hand geschriebenes `take.clip` zählt nicht: Wird der Clip später umgehängt oder gelöst, bliebe
+/// sein Name am alten Take hängen (Treppenhaus Takes 6 und 7, 17.10.2026); die Zuordnung selbst steht in der
+/// Zusammenfassung der Karte.
+pub(crate) fn clipname_im_plan(take: &Value) -> String {
+    let von_hand = clip_von_hand(take);
+    [&take["clip"]["name"], &take["clip_name"]]
+        .into_iter()
+        .skip(usize::from(von_hand))
+        .map(text)
+        .find(|c| !c.is_empty())
+        .map(|c| ohne_endung(&c).to_uppercase())
+        .unwrap_or_default()
+}
+
 /// Den Clipnamen hat die Kamera bestätigt: Sie meldete für diesen Take das REC (`kamera.quelle = cap`) und nach dem
 /// Stopp den Clip (`take.clip`), und dessen Start-Timecode passt zum Timecode beim REC (`start_tc`; bei CAP stets gleich,
 /// echte Daten 17.10.2026). Ein Platzhalter (Build 32) trägt den Namen des letzten Clips ohne eigenes REC: nur ein
@@ -1042,12 +1067,7 @@ pub(crate) fn soll_aus(v: &Value, dreh_id: &str) -> Vec<SollClip> {
             };
             for take in plate["take"].as_array().into_iter().flatten().filter(|t| t["geloescht"] != true) {
                 let aus_clip = aus_clip_angelegt(take, &drehtag);
-                let clip = [&take["clip"]["name"], &take["clip_name"]]
-                    .into_iter()
-                    .map(text)
-                    .find(|c| !c.is_empty())
-                    .map(|c| ohne_endung(&c).to_uppercase())
-                    .unwrap_or_default();
+                let clip = clipname_im_plan(take);
                 // Bestätigt nur, was die Kamera gemeldet hat (`name_bestaetigt`); jeder andere Name ist ein Hinweis.
                 let name_geschaetzt = !name_bestaetigt(take) && !clip.is_empty();
                 let art = take["art"].as_str().unwrap_or("take");
@@ -1234,6 +1254,22 @@ mod tests {
         assert_eq!(s[0].fenster_bis, "2026-10-10T22:30:00+00:00");
         assert_eq!(s[1].drehtag, "2026-10-11", "Ortszeit Zürich: 00:30 am Folgetag");
         assert!(s[1].clip.is_empty() && s[1].fenster_bis.is_empty());
+    }
+
+    #[test]
+    fn clipname_von_hand_bleibt_nicht_haengen() {
+        // Treppenhaus Take 7: C011 von Hand zugeordnet (take.clip geschrieben), später gelöst.
+        let t7 = json!({ "clip_name": "A009C011_261015_R132",
+                         "clip": {"name": "A009C011_120101_R132", "startTc": "15:14:03:19", "bilder": 100} });
+        assert!(clip_von_hand(&t7));
+        assert_eq!(clipname_im_plan(&t7), "A009C011_261015_R132");
+        // CAP und Platzhalter behalten ihren Namen.
+        let cap = json!({ "kamera": {"quelle": "cap"}, "start_tc": "15:09:23:15",
+                          "clip": {"name": "A009C008_120101_R132", "startTc": "15:09:23:15", "bilder": 100} });
+        assert_eq!(clipname_im_plan(&cap), "A009C008_120101_R132");
+        let platzhalter = json!({ "start_tc": "15:22:01:14", "clip_name": "A010C021_120101_R132",
+                                  "clip": {"name": "A010C021_120101_R132", "startTc": "15:22:01:14", "bilder": 100} });
+        assert!(!clip_von_hand(&platzhalter));
     }
 
     #[test]

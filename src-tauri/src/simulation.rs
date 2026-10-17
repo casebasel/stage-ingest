@@ -518,8 +518,8 @@ pub(crate) fn vorschlaege_uebernehmen(
         let Some(sim) = clips.iter().find(|c| c.name.eq_ignore_ascii_case(&o.clip)) else { continue };
         let an = sim.zeile.angaben.as_ref().unwrap();
         let take_id = if let Some(t) = &o.vorschlag_take {
-            // `take.clip` nur, wenn der Take noch keinen Clipnamen hat (wie `takeHatClip`).
-            if let Some(take) = take_mut(drehs, t).filter(|x| x["clip"]["name"].as_str().is_none_or(str::is_empty)) {
+            // `take.clip`, wenn die Kamera keinen Namen bestätigt hat (wie `takeHatClip` = `clipBestaetigt`).
+            if let Some(take) = take_mut(drehs, t).filter(|x| !crate::plate::name_bestaetigt(x)) {
                 take["clip"] = json!({ "name": o.clip, "startTc": an.start_tc, "bilder": an.bilder });
             }
             t.clone()

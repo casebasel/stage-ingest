@@ -876,6 +876,9 @@ pub struct TakeStand {
     pub ohne_aufnahme: bool,
     /// Clip aus einem abgebrochenen Einlesen, nie gegen die Karte geprüft.
     pub ungeprueft: bool,
+    /// Den Clipnamen am Take hat die Kamera bestätigt (`plate::name_bestaetigt`): beim Zuordnen von Hand nie
+    /// überschreiben. Sonst schreibt der Ingest `take.clip` neu (ein früher von Hand geschriebener Name wäre falsch).
+    pub clip_bestaetigt: bool,
     /// Kein Clip zugeordnet, obwohl die Karte zu seiner Klappe eingelesen ist, und nicht sicher ohne Aufnahme: ein
     /// offener Clip in „Zu klären“ könnte dazugehören.
     pub clip_offen: bool,
@@ -1259,12 +1262,7 @@ pub fn zusammenfuehren(
             let mut takes = Vec::new();
             for t in p["take"].as_array().into_iter().flatten().filter(|t| gilt(t)) {
                 let id = text(&t["id"]);
-                let clip = [&t["clip"]["name"], &t["clip_name"]]
-                    .into_iter()
-                    .map(text)
-                    .find(|c| !c.is_empty())
-                    .map(|c| ingest_kern::soll::ohne_endung(&c).to_uppercase())
-                    .unwrap_or_default();
+                let clip = crate::plate::clipname_im_plan(t);
                 take_zu_dreh.insert(id.clone(), text(&d["id"]));
                 if !clip.is_empty() {
                     clip_zu_dreh.insert(clip.clone(), text(&d["id"]));
@@ -1297,6 +1295,7 @@ pub fn zusammenfuehren(
                     clip_geplant,
                     ohne_aufnahme: false,
                     ungeprueft: stand.is_some_and(|s| s.ungeprueft),
+                    clip_bestaetigt: bestaetigt,
                     clip_offen: false,
                     unstimmig: false,
                     karte: stand.map(|s| s.karte.clone()),

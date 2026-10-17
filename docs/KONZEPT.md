@@ -25,6 +25,26 @@ Vorbilder zum Anschauen (nur lesen, nichts ungeprüft übernehmen): Sluice (MIT,
 4. Abweichung, Lesefehler, fehlende oder zusätzliche Datei → das Ziel ist nicht gültig, die Karte nicht freigegeben. Kein stilles Weitermachen.
 5. Ein laufender Kopiervorgang wird **nie** unterbrochen, auch nicht durch ein Update.
 
+**Simulation (`kern/tests/simulation_kopie.rs`, Marlon 17.10.2026: „da darf wirklich kein Fehler passieren“).** Zufällige Karten gehen durch den echten Ablauf (`ablauf::sichern`). Sie enthalten Clips, ARRIRAW-Bildordner, Begleitdateien, Dateien des Betriebssystems, leere Ordner und Grössen an den Blockgrenzen. Gestört wird so:
+- Abbruch mitten im Kopieren,
+- halb geschriebener Lauf mit `…ingest-teil`,
+- weitergedrehte Karte (Ergänzen),
+- frühere Kopie nachprüfen, auch verfälscht,
+- Karte mit verändertem Clip,
+- Bitfehler zwischen Schreiben und Zurücklesen,
+- Karte liefert beim zweiten Lesen anderes,
+- zwei Ziele auf derselben Platte,
+- endgültiges Löschen eines Clips.
+
+Geprüft wird:
+- Freigabe genau dann, wenn genug unabhängige Kopien Byte für Byte der Karte gleichen.
+- Eine gestörte Kopie zählt nie.
+- Eine frühere Kopie wird nie überschrieben.
+- Nach einem Abbruch sind nur neu begonnene Ziele weg.
+- Jede gute Kopie besteht ihre ASC-MHL-Historie, eigene Prüfung und Referenz `ascmhl verify`.
+
+Stand 17.10.2026: 2000 Karten ohne Fehler (`SIM_KOPIE_ANZAHL=2000 ASCMHL_DEBUG=<ascmhl-debug> cargo test -p ingest-kern --release --test simulation_kopie -- --nocapture`).
+
 ## 4. Freigabe und Entwerten
 
 - **„Sicher zum Formatieren“** erst, wenn die Karte an mindestens **N unabhängige Kopien** geprüft geschrieben ist. N ist im Ingest einstellbar (nicht am Projekt), Standard **2**.
@@ -64,7 +84,7 @@ Die Struktur ist von Marlon bestätigt (07.10.2026) und gebaut (`kern/src/strukt
 **Simulation (`src-tauri/src/simulation.rs`):** Zufällige, realistische Drehtage mit bekannter Wahrheit durch denselben Code wie die App (Plan → Soll-Liste → Abgleich → Zusammenfassung → Projektseite): Verbindung reisst ab und kommt wieder, Klappen ohne REC, Aufnahmen nur an der Kamera, QR, Kamerauhr auf 2012, verschobener Timecode und Sprung mitten im Tag, B-Kamera, Platzhalter, Kartenwechsel, zweiter Drehort auf derselben Karte, gelöschte Takes. Danach übernimmt die Simulation alle Vorschläge wie Marlon und rechnet neu, bis keiner mehr kommt, und ordnet zur Gegenprobe einen Clip von Hand falsch zu. Geprüft: keine falsche Zuordnung, kein falscher Vorschlag, kein Clip verloren oder doppelt, kein Take mit Aufnahme als „ohne Aufnahme“, kein „Karte fehlt“ bei eingelesenen Karten, keine Unstimmigkeit ohne Grund. Stand 17.10.2026: 100 000 Drehtage (1,2 Mio. Clips) ohne Fehler, 98 % der falschen Zuordnungen von Hand gemeldet (`SIM_ANZAHL=100000 cargo test -p stage-ingest --release drehtage -- --nocapture`, einzeln `SIM_NR=<n>`). Mit echten Daten: Test `echtes_projekt_pruefen` (Plan und Zusammenfassungen nur gelesen).
 
 **„Zu klären“ (Projektseite):**
-- **Offene Clips** bekommen Vorschläge nach denselben Regeln (je Karte, schon zugeordnete Clips als sichere Bezugspunkte, alle Takes des Projekts ohne Clip auf einer anderen Karte); „Alle Vorschläge übernehmen“. Ein neuer Take wird nur vorgeschlagen, wenn der Clip sicher im Abschnitt eines Takes beginnt, der seinen Clip schon hat, und kein Take (auch kein gelöschter) diesen Clip nennt. Warum ein Clip offen bleibt, steht darunter (z. B. „Take-ID im ersten Clip der Karte“). Beim Zuordnen zu einem Take ohne Clipnamen schreibt der Ingest `take.clip {name, startTc, bilder}` wie CAP nach dem Stopp.
+- **Offene Clips** bekommen Vorschläge nach denselben Regeln (je Karte, schon zugeordnete Clips als sichere Bezugspunkte, alle Takes des Projekts ohne Clip auf einer anderen Karte); „Alle Vorschläge übernehmen“. Ein neuer Take wird nur vorgeschlagen, wenn der Clip sicher im Abschnitt eines Takes beginnt, der seinen Clip schon hat, und kein Take (auch kein gelöschter) diesen Clip nennt. Warum ein Clip offen bleibt, steht darunter (z. B. „Take-ID im ersten Clip der Karte“). Beim Zuordnen schreibt der Ingest `take.clip {name, startTc, bilder}` wie CAP nach dem Stopp, wenn die Kamera am Take keinen Namen bestätigt hat (`clipBestaetigt`); ein früher von Hand geschriebener Name wird dabei ersetzt. Ein von Hand geschriebenes `take.clip` (ohne `cap` und ohne Timecode beim REC) gilt nur als geplanter Name; für Abgleich und Anzeige zählt dann der Vorschlag der App (`plate::clipname_im_plan`), damit ein umgehängter oder gelöster Clip nicht am alten Take hängen bleibt. Löschen kann der Ingest `take.clip` nicht (nur Name, Timecode, Bilder erlaubt), der Plate Assistant zeigt den alten Namen also weiter.
 - **Takes ohne Aufnahme:** Takes ohne Clip, deren Klappe an eine eingelesene Karte grenzt. **Sicher** ohne Aufnahme nur, wenn die Klappe zwischen zwei Takes mit Clip auf derselben Karte (oder auf zwei aufeinanderfolgenden Rollen) liegt, kein offener Clip für ihn in Frage kommt, die Kamera kein REC gemeldet hat, an dem Tag nur eine Kamera drehte, jeder offene Clip dort eine Zeit hat und er kein Platzhalter ist; sonst **unklar** mit Grund. Grenzt die Klappe an keine eingelesene Karte oder liegt eine Rolle dazwischen nicht vor: „Karte fehlt“. **„Ohne Aufnahme bestätigen“** (auch alle sicheren auf einmal; Marlon, 17.10.2026: „Ich möchte immer alles behalten, es werden mir nie Takes gelöscht“): Der Take bleibt im Plate Assistant, die Bestätigung steht mit Zeit und Rechner in jeder Zusammenfassung der Karte (`ohne_aufnahme`, gilt auf Mac und Windows, bleibt beim Ergänzen). Löschen nur ausnahmsweise über das Papierkorb-Symbol mit deutlicher Warnung (`take.geloescht`, im Plate Assistant wiederherstellbar). An bestehenden Takes schreibt der Ingest nur `take.clip` und `take.geloescht` (Sperre in `src-tauri/src/plate.rs`, mit Test).
 - **Unstimmigkeiten** (Marlon, 17.10.2026: „Unstimmigkeiten müssen in Zu klären erscheinen“): Jede Zuordnung wird nur mit den Belegen der Clips gegengeprüft (QR, Take-ID, Name von der Kamera, Timecode, Zeit; ohne die Zuordnungen selbst). Gemeldet wird, wenn ein sicherer Beleg einen anderen Take nennt, der Clip nicht im Abschnitt seines Takes beginnt, der Take laut Beleg einen anderen Clip derselben Kamera hat, oder ein Take zwei Clips derselben Kamera hat. Je Fall: auf den Take der Belege umhängen, lösen (zurück zu den offenen Clips) oder „Stimmt so“ (`stimmt_so` in der Zusammenfassung; ändert sich die Lage, erscheint er wieder). Für Zusammenfassungen vor 0.1.50 ohne `info1` liest die App die Take-ID aus den ersten 64 KB der Clipdatei nach (ARRI legt sie nach etwa 7 KB ab), nur im Speicher. Echte Daten 17.10.2026: genau die drei falschen Zuordnungen im Treppenhaus (C010 bei Take 6, C011 bei Take 7, C012 bei Take 8; laut Take-ID und REC gehört C010 zu Take 8, C011 und C012 sind weitere Aufnahmen danach).
 
