@@ -103,6 +103,8 @@ type Uebersicht = {
   ohneDatenbank?: string[];
   /** Eindeutige Zuordnungen, die erst nach dem Einlesen erkannt wurden: die App trägt sie nach. */
   nachzutragen?: { clip: string; karte: string; karteId: string; takeId: string; drehId: string; dateien: string[] }[];
+  /** Tilt und Roll am Take nach der Regel in `aus_clip.rs` (aus den Clips): die App trägt sie nach. */
+  ausClipNachzutragen?: { takeId: string; wert: unknown }[];
 };
 type TakeOhneAufnahme = {
   takeId: string;
@@ -246,7 +248,8 @@ const GRUNDSPALTEN: Spalte[] = [
       ) : (
         <span className="ohne-umbruch">
           <TakeArt t={t} />
-          {BEWERTUNG[t.bewertung] && ` · ${BEWERTUNG[t.bewertung]}`}
+          {/* Referenz-Takes ohne Bewertung (wie der Plate Assistant); sie bleibt gespeichert und erscheint als Take wieder. */}
+          {(t.art || "take") === "take" && BEWERTUNG[t.bewertung] && ` · ${BEWERTUNG[t.bewertung]}`}
         </span>
       ),
   },
@@ -436,6 +439,7 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
   const [nachgetragen, setNachgetragen] = useState<{ ton: Ton; text: string } | null>(null);
   // Je Sitzung jede Zuordnung höchstens einmal nachtragen (schlägt es fehl, versucht es erst ein Neustart wieder).
   const zuordnungVersucht = useRef(new Set<string>());
+  const ausClipVersucht = useRef(new Set<string>());
   async function laden(p: ProjektT) {
     setLaedt(true);
     setFehler(null);
@@ -459,6 +463,15 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
             );
           })
           .catch((err) => setNachgetragen({ ton: "warn", text: `Nachtragen nicht möglich: ${String(err)}` }));
+      }
+      // Tilt und Roll aus den Clips an die Takes (Marlon, 17.10.2026: „das soll der Ingest machen. Und es an alle anderen
+      // weitergeben“): im Hintergrund, je Sitzung je Take und Wert höchstens einmal.
+      const tiltRoll = (neu.ausClipNachzutragen ?? []).filter((x) => !ausClipVersucht.current.has(`${x.takeId}|${JSON.stringify(x.wert)}`));
+      if (verbunden && p.id && tiltRoll.length > 0 && !lauf.laeuft) {
+        tiltRoll.forEach((x) => ausClipVersucht.current.add(`${x.takeId}|${JSON.stringify(x.wert)}`));
+        invoke<number>("aus_clip_nachtragen", { zugang: konto.zugang, eintraege: tiltRoll }).catch((err) =>
+          setNachgetragen({ ton: "warn", text: `Tilt und Roll nicht an alle Takes nachgetragen: ${String(err)}` }),
+        );
       }
       // Eindeutige Zuordnungen, die die App erst nach dem Einlesen erkannt hat (Clipname von der Kamera am Take bestätigt),
       // in Datenbank und Zusammenfassungen nachtragen (Marlon, 17.10.2026: „automatisch nachtragen“), dann neu laden.

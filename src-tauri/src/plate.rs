@@ -105,6 +105,8 @@ pub fn aenderungen_pruefen(body: &Value) -> Result<(), String> {
                 "geloescht" if a["wert"] == false && paar(a, "clip_name", &name_ok) => {}
                 // „Art ändern“ (Marlon, 17.10.2026, mit dem Plate Assistant abgestimmt): nur eine der vier Arten.
                 "art" if a["wert"].as_str().is_some_and(|w| TAKE_ARTEN.contains(&w)) => {}
+                // Tilt und Roll aus dem Clip (Marlon, 17.10.2026: „das soll der Ingest machen“): nur die vier Zahlen.
+                "aus_clip" if crate::aus_clip::gueltig(&a["wert"]) => {}
                 "clip_name" if name_ok(&a["wert"]) && paar(a, "geloescht", &|w| *w == false) => {}
                 _ => return Err(format!("Stage Ingest ändert am Take „{feld}“ nicht")),
             }
@@ -632,6 +634,55 @@ impl Plate {
                 e.unwrap_or("unbekannt"),
                 v[0]["grund"].as_str().unwrap_or_default()
             )),
+        }
+    }
+
+    /// `take.aus_clip` dieser Takes nach der Regel in `aus_clip` angleichen: liest ihre Clips und ihr `aus_clip` und
+    /// schreibt, was abweicht. Gibt die Zahl der geschriebenen zurück.
+    pub fn aus_clip_abgleichen(&self, z: &Zugang, take_ids: &[String]) -> Result<usize, String> {
+        let mut liste = Vec::new();
+        for teil in take_ids.chunks(50) {
+            let ids: Vec<String> = teil.iter().map(|t| url_teil(t)).collect();
+            let clips = self.lesen(
+                z,
+                &format!("clip?take_id=in.({})&geloescht=not.is.true&select=take_id,name,aus_clip", ids.join(",")),
+            )?;
+            let takes = self.lesen(z, &format!("take?id=in.({})&select=id,aus_clip", ids.join(",")))?;
+            let clips: Vec<(String, String, Value)> = clips
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|c| (text(&c["take_id"]).to_owned(), text(&c["name"]).to_owned(), c["aus_clip"].clone()))
+                .collect();
+            let ist: Vec<(String, Value)> = takes
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|t| (text(&t["id"]).to_owned(), t["aus_clip"].clone()))
+                .collect();
+            liste.extend(crate::aus_clip::abweichungen(ist.iter().map(|(i, w)| (i.as_str(), w)), &clips));
+        }
+        self.aus_clip_schreiben(z, &liste)
+    }
+
+    /// Schreibt `take.aus_clip` (Take, Wert); gibt die Zahl der übernommenen zurück.
+    pub fn aus_clip_schreiben(&self, z: &Zugang, liste: &[(String, Value)]) -> Result<usize, String> {
+        let mut gut = 0;
+        let mut fehler = Vec::new();
+        for teil in liste.chunks(50) {
+            let a = crate::aus_clip::aenderungen(teil, chrono::Utc::now(), ulid_aehnlich);
+            let body = json!({ "p_geraet": geraet_name(), "p_aenderungen": a });
+            for x in self.anwenden(z, &body)?.as_array().into_iter().flatten() {
+                match x["ergebnis"].as_str() {
+                    Some("uebernommen" | "aelter" | "doppelt") => gut += 1,
+                    e => fehler.push(format!("{} {}", e.unwrap_or("?"), x["grund"].as_str().unwrap_or_default())),
+                }
+            }
+        }
+        if fehler.is_empty() {
+            Ok(gut)
+        } else {
+            Err(format!("Tilt/Roll am Take nicht überall: {}", fehler.join("; ")))
         }
     }
 
@@ -1679,6 +1730,8 @@ mod tests {
         for w in PLATE_ARTEN {
             assert!(aenderungen_pruefen(&a("plate", "art", json!(w))).is_ok(), "plate.art = {w}");
         }
+        assert!(aenderungen_pruefen(&a("take", "aus_clip", json!({"tiltGrad": 1.9, "rollGrad": 0.8}))).is_ok());
+        assert!(aenderungen_pruefen(&a("take", "aus_clip", json!({"tiltGrad": 1.9, "x": 1}))).is_err());
         for (t, f, w) in [
             ("take", "art", json!("studio")),
             ("take", "art", json!(null)),

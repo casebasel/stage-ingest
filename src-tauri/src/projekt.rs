@@ -39,6 +39,17 @@ pub struct Uebersicht {
     /// Eindeutige Zuordnungen, die die App erst nach dem Einlesen erkannt hat und die noch nirgends stehen: die App
     /// trägt sie in Datenbank und Zusammenfassungen nach (Marlon, 17.10.2026: „automatisch nachtragen“).
     pub nachzutragen: Vec<Nachtrag>,
+    /// Tilt und Roll am Take, die nicht der Regel in `aus_clip` entsprechen: die App trägt sie nach (Marlon, 17.10.2026:
+    /// „Das normale Spalte Tilt und Roll kommt aus den File, das soll der Ingest machen“).
+    pub aus_clip_nachzutragen: Vec<AusClipNachtrag>,
+}
+
+/// Ein Take mit seinem Soll für `take.aus_clip` (leer = `null`).
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AusClipNachtrag {
+    pub take_id: String,
+    pub wert: Value,
 }
 
 /// Eine eindeutige Zuordnung zum Nachtragen: Der Clipname am Take ist von der Kamera bestätigt (`plate::name_bestaetigt`:
@@ -1786,6 +1797,34 @@ pub fn zusammenfuehren(
     let einsortieren = einsortierbar(&karten, &drehs, &take_zu_dreh, &clip_zu_dreh);
     let ohne_datenbank = karten.iter().filter(|k| k.inhalt.karte_id.is_none()).map(|k| k.datei.clone()).collect();
     let nachzutragen = nachtraege(ueber_namen, &karten, db, &unstimmigkeiten);
+    // Tilt und Roll am Take nach der Regel in `aus_clip`, aus den Clips der Datenbank. Nur wenn die Clips das Feld
+    // mitbringen: Sonst (Rückfall-Abfrage eines alten Servers) sähe jeder Take leer aus und würde geleert.
+    let clips_db = db["clips"].as_array().filter(|a| !a.is_empty() && a.iter().all(|c| c.get("aus_clip").is_some()));
+    let aus_clip_nachzutragen = match clips_db {
+        Some(clips) => {
+            let clips: Vec<(String, String, Value)> = clips
+                .iter()
+                .filter(|c| gilt(c) && !text(&c["take_id"]).is_empty())
+                .map(|c| (text(&c["take_id"]), text(&c["name"]), c["aus_clip"].clone()))
+                .collect();
+            let takes: Vec<(String, Value)> = drehs_json
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|d| gilt(d))
+                .flat_map(|d| d["plate"].as_array().into_iter().flatten())
+                .filter(|p| gilt(p))
+                .flat_map(|p| p["take"].as_array().into_iter().flatten())
+                .filter(|t| gilt(t) && t["studio"] != true)
+                .map(|t| (text(&t["id"]), t["aus_clip"].clone()))
+                .collect();
+            crate::aus_clip::abweichungen(takes.iter().map(|(i, w)| (i.as_str(), w)), &clips)
+                .into_iter()
+                .map(|(take_id, wert)| AusClipNachtrag { take_id, wert })
+                .collect()
+        }
+        None => vec![],
+    };
     // Anzeige: dieselbe Karte auf mehreren Zielen einmal (neuester Durchgang gewinnt). Vorher wurde schon beim Laden
     // zusammengefasst, dann sah das Einsortieren nur eine Kopie (Prüfung der Systemkarte, 10.10.2026).
     karten.sort_by(|a, b| (&a.inhalt.karte, &b.inhalt.beginn).cmp(&(&b.inhalt.karte, &a.inhalt.beginn)));
@@ -1802,6 +1841,7 @@ pub fn zusammenfuehren(
         einsortieren,
         ohne_datenbank,
         nachzutragen,
+        aus_clip_nachzutragen,
     }
 }
 
@@ -2201,6 +2241,25 @@ mod tests {
         assert_eq!((wert(0, "take.aus_clip.tiltGrad"), wert(0, "take.aus_clip.rollBereich")), (Some(1.89), Some(1.5)));
         // Hat der Take selbst Werte, gelten diese.
         assert_eq!(wert(1, "take.aus_clip.tiltGrad"), Some(-1.32));
+        // Nachtragen an den Take (der Ingest schreibt `take.aus_clip`, Regel in `aus_clip`): Take 1 bekommt die Werte
+        // seines Clips gerundet, Take 7 wird an seinen Clip angeglichen.
+        let nach: Vec<(&str, Value)> =
+            u.aus_clip_nachzutragen.iter().map(|n| (n.take_id.as_str(), n.wert.clone())).collect();
+        assert_eq!(
+            nach,
+            [
+                ("T1", json!({ "tiltGrad": 1.9, "rollGrad": 0.8, "rollBereich": 1.5 })),
+                ("T7", json!({ "tiltGrad": 9.9, "rollGrad": 9.9 }))
+            ]
+        );
+        // Bringen die Clips das Feld nicht mit (Rückfall-Abfrage), wird nichts geleert oder geschrieben.
+        let mut ohne = db.clone();
+        for c in ohne["clips"].as_array_mut().unwrap() {
+            c.as_object_mut().unwrap().remove("aus_clip");
+        }
+        let p: Projekt =
+            serde_json::from_value(json!({"id": "projekt-x", "name": "X", "kurzname": "X", "aktiv": true})).unwrap();
+        assert!(zusammenfuehren(p, &drehs, &json!([]), vec![], vec![], &ohne).aus_clip_nachzutragen.is_empty());
     }
 
     #[test]

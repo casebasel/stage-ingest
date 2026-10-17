@@ -2,6 +2,7 @@
 
 mod arri_abspielen;
 mod artcmd_laden;
+mod aus_clip;
 mod export;
 mod karte_db;
 mod mittelbild;
@@ -314,6 +315,13 @@ fn karte_in_datenbank(
         karte_db::aenderungen(&karte, &eintraege, chrono::Utc::now(), plate::ulid_aehnlich);
     let mut abgelehnt = app.state::<Arc<plate::Plate>>().karte_schreiben(z, aenderungen)?;
     abgelehnt.extend(ungueltig.into_iter().map(|n| format!("Clip {n}: Name nicht verwendbar")));
+    // Tilt und Roll an die Takes dieser Clips, nach der Regel in `aus_clip` (ab 0.1.62 schreibt sie der Ingest).
+    let mut takes: Vec<String> = eintraege.iter().filter_map(|c| c.take_id.map(str::to_owned)).collect();
+    takes.sort();
+    takes.dedup();
+    if let Err(e) = app.state::<Arc<plate::Plate>>().aus_clip_abgleichen(z, &takes) {
+        abgelehnt.push(e);
+    }
     Ok((id, abgelehnt))
 }
 
@@ -427,6 +435,23 @@ fn karten_nachtragen_jetzt(
         aus.push(Nachgetragen { karte: name, ergebnis });
     }
     aus
+}
+
+/// Projektseite: Tilt und Roll an den Takes nachtragen, wo sie nicht der Regel in `aus_clip` entsprechen (Marlon,
+/// 17.10.2026: „Das normale Spalte Tilt und Roll kommt aus den File, das soll der Ingest machen. Und es an alle anderen
+/// weitergeben“). Gibt die Zahl der übernommenen zurück.
+#[tauri::command]
+async fn aus_clip_nachtragen(
+    plate: State<'_, Arc<plate::Plate>>,
+    zugang: plate::Zugang,
+    eintraege: Vec<projekt::AusClipNachtrag>,
+) -> Result<usize, String> {
+    let p = Arc::clone(&plate);
+    im_hintergrund(move || {
+        let liste: Vec<(String, serde_json::Value)> = eintraege.into_iter().map(|e| (e.take_id, e.wert)).collect();
+        p.aus_clip_schreiben(&zugang, &liste)
+    })
+    .await
 }
 
 #[derive(Debug, Serialize)]
@@ -2414,11 +2439,13 @@ async fn take_aus_clip(
             .map(|k| struktur::metadatenordner(k).join(format!("{stamm}.csv")))
             .filter(|c| c.is_file());
         let werte = technik::lesen(&technik::Anfrage { datei: a.clipdatei.clone(), csv: csv.clone() });
+        // Am Take gerundet wie die Regel in `aus_clip` (sonst gleicht der nächste Abgleich es gleich wieder an).
         let aus_clip = csv
             .and_then(|c| std::fs::read_to_string(c).ok())
             .and_then(|t| artcmd::auswerten(&t).ok())
             .and_then(|b| b.aus_clip())
-            .and_then(|x| serde_json::to_value(x).ok());
+            .and_then(|x| serde_json::to_value(x).ok())
+            .and_then(|x| aus_clip::gerundet(&x));
         let angaben = ingest_kern::clip::lesen(&a.clipdatei).ok();
         // Frisch direkt vor dem Schreiben (Plate Assistant: keine Eindeutigkeit der Nummer auf dem Server).
         if let Some(pfad) = &a.aufnehmen {
@@ -2887,6 +2914,7 @@ pub fn run() {
             ausgang_stand,
             take_art_aendern,
             einstellung_art_aendern,
+            aus_clip_nachtragen,
             zur_seite_liste,
             studio_take_bewerten,
             zur_seite_wegwerfen,
