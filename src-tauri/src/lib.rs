@@ -2002,6 +2002,40 @@ async fn einlesen_vorschau(
     .await
 }
 
+/// Ein Take ohne Mittelbild, dessen Clip erreichbar ist.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OhneMittelbild {
+    take_id: String,
+    plate_id: String,
+    dreh_id: String,
+    datei: PathBuf,
+    klappe: Option<String>,
+}
+
+/// Mittelbilder nachholen (Marlon, 17.10.2026): für sichere Takes ohne Mittelbild, z. B. in „Zu klären“ zugeordnet oder
+/// vor 0.1.41 eingelesen. Im Hintergrund, eines nach dem anderen, je Take höchstens eines (Prüfung in der Datenbank).
+#[tauri::command]
+fn mittelbilder_nachholen(
+    app: AppHandle,
+    plate: State<'_, Arc<plate::Plate>>,
+    zugang: plate::Zugang,
+    art_cmd: PathBuf,
+    takes: Vec<OhneMittelbild>,
+) -> Result<(), String> {
+    let cache = app.path().app_cache_dir().map_err(|e| e.to_string())?;
+    let auftraege = takes
+        .into_iter()
+        .filter(|t| t.datei.is_file())
+        .map(|t| {
+            let klappe = t.klappe.and_then(|k| chrono::DateTime::parse_from_rfc3339(&k).ok()).map(|k| k.to_utc());
+            mittelbild::auftrag(t.take_id, t.plate_id, t.dreh_id, t.datei, klappe)
+        })
+        .collect();
+    mittelbild::im_hintergrund(Arc::clone(&plate), zugang, art_cmd, cache, auftraege);
+    Ok(())
+}
+
 /// Projektübersicht: Plan aus dem Plate Assistant und eingelesene Karten auf den Zielordnern.
 #[tauri::command]
 async fn projekt_uebersicht(
@@ -2324,6 +2358,7 @@ pub fn run() {
             art_viewer,
             im_art_viewer,
             arriraw_oeffnen,
+            mittelbilder_nachholen,
             art_viewer_installieren,
             abbrechen,
             laeuft,

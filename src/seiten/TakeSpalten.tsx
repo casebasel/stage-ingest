@@ -13,6 +13,12 @@ export type TakeMitWerten = {
   art: string;
   bewertung: string;
   clip: string;
+  /** Geplanter Name, wenn er vom Clip auf der Karte abweicht. */
+  clipGeplant?: string | null;
+  /** Kein Clip auf der eingelesenen Karte (Klappe ohne REC). */
+  ohneAufnahme?: boolean;
+  /** Clip aus einem abgebrochenen Einlesen, nie gegen die Karte geprüft. */
+  ungeprueft?: boolean;
   karte: string | null;
   freigegeben: boolean;
   /** Studio-Take der Stage: Bewertung und Notiz im Ingest änderbar. */

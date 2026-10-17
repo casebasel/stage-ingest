@@ -3,8 +3,9 @@
 //! Bucket `fotos` und legt ein `foto` mit `quelle = clip` an. Das iPhone zeigt es dann im Take-Blatt vor dem Standbild
 //! nach dem Stopp. Läuft im Hintergrund nach dem Einlesen; ein Fehler kostet nur das Bild.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
 
@@ -85,23 +86,79 @@ fn eins(p: &Plate, z: &Zugang, art: &Path, cache: &Path, a: &Auftrag) -> Result<
     p.mittelbild_schreiben(z, &daten, aenderung)
 }
 
-/// Alle Mittelbilder einer Karte nacheinander im Hintergrund (ART CMD braucht die Maschine; nie parallel).
+/// Immer nur ein Mittelbild auf einmal (ART CMD braucht die Maschine, die Zwischendatei ist dieselbe).
+static ARBEIT: Mutex<()> = Mutex::new(());
+/// Takes, deren Mittelbild schon ansteht: ein zweiter Auftrag (Einlesen und Nachholen zugleich) wird übersprungen,
+/// damit es je Take nur eines gibt.
+static ANSTEHEND: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
+
+/// Mittelbilder nacheinander im Hintergrund, je Take höchstens eines.
 pub fn im_hintergrund(p: Arc<Plate>, z: Zugang, art: PathBuf, cache: PathBuf, auftraege: Vec<Auftrag>) {
-    if auftraege.is_empty() {
+    let neu: Vec<Auftrag> = {
+        let Ok(mut anstehend) = ANSTEHEND.lock() else { return };
+        auftraege.into_iter().filter(|a| anstehend.insert(a.take_id.clone())).collect()
+    };
+    if neu.is_empty() {
         return;
     }
     std::thread::spawn(move || {
-        for a in &auftraege {
+        let _eins_nach_dem_andern = ARBEIT.lock();
+        for a in &neu {
             if let Err(e) = eins(&p, &z, &art, &cache, a) {
                 eprintln!("Mittelbild {}: {e}", a.take_id);
+            }
+            if let Ok(mut anstehend) = ANSTEHEND.lock() {
+                anstehend.remove(&a.take_id);
             }
         }
     });
 }
 
+/// Auftrag für einen Clip in einer Kopie (`…/01_KAMERA/<Karte>/…`): `original` relativ zum Projektordner (Pfadregel).
+pub fn auftrag(
+    take_id: String,
+    plate_id: String,
+    dreh_id: String,
+    datei: PathBuf,
+    klappe: Option<DateTime<Utc>>,
+) -> Auftrag {
+    let kartenordner = datei
+        .ancestors()
+        .find(|o| o.parent().and_then(Path::file_name).is_some_and(|n| n == ingest_kern::struktur::KAMERA))
+        .map(Path::to_path_buf);
+    let original = match &kartenordner {
+        Some(k) => {
+            let (ort, _, _) = crate::karte_db::ort(k, None);
+            let rel = datei
+                .strip_prefix(k)
+                .map(|r| r.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/"))
+                .unwrap_or_default();
+            if ort.starts_with('/') || ort.contains(':') {
+                datei.display().to_string()
+            } else {
+                format!("{ort}/{rel}")
+            }
+        }
+        None => datei.display().to_string(),
+    };
+    Auftrag { take_id, plate_id, dreh_id, datei, original, klappe }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn original_relativ_zum_projektordner() {
+        let a = auftrag(
+            "T".into(),
+            "P".into(),
+            "D".into(),
+            PathBuf::from("/Volumes/Footage/ingest/HAPPY_END_TEST/2026-10-16_PREDIGERHOF/01_KAMERA/A010R132/A010R132/A010C005_120101_R132.mxf"),
+            None,
+        );
+        assert_eq!(a.original, "2026-10-16_PREDIGERHOF/01_KAMERA/A010R132/A010R132/A010C005_120101_R132.mxf");
+    }
 
     #[test]
     fn a_kamera_gewinnt() {

@@ -303,6 +303,8 @@ pub struct FotoStand {
     pub pfad: String,
     /// Vorschaubild eines Takes (`art` = `vorschau`, Plate Assistant): der Take dazu.
     pub take_id: Option<String>,
+    /// Herkunft (0029): `iphone`, `kamera` (Standbild nach dem Stopp über CAP), `clip` (Mittelbild des Ingest).
+    pub quelle: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -327,7 +329,14 @@ pub struct TakeStand {
     pub nummer: i64,
     pub art: String,
     pub bewertung: String,
+    /// Clip auf der Karte, sonst der geplante Name aus dem Plate Assistant.
     pub clip: String,
+    /// Geplanter Name, wenn er vom Clip auf der Karte abweicht (z. B. Datum der App statt 2012 der Kamera).
+    pub clip_geplant: Option<String>,
+    /// Kein Clip auf der eingelesenen Karte ihres Magazins (Klappe ohne REC), siehe `takes_ohne_aufnahme`.
+    pub ohne_aufnahme: bool,
+    /// Clip aus einem abgebrochenen Einlesen, nie gegen die Karte geprüft.
+    pub ungeprueft: bool,
     /// Eingelesen: Karte und ob freigegeben.
     pub karte: Option<String>,
     pub freigegeben: bool,
@@ -374,6 +383,31 @@ fn ohne_eintrag_ergaenzen(k: &mut GefundeneKarte) {
     else {
         return;
     };
+    // Gelöscht laut Löschprotokoll (`04_BERICHTE/<Karte>_GELOESCHT_<Clip>_…`), auch wenn ein abgebrochener Lauf den Clip
+    // in der Zusammenfassung liess (A007C001, 16.10.2026): das Protokoll gilt.
+    if let Some(berichte) = k.datei.parent() {
+        let vorne = format!("{}_GELOESCHT_", ingest_kern::struktur::ordnername(&k.inhalt.karte)).to_uppercase();
+        let protokolle: Vec<String> = std::fs::read_dir(berichte)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_uppercase())
+            .filter(|n| n.starts_with(&vorne) && n.ends_with(".TXT"))
+            .collect();
+        let weg: Vec<String> = k
+            .inhalt
+            .clips
+            .iter()
+            .filter(|c| protokolle.iter().any(|p| p[vorne.len()..].starts_with(&format!("{}_", c.name.to_uppercase()))))
+            .map(|c| c.name.clone())
+            .collect();
+        k.inhalt.clips.retain(|c| !weg.contains(&c.name));
+        for n in weg {
+            if !k.inhalt.geloescht.contains(&n) {
+                k.inhalt.geloescht.push(n);
+            }
+        }
+    }
     let bekannt: HashSet<String> = k
         .inhalt
         .clips
@@ -499,8 +533,12 @@ fn einsortierbar(
 /// Wo ein eingelesener Clip liegt.
 #[derive(Clone)]
 struct Eingelesen {
+    /// Name des Clips auf der Karte (kann vom geplanten Namen im Plate Assistant abweichen).
+    clip: String,
     karte: String,
     freigegeben: bool,
+    /// Aus einem abgebrochenen Einlesen aufgenommen: nicht gegen die Karte geprüft.
+    ungeprueft: bool,
     datei: Option<PathBuf>,
     csv: Option<PathBuf>,
 }
@@ -565,8 +603,9 @@ pub fn zusammenfuehren(
             .filter(|o| o.is_dir());
         // Ältere Zusammenfassungen ohne `pfad`: Clips einmal pro Karte über den Namen suchen.
         let mut nach_name: Option<HashMap<String, PathBuf>> = None;
-        // Ungeprüfte Clips (abgebrochenes Einlesen) machen keinen Take „sicher“; sie stehen in „Zu klären“.
-        for c in k.inhalt.clips.iter().filter(|c| !c.ohne_pruefung) {
+        // Ungeprüfte Clips (abgebrochenes Einlesen) stehen in „Zu klären“, bis Marlon sie einem Take zuordnet; auch dann
+        // ist der Take nicht „sicher“, sondern „ungeprüft“.
+        for c in k.inhalt.clips.iter().filter(|c| !c.ohne_pruefung || c.take_id.is_some()) {
             let datei = ordner.as_ref().and_then(|o| {
                 let direkt = o.join(&c.pfad);
                 if !c.pfad.is_empty() && direkt.is_file() {
@@ -586,7 +625,14 @@ pub fn zusammenfuehren(
                 }
                 dazu(&mut pfade_clip, &c.name.to_uppercase(), p);
             }
-            let stand = Eingelesen { karte: k.inhalt.karte.clone(), freigegeben: k.inhalt.freigegeben, datei, csv };
+            let stand = Eingelesen {
+                clip: c.name.clone(),
+                karte: k.inhalt.karte.clone(),
+                freigegeben: k.inhalt.freigegeben && !c.ohne_pruefung,
+                ungeprueft: c.ohne_pruefung,
+                datei,
+                csv,
+            };
             let besser = |alt: Option<&Eingelesen>| alt.is_none_or(|a| a.datei.is_none() && stand.datei.is_some());
             if let Some(t) = &c.take_id {
                 if besser(nach_take.get(t)) {
@@ -611,7 +657,14 @@ pub fn zusammenfuehren(
         .collect();
     for c in db["clips"].as_array().into_iter().flatten().filter(|c| gilt(c)) {
         let Some((karte, freigegeben)) = db_karten.get(&text(&c["karte_id"])) else { continue };
-        let stand = Eingelesen { karte: karte.clone(), freigegeben: *freigegeben, datei: None, csv: None };
+        let stand = Eingelesen {
+            clip: text(&c["name"]),
+            karte: karte.clone(),
+            freigegeben: *freigegeben,
+            ungeprueft: false,
+            datei: None,
+            csv: None,
+        };
         for t in [text(&c["take_id"]), text(&c["studio_take_id"])].into_iter().filter(|t| !t.is_empty()) {
             nach_take.entry(t).or_insert_with(|| stand.clone());
         }
@@ -655,11 +708,17 @@ pub fn zusammenfuehren(
                     .or_else(|| (!clip.is_empty()).then(|| pfade_clip.get(&clip)).flatten())
                     .cloned()
                     .unwrap_or_default();
+                // Eingelesen: der Name auf der Karte (Marlon, 17.10.2026: Take 6 zeigte den geschätzten „…_261016“).
+                let auf_karte = stand.map(|s| s.clip.to_uppercase()).filter(|c| !c.is_empty());
+                let clip_geplant = auf_karte.as_ref().filter(|k| **k != clip && !clip.is_empty()).map(|_| clip.clone());
                 takes.push(TakeStand {
                     nummer: t["nummer"].as_i64().unwrap_or(0),
                     art: t["art"].as_str().unwrap_or("take").to_owned(),
                     bewertung: text(&t["bewertung"]),
-                    clip,
+                    clip: auf_karte.unwrap_or(clip),
+                    clip_geplant,
+                    ohne_aufnahme: false,
+                    ungeprueft: stand.is_some_and(|s| s.ungeprueft),
                     karte: stand.map(|s| s.karte.clone()),
                     freigegeben: stand.is_some_and(|s| s.freigegeben),
                     studio: t["studio"] == true,
@@ -678,11 +737,29 @@ pub fn zusammenfuehren(
                 .filter(|x| gilt(x))
                 .map(|f| {
                     let take_id = Some(text(&f["take_id"])).filter(|t| !t.is_empty());
-                    (f, FotoStand { id: text(&f["id"]), art: text(&f["art"]), pfad: text(&f["pfad"]), take_id })
+                    let quelle = text(&f["quelle"]);
+                    (f, FotoStand { id: text(&f["id"]), art: text(&f["art"]), pfad: text(&f["pfad"]), take_id, quelle })
                 })
                 .filter(|(_, f)| !f.pfad.is_empty())
                 .collect();
-            fotos.sort_by_key(|(f, _)| text(&f["zeit"]));
+            // Je Take ein Vorschaubild: Hat der Take ein Mittelbild aus dem Clip, fällt das Standbild der Kamera weg
+            // (Marlon, 17.10.2026: „zweimal dasselbe Bild“, die App zeigt bei beiden das Bild aus der Mitte).
+            let mit_mittelbild: HashSet<String> = fotos
+                .iter()
+                .filter(|(_, f)| f.art == "vorschau" && f.quelle == "clip")
+                .filter_map(|(_, f)| f.take_id.clone())
+                .collect();
+            fotos.retain(|(_, f)| {
+                f.art != "vorschau"
+                    || f.quelle == "clip"
+                    || f.take_id.as_ref().is_none_or(|t| !mit_mittelbild.contains(t))
+            });
+            // Setup-Fotos zuerst (nach Zeit), dann die Takes nach Nummer (17.10.2026: T7 stand vor T5).
+            let take_nummer: HashMap<String, i64> = takes.iter().map(|t| (t.id.clone(), t.nummer)).collect();
+            fotos.sort_by_key(|(f, s)| {
+                let n = s.take_id.as_ref().and_then(|t| take_nummer.get(t)).copied();
+                (n.is_some(), n.unwrap_or(0), text(&f["zeit"]))
+            });
             plates.push(PlateStand {
                 id: pid.clone(),
                 nummer: p["nummer"].as_i64().unwrap_or(0),
@@ -747,6 +824,10 @@ pub fn zusammenfuehren(
         // Auch Clips, die nur einem Drehort zugeordnet sind: jeder Clip auf der Karte gehört zu einem Take (Marlon,
         // 16.10.2026: „Alles, was auf der Karte ist, muss beim Ingest rein und zugeordnet werden“).
         if mit_take.contains(&name) || zugeordnete_clips.contains(&name) {
+            continue;
+        }
+        // Einem Drehort ohne Plates zugeordnet (z. B. Produktionsbüro): dort gibt es keinen Take, das ist erledigt.
+        if c.dreh_id.as_ref().is_some_and(|d| drehs.iter().any(|x| &x.id == d && x.plates.is_empty())) {
             continue;
         }
         // Clipdatei dieser Kopie: `<Dreh>/01_KAMERA/<Karte>/<pfad>`.
@@ -828,6 +909,9 @@ pub fn zusammenfuehren(
         }
     }
     let ohne_aufnahme = takes_ohne_aufnahme(&drehs, &karten, &ohne_datum);
+    for t in drehs.iter_mut().flat_map(|d| d.plates.iter_mut()).flat_map(|p| p.takes.iter_mut()) {
+        t.ohne_aufnahme = ohne_aufnahme.iter().any(|o| o.take_id == t.id);
+    }
     let einsortieren = einsortierbar(&karten, &drehs, &take_zu_dreh, &clip_zu_dreh);
     let ohne_datenbank = karten.iter().filter(|k| k.inhalt.karte_id.is_none()).map(|k| k.datei.clone()).collect();
     // Anzeige: dieselbe Karte auf mehreren Zielen einmal (neuester Durchgang gewinnt). Vorher wurde schon beim Laden
@@ -1092,6 +1176,106 @@ mod tests {
         );
         assert_eq!(o.vorschlag_take.as_deref(), Some("T1"));
         assert!(u.ohne_aufnahme.is_empty());
+
+        // Nach der Bestätigung (aufgenommen und zugeordnet): der Take ist eingelesen, aber „ungeprüft“, nicht sicher.
+        let mut inhalt = u.karten[0].inhalt.clone();
+        for c in inhalt.clips.iter_mut().filter(|c| c.ohne_pruefung) {
+            c.take_id = Some("T1".into());
+            c.zuordnung = "hand".into();
+        }
+        let k = GefundeneKarte {
+            dreh_ordner: "2026-10-14_4_STOCK".into(),
+            datei: dreh.join("04_BERICHTE/A007R132_ingest.json"),
+            inhalt,
+        };
+        let p: Projekt =
+            serde_json::from_value(json!({"id": "projekt-x", "name": "X", "kurzname": "X", "aktiv": true})).unwrap();
+        let u = zusammenfuehren(p, &drehs, &json!([]), vec![k], vec![], &Value::Null);
+        let t = &u.drehs[0].plates[0].takes[0];
+        assert_eq!((t.karte.as_deref(), t.freigegeben, t.ungeprueft), (Some("A007R132"), false, true));
+        assert!(u.zu_klaeren.is_empty());
+    }
+
+    /// Echtes Projekt durchrechnen und ausgeben, was die Projektseite zeigt (nur von Hand: `PROJEKT_PRUEFEN=<ordner>`
+    /// mit `drehs.json` und `db.json` wie vom Plate Assistant und `nas/<KURZNAME>/…` mit den Zusammenfassungen).
+    #[test]
+    fn echtes_projekt_pruefen() {
+        let Ok(ordner) = std::env::var("PROJEKT_PRUEFEN") else { return };
+        let o = PathBuf::from(ordner);
+        let drehs: Value = serde_json::from_slice(&std::fs::read(o.join("drehs.json")).unwrap()).unwrap();
+        let db: Value = serde_json::from_slice(&std::fs::read(o.join("db.json")).unwrap()).unwrap();
+        let p: Projekt = serde_json::from_value(
+            json!({"id": "projekt-happy_end_test", "name": "Happy End Test", "kurzname": "HAPPY_END_TEST", "aktiv": true}),
+        )
+        .unwrap();
+        let (mut karten, unlesbar) = uebersicht::suchen(&o.join("nas"), &p.kurzname);
+        for k in &mut karten {
+            ohne_eintrag_ergaenzen(k);
+        }
+        let u = zusammenfuehren(p, &drehs, &json!([]), karten, unlesbar, &db);
+        let take_nr: HashMap<String, String> = u
+            .drehs
+            .iter()
+            .flat_map(|d| d.plates.iter().flat_map(move |p| p.takes.iter().map(move |t| (d, p, t))))
+            .map(|(d, p, t)| (t.id.clone(), format!("{} · P{} T{}", d.name, p.nummer, t.nummer)))
+            .collect();
+        for d in &u.drehs {
+            println!("== {} ({})", d.name, d.datum);
+            for p in &d.plates {
+                println!("  Plate {} {}", p.nummer, p.name);
+                for t in &p.takes {
+                    let stand = if t.freigegeben {
+                        "Sicher"
+                    } else if t.karte.is_some() {
+                        "Nicht freigegeben"
+                    } else if t.ohne_aufnahme {
+                        "Ohne Aufnahme"
+                    } else {
+                        "Karte fehlt"
+                    };
+                    println!(
+                        "    T{:<2} {:<10} {:<9} {:<22} {:<10} {:<17} geplant={}",
+                        t.nummer,
+                        t.art,
+                        t.bewertung,
+                        t.clip,
+                        t.karte.clone().unwrap_or_default(),
+                        stand,
+                        t.clip_geplant.clone().unwrap_or_default()
+                    );
+                }
+                let fotos: Vec<String> = p
+                    .fotos
+                    .iter()
+                    .map(|f| {
+                        let t = f
+                            .take_id
+                            .as_ref()
+                            .and_then(|t| take_nr.get(t))
+                            .map_or(String::new(), |n| n.rsplit(' ').next().unwrap_or_default().to_owned());
+                        format!("{}/{}{}", f.art, f.quelle, if t.is_empty() { String::new() } else { format!("@{t}") })
+                    })
+                    .collect();
+                println!("    Fotos: {}", fotos.join(", "));
+            }
+        }
+        println!("== Zu klären ({})", u.zu_klaeren.len());
+        for c in &u.zu_klaeren {
+            println!(
+                "  {} {} ungeprüft={} dreh={:?} vorschlag_take={:?} vorschlag_plate={:?} grund={:?}",
+                c.clip,
+                c.karte,
+                c.ohne_pruefung,
+                c.dreh_id,
+                c.vorschlag_take.as_ref().and_then(|t| take_nr.get(t)),
+                c.vorschlag_plate,
+                c.vorschlag_grund
+            );
+        }
+        println!("== Ohne Aufnahme ({})", u.ohne_aufnahme.len());
+        for t in &u.ohne_aufnahme {
+            println!("  {} geplant {} Karte {}", take_nr.get(&t.take_id).cloned().unwrap_or_default(), t.clip, t.karte);
+        }
     }
 
     #[test]

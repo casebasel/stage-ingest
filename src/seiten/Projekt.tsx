@@ -18,7 +18,7 @@ import { Abspieler, type AbspielEintrag } from "./Abspieler";
 import { ClipMitBild, vorschauLaden, SpaltenKopf, SpaltenMenue, SpaltenZellen, useTakeSpalten, type Spalte, type TakeMitWerten } from "./TakeSpalten";
 
 type TakeStand = TakeMitWerten;
-type FotoStand = { id: string; art: string; pfad: string; takeId?: string | null };
+type FotoStand = { id: string; art: string; pfad: string; takeId?: string | null; quelle?: string };
 type HdriStand = {
   id: string;
   zustand: string;
@@ -125,8 +125,10 @@ type Zeile = { dreh: DrehStand; plate: PlateStand; take: TakeStand; ton: Ton; st
 type Auswahl = { art: "takes" } | { art: "klaeren" } | { art: "karten" } | { art: "dreh"; id: string } | { art: "plate"; id: string };
 
 function stand(t: TakeStand): { ton: Ton; stand: string } {
+  if (t.ungeprueft) return { ton: "warn", stand: "Ungeprüft" };
   if (t.freigegeben) return { ton: "ok", stand: "Sicher" };
   if (t.karte) return { ton: "rot", stand: "Nicht freigegeben" };
+  if (t.ohneAufnahme) return { ton: "leise", stand: "Ohne Aufnahme" };
   return { ton: "fehler", stand: "Karte fehlt" };
 }
 
@@ -162,7 +164,18 @@ const GRUNDSPALTEN: Spalte[] = [
     gruppe: "Take",
     quelle: "Plate Assistant / Karte (darüberfahren: Bild aus der Mitte)",
     mono: true,
-    wert: (t) => (t.clip ? t.datei ? <ClipMitBild clip={t.clip} datei={t.datei} /> : t.clip : undefined),
+    wert: (t) =>
+      t.ohneAufnahme ? (
+        <span className="leise" title="Name, den die App vorgeschlagen hat; die Kamera hat dazu nichts aufgenommen">
+          geplant {t.clip}
+        </span>
+      ) : t.clip ? (
+        t.datei ? (
+          <ClipMitBild clip={t.clip} datei={t.datei} />
+        ) : (
+          t.clip
+        )
+      ) : undefined,
   },
   { id: "karte", titel: "Karte", gruppe: "Take", quelle: "Eingelesene Karten", mono: true, wert: (t) => t.karte ?? undefined },
   {
@@ -342,6 +355,29 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
             );
           })
           .catch((err) => setNachgetragen({ ton: "warn", text: `Nachtragen nicht möglich: ${String(err)}` }));
+      }
+      // Mittelbilder nachholen: sichere Takes mit erreichbarem Clip, aber ohne Mittelbild (z. B. in „Zu klären“
+      // zugeordnet). Im Hintergrund, je Take höchstens eines (Marlon, 17.10.2026).
+      const art = e.artCmd.trim();
+      if (verbunden && art && !lauf.laeuft) {
+        const takes = neu.drehs.flatMap((d) =>
+          d.plates
+            .filter((pl) => pl.art !== "studio")
+            .flatMap((pl) =>
+              pl.takes
+                .filter((t) => !t.studio && (t.freigegeben || t.ungeprueft) && t.datei)
+                .filter((t) => !pl.fotos.some((f) => f.takeId === t.id && f.art === "vorschau" && f.quelle === "clip"))
+                .map((t) => ({
+                  takeId: t.id,
+                  plateId: pl.id,
+                  drehId: d.id,
+                  datei: t.datei!,
+                  klappe: typeof t.werte?.["take.start_zeit"] === "string" ? (t.werte["take.start_zeit"] as string) : null,
+                })),
+            ),
+        );
+        if (takes.length)
+          invoke("mittelbilder_nachholen", { zugang: konto.zugang, artCmd: art, takes }).catch(() => {});
       }
     } catch (err) {
       setFehler(String(err));
@@ -614,7 +650,7 @@ function AlleTakes({
   const sichtbar = zeilen.filter(
     (z) =>
       filter === "alle" ||
-      (filter === "fehlt" && !z.take.karte) ||
+      (filter === "fehlt" && !z.take.karte && !z.take.ohneAufnahme) ||
       (filter === "offen" && z.take.karte && !z.take.freigegeben) ||
       (filter === "sicher" && z.take.freigegeben),
   );
@@ -947,7 +983,7 @@ function DrehDetail({ d, plateWaehlen }: { d: DrehStand; plateWaehlen: (id: stri
           <tbody>
             {d.plates.map((p) => {
               const sicher = p.takes.filter((t) => t.freigegeben).length;
-              const fehlt = p.takes.filter((t) => !t.karte).length;
+              const fehlt = p.takes.filter((t) => !t.karte && !t.ohneAufnahme).length;
               return (
                 <tr
                   key={p.id}
@@ -1142,7 +1178,7 @@ function FotoOderMitte({ f, takes, breite }: { f: FotoStand; takes: TakeStand[];
 function Vorschau({ bucket, pfad, breite, alt }: { bucket: string; pfad: string; breite: number; alt: string }) {
   const konto = useKonto();
   const [url, setUrl] = useState<string | null>(null);
-  const [fehler, setFehler] = useState(false);
+  const [fehler, setFehler] = useState<string | null>(null);
   useEffect(() => {
     const k = `${bucket}|${pfad}|${breite}`;
     let p = vorschauen.get(k);
@@ -1152,12 +1188,18 @@ function Vorschau({ bucket, pfad, breite, alt }: { bucket: string; pfad: string;
       p.catch(() => vorschauen.delete(k));
     }
     let aktiv = true;
-    p.then((u) => aktiv && setUrl(u)).catch(() => aktiv && setFehler(true));
+    p.then((u) => aktiv && setUrl(u)).catch((e) => aktiv && setFehler(String(e)));
     return () => {
       aktiv = false;
     };
   }, [bucket, pfad, breite]);
-  if (fehler) return <span className="vorschau-platz">nicht ladbar</span>;
+  // Fehlt die Datei im Speicher, hat das iPhone sie noch nicht hochgeladen (17.10.2026: 8 von 91 Fotos).
+  if (fehler)
+    return (
+      <span className="vorschau-platz" title={fehler}>
+        {/not.?found/i.test(fehler) ? "noch nicht hochgeladen" : "nicht ladbar"}
+      </span>
+    );
   if (!url) return <span className="vorschau-platz" aria-busy="true" />;
   return <img src={url} alt={alt} loading="lazy" />;
 }
@@ -1689,7 +1731,7 @@ function Gliederung({
               {offen && g.eintraege.length > 0 && (
                 <ul className="baum-kinder">
                   {g.eintraege.map(({ p, d }) => {
-                    const fehlt = p.takes.some((t) => !t.karte);
+                    const fehlt = p.takes.some((t) => !t.karte && !t.ohneAufnahme);
                     return (
                       <li key={p.id}>
                         <button
