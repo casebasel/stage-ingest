@@ -373,14 +373,25 @@ impl Plate {
     /// Rechner, der die Karten nicht selbst eingelesen hat). Fehlt etwas (Rechte, alter Server): leer.
     pub fn karten_und_clips(&self, z: &Zugang, projekt_id: &str) -> Value {
         let p = url_teil(projekt_id);
+        // Mit Ordnerdatum und Timecode (ab 0029): Damit prüft die Projektseite Takes ohne Aufnahme auch, wenn die Karte
+        // gerade nicht erreichbar ist (Marlon, 17.10.2026: „Karte fehlt“, obwohl sie eingelesen war).
         let karten = self
-            .lesen(z, &format!("karte?projekt_id=eq.{p}&select=id,name,freigegeben,geloescht"))
+            .lesen(z, &format!("karte?projekt_id=eq.{p}&select=id,name,freigegeben,geloescht,ordner_datum,speicherort"))
+            .or_else(|_| self.lesen(z, &format!("karte?projekt_id=eq.{p}&select=id,name,freigegeben,geloescht")))
             .unwrap_or(Value::Null);
         let clips = self
             .lesen(
                 z,
-                &format!("clip?projekt_id=eq.{p}&select=name,karte_id,take_id,studio_take_id,zuordnung,geloescht"),
+                &format!(
+                    "clip?projekt_id=eq.{p}&select=name,karte_id,take_id,studio_take_id,zuordnung,geloescht,start_tc,end_tc,fps,dreh_id"
+                ),
             )
+            .or_else(|_| {
+                self.lesen(
+                    z,
+                    &format!("clip?projekt_id=eq.{p}&select=name,karte_id,take_id,studio_take_id,zuordnung,geloescht"),
+                )
+            })
             .or_else(|_| {
                 self.lesen(z, &format!("clip?projekt_id=eq.{p}&select=name,karte_id,take_id,zuordnung,geloescht"))
             })

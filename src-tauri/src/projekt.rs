@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use ingest_kern::uebersicht::{self, GefundeneKarte};
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::plate::{Plate, Projekt, Zugang};
 
@@ -124,6 +124,62 @@ pub struct TakeOhneAufnahme {
     pub grund: String,
     /// Zusammenfassungen der Karte (alle Kopien), für „Ohne Aufnahme bestätigen“.
     pub dateien: Vec<PathBuf>,
+}
+
+/// Karten aus der gemeinsamen Datenbank, deren Zusammenfassung auf keinem erreichbaren Ziel liegt: Clips mit Timecode
+/// und Zuordnung, Drehordner aus `speicherort` bzw. `ordner_datum` (ab 0029). Ohne Datei (`datei` leer).
+fn karten_aus_datenbank(db: &Value, karten: &[GefundeneKarte]) -> Vec<GefundeneKarte> {
+    let gilt = |x: &Value| x["geloescht"] != true;
+    let da: HashSet<String> = karten.iter().map(|k| k.inhalt.karte.to_uppercase()).collect();
+    let mut aus = Vec::new();
+    for k in db["karten"].as_array().into_iter().flatten().filter(|k| gilt(k)) {
+        let name = text(&k["name"]);
+        if name.is_empty()
+            || da.contains(&name.to_uppercase())
+            || aus.iter().any(|a: &GefundeneKarte| a.inhalt.karte == name)
+        {
+            continue;
+        }
+        // `2026-10-16_PREDIGERHOF/01_KAMERA/A010R132` → Drehordner; sonst nur das Datum.
+        let speicherort = text(&k["speicherort"]);
+        let erster = speicherort.split('/').next().unwrap_or_default();
+        let dreh_ordner = if chrono::NaiveDate::parse_from_str(erster.get(..10).unwrap_or_default(), "%Y-%m-%d").is_ok()
+        {
+            erster.to_owned()
+        } else if !text(&k["ordner_datum"]).is_empty() {
+            format!("{}_DATENBANK", text(&k["ordner_datum"]))
+        } else {
+            continue;
+        };
+        let id = text(&k["id"]);
+        let clips: Vec<Value> = db["clips"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|c| gilt(c) && text(&c["karte_id"]) == id)
+            .map(|c| {
+                let take = Some(text(&c["take_id"]))
+                    .filter(|t| !t.is_empty())
+                    .or_else(|| Some(text(&c["studio_take_id"])).filter(|t| !t.is_empty()));
+                json!({
+                    "name": text(&c["name"]), "pfad": "", "startTc": c["start_tc"], "endTc": c["end_tc"],
+                    "fps": c["fps"], "takeId": take, "zuordnung": text(&c["zuordnung"]),
+                    "drehId": Some(text(&c["dreh_id"])).filter(|d| !d.is_empty()),
+                })
+            })
+            .collect();
+        if clips.is_empty() {
+            continue;
+        }
+        let inhalt = serde_json::from_value(json!({
+            "format": 1, "karte": name, "beginn": "", "version": "datenbank", "freigegeben": k["freigegeben"] == true,
+            "unabhaengigeKopien": 0, "grund": "", "clips": clips, "karteId": id,
+        }));
+        if let Ok(inhalt) = inhalt {
+            aus.push(GefundeneKarte { dreh_ordner, datei: PathBuf::new(), inhalt });
+        }
+    }
+    aus
 }
 
 /// Platzhalter des Plate Assistant (Build 32): beim Wiederverbinden je Clip, den die Kamera ohne App aufnahm, ein Take.
@@ -639,7 +695,7 @@ fn kern_vorschlaege(
                         || zeit_von(c, &c.end_tc).is_none()
                 }),
                 tc_spanne: tc.iter().min().copied().zip(tc.iter().max().copied()),
-                dateien: kopien.iter().map(|x| x.datei.clone()).collect(),
+                dateien: kopien.iter().map(|x| x.datei.clone()).filter(|d| !d.as_os_str().is_empty()).collect(),
             },
         );
         offen_alle.extend(offen_namen);
@@ -678,6 +734,13 @@ fn kern_vorschlaege(
             continue;
         }
         let mut eintrag = |karte: &str, sicher: bool, grund: String| {
+            let dateien = lage.get(karte).map(|l| l.dateien.clone()).unwrap_or_default();
+            // Nur aus der Datenbank: Die Bestätigung braucht die Zusammenfassung auf dem Ziel.
+            let grund = if dateien.is_empty() {
+                format!("{grund} · Karte gerade nicht erreichbar (Stand aus der Datenbank)")
+            } else {
+                grund
+            };
             kv.ohne_clip.push(TakeOhneAufnahme {
                 take_id: s.take_id.clone(),
                 nummer: *nummer,
@@ -687,7 +750,7 @@ fn kern_vorschlaege(
                 karte: karte.to_owned(),
                 sicher,
                 grund,
-                dateien: lage.get(karte).map(|l| l.dateien.clone()).unwrap_or_default(),
+                dateien,
             })
         };
         // Name von der Kamera gemeldet: der Clip liegt auf dieser Rolle. Ist sie nicht eingelesen: Karte fehlt.
@@ -1396,7 +1459,12 @@ pub fn zusammenfuehren(
         .filter(|c| c.take_id.is_some())
         .map(|c| c.name.to_uppercase())
         .collect();
-    let kv = kern_vorschlaege(drehs_json, &drehs, &karten, &zugeordnete_clips);
+    // Für den Abgleich auch Karten, die gerade nicht erreichbar sind, aus der gemeinsamen Datenbank (Clips mit Timecode):
+    // Sonst stünde ein Take ohne Aufnahme als „Karte fehlt“ da (Marlon, 17.10.2026, Mac ohne NAS). Schreiben lässt
+    // sich auf ihnen nichts; sie fehlen in „Zu klären“ bei den offenen Clips und den Unstimmigkeiten.
+    let mut fuer_abgleich = karten.clone();
+    fuer_abgleich.extend(karten_aus_datenbank(db, &karten));
+    let kv = kern_vorschlaege(drehs_json, &drehs, &fuer_abgleich, &zugeordnete_clips);
     let mut zu_klaeren: Vec<OffenerClip> = Vec::new();
     for (k, c) in karten.iter().flat_map(|k| k.inhalt.clips.iter().map(move |c| (k, c))) {
         let name = c.name.to_uppercase();
@@ -1464,7 +1532,25 @@ pub fn zusammenfuehren(
         }
     }
     let unstimmigkeiten = unstimmigkeiten_finden(&karten, &drehs, &kv.widerspruch);
-    let ohne_aufnahme: Vec<TakeOhneAufnahme> = kv.ohne_clip;
+    let mut ohne_aufnahme: Vec<TakeOhneAufnahme> = kv.ohne_clip;
+    // Geplanter Name, den in Wirklichkeit ein anderer Take bekam (gleiche Rolle, gleicher Zähler): nicht mehr zeigen
+    // (Marlon, 17.10.2026: „Der geplant relativiert sich ja, wenn er gedreht wurde“; Predigerhof P6 T2 hiess geplant
+    // A010C023_261016, C023 ist der Clip von Take 3).
+    let vergeben: HashMap<(String, u32, String), &String> =
+        zugeordnete_clips.iter().filter_map(|(c, t)| Some((ingest_kern::soll::ohne_datum(c)?, t))).collect();
+    let fremd = |clip: &str, take: &str| {
+        ingest_kern::soll::ohne_datum(clip).and_then(|k| vergeben.get(&k)).is_some_and(|t| t.as_str() != take)
+    };
+    for o in &mut ohne_aufnahme {
+        if fremd(&o.clip, &o.take_id) {
+            o.clip = String::new();
+        }
+    }
+    for t in drehs.iter_mut().flat_map(|d| d.plates.iter_mut()).flat_map(|p| p.takes.iter_mut()) {
+        if t.karte.is_none() && fremd(&t.clip, &t.id) {
+            t.clip = String::new();
+        }
+    }
     // Clip offen: ein Vorschlag in „Zu klären“ nennt den Take, oder er steht dort ohne sichere Aussage.
     let vorgeschlagen: HashSet<&String> = kv.take.values().map(|(t, _, _)| t).collect();
     for t in drehs.iter_mut().flat_map(|d| d.plates.iter_mut()).flat_map(|p| p.takes.iter_mut()) {
@@ -1715,6 +1801,47 @@ mod tests {
         let mut unklar: Vec<i64> = u.ohne_aufnahme.iter().filter(|t| !t.sicher).map(|t| t.nummer).collect();
         unklar.sort();
         assert_eq!(unklar, [7, 8]);
+    }
+
+    #[test]
+    fn ohne_erreichbare_karte_aus_der_datenbank() {
+        // Predigerhof P6, 17.10.2026: Mac ohne NAS. Take 2 hatte kein REC, sein geplanter Name (C023, Datum des iPhones)
+        // ging an Take 3. Aus der Datenbank: „Ohne Aufnahme“ statt „Karte fehlt“, ohne den fremden Namen.
+        let take = |n: i64, zeit: &str, name: &str, cap: Option<&str>| {
+            let mut t = json!({ "id": format!("T{n}"), "nummer": n, "clip_name": name, "geloescht": false,
+                                "start_zeit": format!("2026-10-16T{zeit}+00:00"), "erstellt_am": format!("2026-10-16T{zeit}+00:00") });
+            if let Some(tc) = cap {
+                t["kamera"] = json!({ "quelle": "cap" });
+                t["start_tc"] = json!(tc);
+                t["clip"] = json!({ "name": name, "startTc": tc, "bilder": 100 });
+            }
+            t
+        };
+        let drehs = json!([{ "id": "D1", "name": "Predigerhof", "kurzname": "PREDIGERHOF", "datum": "2026-10-16",
+            "geloescht": false, "plate": [{ "id": "P6", "nummer": 6, "geloescht": false, "take": [
+                take(1, "13:23:28.642", "A010C022_120101_R132", Some("15:23:53:22")),
+                take(2, "13:30:43.641", "A010C023_261016_R132", None),
+                take(3, "13:31:27.816", "A010C023_120101_R132", Some("15:31:31:03")),
+            ] }] }]);
+        let clip = |n: &str, von: &str, bis: &str, t: &str| {
+            json!({ "name": n, "karte_id": "K1", "take_id": t, "zuordnung": "info1", "geloescht": false,
+                    "start_tc": von, "end_tc": bis, "fps": 25 })
+        };
+        let db = json!({
+            "karten": [{ "id": "K1", "name": "A010R132", "freigegeben": true, "geloescht": false,
+                         "ordner_datum": "2026-10-16", "speicherort": "2026-10-16_PREDIGERHOF/01_KAMERA/A010R132" }],
+            "clips": [clip("A010C022_120101_R132", "15:23:53:22", "15:24:10:00", "T1"),
+                      clip("A010C023_120101_R132", "15:31:31:03", "15:31:50:00", "T3")],
+        });
+        let p: Projekt =
+            serde_json::from_value(json!({"id": "projekt-x", "name": "X", "kurzname": "X", "aktiv": true})).unwrap();
+        let u = zusammenfuehren(p, &drehs, &json!([]), vec![], vec![], &db);
+        let t2 = &u.drehs[0].plates[0].takes[1];
+        assert!(t2.ohne_aufnahme && t2.karte.is_none(), "{t2:?}");
+        assert_eq!(t2.clip, "", "C023 gehört Take 3: der geplante Name von Take 2 verschwindet");
+        assert_eq!(u.ohne_aufnahme.len(), 1);
+        assert!(u.ohne_aufnahme[0].dateien.is_empty() && u.ohne_aufnahme[0].grund.contains("nicht erreichbar"));
+        assert_eq!(u.drehs[0].plates[0].takes[2].karte.as_deref(), Some("A010R132"));
     }
 
     #[test]

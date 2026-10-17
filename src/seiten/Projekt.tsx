@@ -200,9 +200,11 @@ const GRUNDSPALTEN: Spalte[] = [
     mono: true,
     wert: (t) =>
       t.ohneAufnahme ? (
-        <span className="leise" title="Name, den die App vorgeschlagen hat; die Kamera hat dazu nichts aufgenommen">
-          geplant {t.clip}
-        </span>
+        t.clip ? (
+          <span className="leise" title="Name, den die App vorgeschlagen hat; die Kamera hat dazu nichts aufgenommen">
+            geplant {t.clip}
+          </span>
+        ) : undefined
       ) : !t.karte && t.clip ? (
         <span className="leise" title="Name im Plate Assistant; auf keiner eingelesenen Karte zugeordnet">
           geplant {t.clip}
@@ -1625,7 +1627,7 @@ function ZuKlaeren({
                     </span>
                   )}
                 </td>
-                <td className="zahl leise">{t.clip}</td>
+                <td className="zahl leise">{t.clip || "–"}</td>
                 <td className="zahl">{t.karte}</td>
                 <td>
                   <Status ton={t.sicher ? "leise" : "warn"}>{t.sicher ? "Sicher ohne Aufnahme" : "Unklar"}</Status>
