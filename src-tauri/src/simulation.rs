@@ -80,6 +80,11 @@ pub(crate) struct Lage {
     /// Kartenwechsel der A-Kamera nach so vielen Clips.
     pub kartenwechsel: Option<usize>,
     pub geloescht: f64,
+    /// Plate Assistant ab Build 34 (17.10.2026, Commit c6d560b): Mit Verbindung entfernt die App einen Take ohne REC
+    /// selbst (`geloescht`, `clip_name` leer; die Kamera behält seine Take-ID in Info 1), legt für eine Aufnahme nur an
+    /// der Kamera einen neuen Take mit Nachfrage an (Clip nach dem Stopp in `take.clip`) und zählt den erwarteten Namen
+    /// von der Kamera weiter, mit ihrem Datum.
+    pub build34: bool,
 }
 
 /// Ein Clip mit seiner Wahrheit.
@@ -163,7 +168,11 @@ pub(crate) fn drehtag(saat: u64) -> Drehtag {
         platzhalter: z.ja(0.5),
         kartenwechsel: z.ja(0.25).then(|| z.bis(2, 20) as usize),
         geloescht: [0.0, 0.0, 0.03][z.bis(0, 2) as usize],
+        build34: false,
     };
+    // Eigene Zufallsfolge für Build 34: die übrigen Drehtage bleiben, wie sie waren.
+    let mut z34 = Zufall::neu(saat ^ 0x0B34_0B34_0B34_0B34);
+    let lage = Lage { build34: z34.ja(0.5), ..lage };
     let datum = if lage.uhr_falsch { "120101" } else { IPHONE_DATUM };
     let mut a = Kamera {
         buchstabe: 'A',
@@ -255,6 +264,11 @@ pub(crate) fn drehtag(saat: u64) -> Drehtag {
                 }
                 // Vorschlag der App für den Clipnamen: voriger Name plus eins, Datum des iPhones.
                 let vorschlag = match voriger_name.as_deref().and_then(soll::ohne_datum) {
+                    // Build 34: mit Verbindung der nächste Name der Kamera, mit ihrem Datum (also oft genau der Name des
+                    // nächsten echten Clips, auch wenn dieser Take dann nicht aufnimmt).
+                    _ if lage.build34 && verbunden => {
+                        format!("A{:03}C{:03}_{}_{}", a.rolle, a.zaehler, a.datum, a.kennung)
+                    }
                     Some((m, c, k)) => format!("{m}C{:03}_{IPHONE_DATUM}_{k}", c + 1),
                     None => format!("A{:03}C{:03}_{IPHONE_DATUM}_{}", a.rolle, a.zaehler, a.kennung),
                 };
@@ -266,8 +280,15 @@ pub(crate) fn drehtag(saat: u64) -> Drehtag {
                     "plate_id": plate_id, "start_zeit": zeit(t), "clip_name": vorschlag, "clip": Value::Null,
                     "erstellt_am": zeit(t),
                 });
+                let mut neuer_take: Option<Value> = None;
                 if z.ja(lage.ohne_rec) {
                     ohne_rec.insert(take_id.clone());
+                    // Build 34: Verbindung stand durchgehend, Kamera meldet keine Aufnahme → die App entfernt den Take
+                    // weich. Die Kamera behält seine Take-ID in Info 1 bis zur nächsten REC-Klappe.
+                    if lage.build34 && verbunden && z34.ja(0.9) {
+                        take["geloescht"] = json!(true);
+                        take["clip_name"] = Value::Null;
+                    }
                 } else {
                     // Meist Sekunden nach der Klappe, manchmal Minuten (Predigerhof P4 T2: 5 min).
                     let verzug = if z.ja(0.1) { z.bis(30, 300) } else { z.bis(1, 15) };
@@ -335,6 +356,12 @@ pub(crate) fn drehtag(saat: u64) -> Drehtag {
                         let name2 = a.naechster_name();
                         let o = versatz(&a, &lage);
                         *karten.entry(a.karte()).or_default().entry(dreh_id.clone()).or_default() += 1;
+                        // Build 34: mit Verbindung legt die App einen Take mit Nachfrage an; der Clip kommt nach dem
+                        // Stopp in `take.clip`. Info 1 im Clip bleibt der Slate davor.
+                        let nachfrage = (lage.build34 && verbunden).then(|| {
+                            take_nr_global += 1;
+                            format!("01SIM{saat:010}{take_nr_global:011}")
+                        });
                         clips.push(sim_clip(
                             &a.karte(),
                             &name2,
@@ -344,13 +371,29 @@ pub(crate) fn drehtag(saat: u64) -> Drehtag {
                             info1.clone(),
                             vec![],
                             e2,
-                            None,
+                            nachfrage.as_deref(),
                         ));
+                        if let Some(id) = nachfrage {
+                            let tc0 = tc(b2 + Duration::seconds(o));
+                            neuer_take = Some(json!({
+                                "id": id, "art": "take", "bewertung": "", "geloescht": false,
+                                "plate_id": plate_id, "start_zeit": zeit(b2), "erstellt_am": zeit(b2),
+                                "kamera": { "quelle": "cap" }, "start_tc": tc0, "end_tc": tc(e2 + Duration::seconds(o)),
+                                "clip": { "name": name2, "startTc": tc0, "bilder": d2 * FPS }, "clip_name": name2,
+                                "sim_nachfrage": true,
+                            }));
+                        }
                         t = e2;
                     }
                 }
                 voriger_name = take["clip_name"].as_str().map(str::to_owned);
                 takes.push(take);
+                if let Some(mut n) = neuer_take {
+                    nummer += 1;
+                    n["nummer"] = json!(nummer);
+                    voriger_name = n["clip_name"].as_str().map(str::to_owned);
+                    takes.push(n);
+                }
             }
             // Nachträglich gelöscht (Papierkorb im Plate Assistant).
             for t in takes.iter_mut() {
@@ -792,9 +835,26 @@ mod tests {
         let (mut clips, mut automatisch, mut offen, mut vorschlaege) = (0usize, 0usize, 0usize, 0usize);
         let (mut ohne_rec, mut ohne_sicher, mut ohne_unklar, mut uebernommen) = (0usize, 0usize, 0usize, 0usize);
         let mut nachgetragen = 0usize;
+        let (mut tage34, mut entfernt34, mut nachfrage34) = (0usize, 0usize, 0usize);
         let (mut hand_falsch, mut hand_erkannt) = (0usize, 0usize);
         for nr in einzeln.map_or(1..=anzahl, |n| n..=n) {
             let d = drehtag(nr);
+            if d.lage.build34 {
+                tage34 += 1;
+                for t in d
+                    .drehs
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .flat_map(|x| x["plate"].as_array().into_iter().flatten())
+                    .flat_map(|p| p["take"].as_array().into_iter().flatten())
+                {
+                    let id = t["id"].as_str().unwrap_or_default();
+                    entfernt34 +=
+                        usize::from(t["geloescht"] == true && t["clip_name"].is_null() && d.ohne_rec.contains(id));
+                    nachfrage34 += usize::from(t["sim_nachfrage"] == true);
+                }
+            }
             let e = durchrechnen(&d);
             clips += d.clips.len();
             automatisch += e.zuordnung.len();
@@ -897,6 +957,9 @@ mod tests {
         );
         println!("{uebernommen} Vorschläge übernommen (Runden danach ohne neue Fehler)");
         println!("{nachgetragen} eindeutige Zuordnungen nachgetragen (Ansicht danach unverändert)");
+        println!(
+            "{tage34} Drehtage mit Plate Assistant Build 34: {entfernt34} Takes ohne REC von der App entfernt, {nachfrage34} Takes mit Nachfrage für Aufnahmen nur an der Kamera"
+        );
         println!("{hand_falsch} falsche Zuordnungen von Hand, {hand_erkannt} davon unter „Unstimmigkeiten“ gemeldet");
         for (art, (n, nr, bsp)) in &je_art {
             println!("FEHLER {art}: {n}× (z. B. Nr. {nr}: {bsp})");
