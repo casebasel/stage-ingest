@@ -284,6 +284,16 @@ mod tests {
     }
 
     #[test]
+    fn nd_wie_cap() {
+        // Wie CAP und die Stage (17.10.2026): „ND 0“ ohne Filter, sonst „ND 2.1“.
+        for (dichte, text) in [("0.0", "ND 0"), ("2.0999999046325684", "ND 2.1"), ("0.6000000238418579", "ND 0.6")] {
+            let s = artcmd::spalten(&format!("filter/ndFilterDensity\n{dichte}\n")).unwrap();
+            let a = anzeige(&artcmd::kamerawerte(&s));
+            assert_eq!(a.iter().find(|(k, _)| *k == "nd").map(|(_, v)| v.as_str()), Some(text), "{dichte}");
+        }
+    }
+
+    #[test]
     fn kamerawerte_erkennen() {
         assert_eq!(kamerawert("com.arri.camera.ExposureIndexAsa"), Some("ei"));
         assert_eq!(kamerawert("com.arri.camera.WhiteBalanceKelvin"), Some("weissK"));

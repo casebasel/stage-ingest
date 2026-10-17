@@ -311,8 +311,10 @@ mod tests {
         ];
         let clip = |take: &str, name: &str, t: &Value| json!({ "take_id": take, "name": name, "technik": t, "geaendert_am": "2026-10-17T20:00:00Z" });
         let b_kamera = json!({ "nd": "ND 2.1", "shutter": "172.8" });
-        // `clip.technik` von 0.1.63 schrieb ND ohne „ND “: an den Take trotzdem wie CAP.
+        // `clip.technik` von 0.1.63 schrieb ND ohne „ND “: an den Take trotzdem wie CAP, auch ohne Filter („ND 0“).
         let technik_alt = json!({ "nd": "1.2" });
+        let ohne_filter = std::collections::BTreeMap::from([("nd".to_owned(), "0".to_owned())]);
+        assert_eq!(kamera(&ohne_filter)["nd"], "ND 0");
         let clips = vec![
             clip("T7", "B003C001_120101_R1AB", &b_kamera),
             clip("T7", "A010C027_120101_R132", &technik),
