@@ -45,10 +45,10 @@ fn kamerawert(feld: &str) -> Option<&'static str> {
         "nd"
     } else if hat("lensmodel") || hat("lenstype") || hat("lensname") {
         "objektiv"
-    } else if hat("focusdistance") {
-        "fokus"
-    } else if hat("iris") || hat("tstop") || hat("fstop") || hat("aperture") {
-        "blende"
+    } else if hat("focusdistance") || hat("iris") || hat("tstop") || hat("fstop") || hat("aperture") {
+        // Blende und Fokus nur roh: Ihre Schreibweise im MOV ist an keinem Clip mit Objektivdaten geprüft, und am Take
+        // gelten die Werte von Hand oder aus CAP („T2.8“, „2.50 m“; Plate Assistant Build 39, 18.10.2026).
+        return None;
     } else if hat("sensorfps") || hat("sensorrate") || hat("capturefps") {
         "sensorFps"
     } else if hat("serial") {
@@ -148,16 +148,12 @@ pub fn lesen(a: &Anfrage) -> BTreeMap<String, String> {
             w.extend(artcmd::felder(&s).into_iter().map(|(feld, v)| (format!("artcmd:{feld}"), v)));
         }
     }
-    for (z, v) in aus_datei.into_iter().filter(|(z, v)| gilt(z, v)) {
+    // Leer ist kein Wert: Er darf weder die Spalte füllen noch an einen Take gehen, sonst überdeckte er dort einen Wert
+    // aus CAP oder von Hand (Plate Assistant, 17.10.2026).
+    for (z, v) in aus_datei.into_iter().filter(|(_, v)| !v.trim().is_empty()) {
         w.entry(z.to_owned()).or_insert(v);
     }
     w
-}
-
-/// Leer oder eine Blende/ein Fokus von 0 ist kein Wert: Er darf weder die Spalte füllen noch an einen Take gehen, sonst
-/// überdeckte er dort einen Wert aus CAP oder von Hand (Plate Assistant, 17.10.2026).
-fn gilt(spalte: &str, v: &str) -> bool {
-    !v.trim().is_empty() && !(matches!(spalte, "blende" | "fokus") && artcmd::zahl(v) == Some(0.0))
 }
 
 /// Spaltenwerte aus den typisierten Kamerawerten, damit die Take-Tabelle dasselbe zeigt wie die Datenbank. Shutter und
@@ -340,8 +336,9 @@ mod tests {
         assert_eq!(db["kamerawerte"]["shutterGrad"], serde_json::json!(180));
         assert_eq!(db["kamerawerte"]["quelle"], "artcmd");
         assert_eq!(db["shutter"], "180.0");
-        // Aus den Metadaten im MOV: leer oder Blende/Fokus 0 überdeckt nie einen Wert am Take.
-        assert!(!gilt("blende", "0") && !gilt("fokus", "0.0") && !gilt("ei", " "));
-        assert!(gilt("blende", "T2.8") && gilt("tint", "0"));
+        // Blende und Fokus aus dem MOV nur roh (`datei:`), nie als Spalte oder am Take: ungeprüft, Hand-Werte gelten.
+        for k in ["com.arri.camera.LensIris", "com.arri.camera.LensFocusDistance", "com.arri.camera.TStop"] {
+            assert_eq!(kamerawert(k), None, "{k}");
+        }
     }
 }

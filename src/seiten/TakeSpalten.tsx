@@ -166,8 +166,10 @@ const KATALOG: Spalte[] = [
   tech("look", "Look", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Take (CAP), sonst Plate", "plate.kamera.look", false),
   tech("objektiv", "Objektiv", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Take (CAP), sonst Einrichtung am Take, sonst Plate", "plate.kamera.objektiv", false),
   tech("brennweite", "Brennweite mm", "Kamerawerte", "ART CMD, sonst Take (CAP), sonst Einrichtung am Take, sonst Plate", "plate.kamera.brennweiteMm"),
-  tech("fokus", "Fokus", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Take (CAP), sonst Plate", "plate.kamera.fokus"),
-  tech("blende", "Blende", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Take (CAP), sonst Plate", "plate.kamera.blende"),
+  // Blende und Fokus: am Take aus CAP oder von Hand (Plate Assistant Build 39), sonst die Plate; aus dem Clip erst, wenn
+  // Objektivdaten an einem echten Clip geprüft sind (die rohen Werte stehen unter „Weitere“).
+  tech("fokus", "Fokus", "Kamerawerte", "Take (CAP oder von Hand), sonst Plate", "plate.kamera.fokus"),
+  tech("blende", "Blende", "Kamerawerte", "Take (CAP oder von Hand), sonst Plate", "plate.kamera.blende"),
   // Bewegung: ART CMD (Mittel und Bereich über alle Bilder), sonst der Wert, den der Plate Assistant übernommen hat.
   tech("tilt", "Tilt °", "Bewegung", "ART CMD (Mittel), sonst gemeinsame Datenbank (Take oder Clip)", "take.aus_clip.tiltGrad"),
   tech("tiltBereich", "Tilt Bereich °", "Bewegung", "ART CMD, sonst gemeinsame Datenbank", "take.aus_clip.tiltBereich"),

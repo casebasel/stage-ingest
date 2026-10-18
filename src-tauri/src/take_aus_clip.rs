@@ -28,15 +28,15 @@ pub struct Anfrage {
     pub aufnehmen: Option<String>,
 }
 
-/// Spalte (`technik`) → Schlüssel von `take.kamera` (Vertrag mit der Stage), als Zahl oder Text.
-const KAMERA: [(&str, &str, bool); 12] = [
+/// Spalte (`technik`) → Schlüssel von `take.kamera` (Vertrag mit der Stage), als Zahl oder Text. Blende und Fokus nicht:
+/// Sie kommen von Hand vom iPhone („T2.8“, „2.50 m“, „∞“; Plate Assistant Build 39) oder über CAP, und eine Quelle im
+/// Clip ist an keinem Clip mit Objektivdaten geprüft (ART CMD schreibt ohne sie nur rohe Encoderwerte).
+const KAMERA: [(&str, &str, bool); 10] = [
     ("kameramodell", "modell", false),
     ("seriennummer", "seriennummer", false),
     ("shutter", "shutter", false),
     ("nd", "nd", false),
     ("look", "look", false),
-    ("fokus", "fokus", false),
-    ("blende", "blende", false),
     ("sensorFps", "sensorFps", true),
     ("ei", "iso", true),
     ("weissK", "weissK", true),
@@ -76,14 +76,16 @@ fn objektiv_null(schluessel: &str, w: &Value) -> bool {
 }
 
 /// Darf der Ingest `take.kamera.<schluessel>` so schreiben (Sperre in `plate.rs`)? Nur die Schlüssel, die er beim Anlegen
-/// aus dem Clip schreibt, nie `quelle`; Text oder Zahl, Blende und Fokus nie 0, `null` nur für sie (entfernt eine alte
-/// „0“; Plate Assistant, 17.10.2026).
+/// aus dem Clip schreibt, nie `quelle`, als Text oder Zahl. Blende und Fokus nur `null`, um eine alte „0“ zu entfernen;
+/// sonst überdeckte seine jüngere Feldzeit die Werte von Hand (Plate Assistant, 17. und 18.10.2026).
 pub fn kamera_wert_gueltig(schluessel: &str, w: &Value) -> bool {
+    if matches!(schluessel, "blende" | "fokus") {
+        return w.is_null();
+    }
     KAMERA.iter().any(|(_, nach, _)| *nach == schluessel)
         && match w {
-            Value::Null => matches!(schluessel, "blende" | "fokus"),
-            Value::String(t) => !t.trim().is_empty() && !objektiv_null(schluessel, w),
-            Value::Number(_) => !objektiv_null(schluessel, w),
+            Value::String(t) => !t.trim().is_empty(),
+            Value::Number(_) => true,
             _ => false,
         }
 }
@@ -91,7 +93,7 @@ pub fn kamera_wert_gueltig(schluessel: &str, w: &Value) -> bool {
 /// Kamerawerte an Takes aus Clips (`kamera.quelle` „ale“) nachführen (Marlon, 17.10.2026; Regeln vom Plate Assistant,
 /// Systemkarte ENTSCHEIDUNGEN „Kamerawerte aus der Datei“). Je Take zählt der massgebende Clip wie bei `aus_clip`, seine
 /// Werte aus `clip.technik` wie beim Anlegen. Geschrieben wird je Schlüssel, nur was der Clip liefert und was abweicht,
-/// nie `quelle`; eine Blende oder ein Fokus von 0 aus früheren Versionen wird entfernt (`null`). Gelöschte Takes und
+/// nie `quelle`, nie Blende oder Fokus; eine Blende oder ein Fokus von 0 aus früheren Versionen wird entfernt (`null`). Gelöschte Takes und
 /// Takes mit anderer Quelle bleiben, wie sie sind. `takes`: Zeilen mit `id`, `kamera`, `geloescht`; `clips`: Zeilen mit
 /// `take_id`, `name`, `technik`, `geaendert_am`, `felder_zeit`. Ergebnis: (Take, Feld `kamera.<schlüssel>`, Wert).
 pub fn kamera_abweichungen(takes: &[Value], clips: &[Value]) -> Vec<(String, String, Value)> {
@@ -118,7 +120,7 @@ pub fn kamera_abweichungen(takes: &[Value], clips: &[Value]) -> Vec<(String, Str
             }
         }
         for k in ["blende", "fokus"] {
-            if soll.get(k).is_none() && objektiv_null(k, &ist[k]) {
+            if objektiv_null(k, &ist[k]) {
                 aus.push((id.to_owned(), format!("kamera.{k}"), Value::Null));
             }
         }
@@ -311,6 +313,10 @@ mod tests {
         ];
         let clip = |take: &str, name: &str, t: &Value| json!({ "take_id": take, "name": name, "technik": t, "geaendert_am": "2026-10-17T20:00:00Z" });
         let b_kamera = json!({ "nd": "ND 2.1", "shutter": "172.8" });
+        // Ein Rohwert aus dem MOV (nie geprüft) geht nie als Blende an einen Take, auch nicht an einen ohne Blende.
+        let mut technik = technik;
+        technik["blende"] = json!("2800");
+        technik["fokus"] = json!("1500");
         // `clip.technik` von 0.1.63 schrieb ND ohne „ND “: an den Take trotzdem wie CAP, auch ohne Filter („ND 0“).
         let technik_alt = json!({ "nd": "1.2" });
         let ohne_filter = std::collections::BTreeMap::from([("nd".to_owned(), "0".to_owned())]);
@@ -339,6 +345,8 @@ mod tests {
         for (feld, wert) in [
             ("kamera.quelle", json!("ale")),
             ("kamera.blende", json!("0")),
+            ("kamera.blende", json!("T2.8")),
+            ("kamera.fokus", json!("2.50 m")),
             ("kamera.fokus", json!(0)),
             ("kamera.iso", Value::Null),
             ("kamera.gamma", json!("LogC3")),
