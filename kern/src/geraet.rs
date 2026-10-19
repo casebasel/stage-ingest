@@ -123,11 +123,22 @@ pub fn kartenname(pfad: &Path) -> String {
     if !name.is_empty() && !name.contains(':') {
         return name;
     }
+    // Windows (`E:\`): Name des Laufwerks. Ist die Karte schon draussen (nach der Freigabe erlaubt, Auswertung läuft
+    // noch), gilt der zuletzt gelesene Name dieses Laufwerks, nie „Karte“ (Marlon, 19.10.2026).
+    static GEMERKT: std::sync::Mutex<Vec<(std::path::PathBuf, String)>> = std::sync::Mutex::new(Vec::new());
     #[cfg(windows)]
     if let Some(n) = plattform::volume_name(pfad) {
+        if let Ok(mut g) = GEMERKT.lock() {
+            g.retain(|(p, _)| p != pfad);
+            g.push((pfad.to_path_buf(), n.clone()));
+        }
         return n;
     }
-    "Karte".into()
+    GEMERKT
+        .lock()
+        .ok()
+        .and_then(|g| g.iter().find(|(p, _)| p == pfad).map(|(_, n)| n.clone()))
+        .unwrap_or_else(|| "Karte".into())
 }
 
 /// Name eines Laufwerks für die Liste links: Volume-Name; unter Windows ohne Namen bei einem Netzlaufwerk die

@@ -62,7 +62,9 @@ export type Fortschritt =
   | { phase: "kopieren"; meldung: Meldung }
   | { phase: "pruefen"; ziel: number; pfad: string }
   | { phase: "nachlesen"; pfad: string }
-  | { phase: "nachpruefen"; pfad: string };
+  | { phase: "nachpruefen"; pfad: string }
+  /** Freigabe steht fest, sobald die Kopien geprüft sind; die Auswertung läuft danach weiter. */
+  | { phase: "freigabe"; sicher: boolean; kopien: number };
 
 export type KartenAuftrag = {
   quelle: string;

@@ -886,7 +886,13 @@ function Fortschritt() {
           </h1>
           <p className="leise">
             {lauf.quelle?.name} · {stand.dateien} Dateien · {bytesText(stand.bytes)} ·{" "}
-            {abschluss ? "Kopie fertig und geprüft, Freigabe am Schluss" : "Karte nicht entfernen"}
+            {!abschluss
+              ? "Karte nicht entfernen"
+              : stand.freigabe?.sicher
+                ? `Sicher zum Formatieren: ${stand.freigabe.kopien} geprüfte ${stand.freigabe.kopien === 1 ? "Kopie" : "Kopien"}. Die Karte darf raus, die Auswertung läuft weiter.`
+                : stand.freigabe
+                  ? "Nicht freigegeben: Karte nicht formatieren, das Urteil folgt am Schluss."
+                  : "Kopie fertig und geprüft, Freigabe am Schluss"}
           </p>
           {abschluss && (
             <p className="lauf-auswertung">
@@ -1013,13 +1019,23 @@ function Fortschritt() {
       <Dateiliste />
 
       <div className="lauf-fuss">
-        <span className="leise">
-          Die App lässt sich während des Kopierens nicht schliessen. Abbrechen räumt die halben Kopien weg; die Karte bleibt
-          unverändert.
-        </span>
-        <button className={`knopf ${lauf.abbruchFragen ? "knopf-gefahr" : ""}`} onClick={lauf.abbrechen}>
-          {lauf.abbruchFragen ? "Wirklich abbrechen?" : "Abbrechen"}
-        </button>
+        {abschluss ? (
+          // Nach dem Prüfen gibt es nichts mehr abzubrechen: Die Kopien sind fertig, es wird nur noch ausgewertet.
+          <span className="leise">
+            Kopien fertig und geprüft. Es laufen noch Bewegungsdaten, Vorschaubilder, Bericht und Datenbank; danach kann die
+            nächste Karte kommen.
+          </span>
+        ) : (
+          <>
+            <span className="leise">
+              Die App lässt sich während des Kopierens nicht schliessen. Abbrechen räumt die halben Kopien weg; die Karte
+              bleibt unverändert.
+            </span>
+            <button className={`knopf ${lauf.abbruchFragen ? "knopf-gefahr" : ""}`} onClick={lauf.abbrechen}>
+              {lauf.abbruchFragen ? "Wirklich abbrechen?" : "Abbrechen"}
+            </button>
+          </>
+        )}
       </div>
     </div>
   );

@@ -46,6 +46,8 @@ export type Stand = {
   zielZahl: number;
   /** Zurücklesen pro Ziel (Ziele auf verschiedenen Platten laufen gleichzeitig): fertige Dateien, Bytes, Beginn. */
   pruefJeZiel: Record<number, { nummer: number; bytes: number; beginn: number }>;
+  /** Freigabe, sobald die Kopien geprüft sind (vor dem Auswerten); `null` bis dahin. */
+  freigabe: { sicher: boolean; kopien: number } | null;
   /** Dateien in der Reihenfolge des Kopierens; `geprueft` = Bitmaske der Ziele, die sie schon zurückgelesen haben
    *  (Bit i = Ziel i). */
   liste: { pfad: string; groesse: number; geprueft: number }[];
@@ -66,6 +68,7 @@ const LEER: Stand = {
   zielZahl: 0,
   pruefJeZiel: {},
   liste: [],
+  freigabe: null,
 };
 
 /** Quelle: Pfad, und wenn aus der Liste der eingesteckten Laufwerke gewählt, dessen Angaben (für Auswerfen). */
@@ -295,7 +298,7 @@ function useLaufHalten() {
     // darin könnte „prüft“ nach dem fertigen Ergebnis wieder setzen.
     const weg = aufFortschritt((f: Fortschritt) => {
       // Bei „Kopie aus Kopie“ bleibt die Phase „nachpruefen“ (Kopf und Einlesen-Seite zeigen keinen Kartenlauf).
-      if (f.phase !== "kopieren" && !kaskadeAktiv.current) setPhase(f.phase);
+      if (f.phase !== "kopieren" && f.phase !== "freigabe" && !kaskadeAktiv.current) setPhase(f.phase);
       // Gesammelt und höchstens alle 100 ms angewendet: eine Karte mit Zehntausenden Dateien schickt sonst für jede
       // Datei ein Ereignis, und jedes kopierte die ganze Liste (Code-Prüfung 09.10.2026).
       puffer.current.push(f);
@@ -552,6 +555,8 @@ function fortschrittAnwenden(alt: Stand, ereignisse: Fortschritt[]): Stand {
       s.pruefBeginn = s.pruefBeginn || Date.now();
       s.pruefZiel = f.ziel;
       s.pruefPfad = f.pfad;
+    } else if (f.phase === "freigabe") {
+      s.freigabe = { sicher: f.sicher, kopien: f.kopien };
     } else if (f.phase === "nachlesen" || f.phase === "nachpruefen") {
       s.pruefPfad = f.pfad;
       s.pruefNummer += 1;

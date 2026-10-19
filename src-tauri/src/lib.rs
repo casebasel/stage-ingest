@@ -160,10 +160,25 @@ fn projekt_zeilen(auftrag: &KartenAuftrag) -> Vec<(String, String)> {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "phase", rename_all = "camelCase")]
 enum Fortschritt {
-    Kopieren { meldung: Meldung },
-    Pruefen { ziel: usize, pfad: String },
-    Nachlesen { pfad: String },
-    Nachpruefen { pfad: String },
+    Kopieren {
+        meldung: Meldung,
+    },
+    Pruefen {
+        ziel: usize,
+        pfad: String,
+    },
+    Nachlesen {
+        pfad: String,
+    },
+    Nachpruefen {
+        pfad: String,
+    },
+    /// Freigabe steht fest, sobald die Kopien geprüft sind (Marlon, 19.10.2026: „Freigabe zuerst“): Die Karte darf raus,
+    /// die Auswertung (ART CMD, QR, Vorschaubilder, Bericht, Datenbank) läuft weiter und ändert sie nicht mehr.
+    Freigabe {
+        sicher: bool,
+        kopien: usize,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -1144,6 +1159,8 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
             }
         }
     }
+    // Kartennamen lesen, solange die Karte steckt: Nach der Freigabe darf sie raus, die Auswertung braucht ihn noch.
+    let _ = geraet::kartenname(&auftrag.quelle);
     // Kern: kopieren, zurücklesen, zweites Lesen, frühere Kopien, ASC MHL, Freigabe (ingest_kern::ablauf, getestet).
     let ablauf = ingest_kern::ablauf::Ablauf {
         quelle: auftrag.quelle.clone(),
@@ -1217,6 +1234,8 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
             .hinweise
             .push(format!("Nicht kopiert (Verknüpfung oder Sonderdatei): {}", kopie.ausgelassen.join(", ")));
     }
+    let _ =
+        app.emit(FORTSCHRITT, Fortschritt::Freigabe { sicher: freigabe.sicher, kopien: freigabe.unabhaengige_kopien });
 
     // ALE auf jedes gute Ziel (Clip-Angaben oben gelesen).
     let ale_text =
