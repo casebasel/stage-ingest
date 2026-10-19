@@ -535,7 +535,7 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
       }
       // Mittelbilder neben die Metadaten (Studio wie Plate; Marlon, 19.10.2026): für Takes mit erreichbarem Clip ohne
       // Bild, je Sitzung und Projekt einmal; danach neu laden, damit sie unter „Fotos“ erscheinen.
-      if (art && !lauf.laeuft && !mittelbilderVersucht.current.has(p.id)) {
+      if (!lauf.laeuft && !mittelbilderVersucht.current.has(p.id)) {
         const ohne = neu.drehs.flatMap((d) =>
           d.plates.flatMap((pl) =>
             pl.takes
@@ -543,13 +543,28 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
               .map((t) => ({ kopien: t.dateien?.length ? t.dateien : [t.datei!] })),
           ),
         );
-        if (ohne.length) {
+        // Die Seite sagt, was sie tut (Marlon, 19.10.2026: „Kommen hier jetzt noch Bilder … oder nicht?“).
+        if (ohne.length && !art) {
+          setNachgetragen({
+            ton: "warn",
+            text: `${ohne.length} Takes ohne Mittelbild: Dafür braucht es ART CMD auf diesem Rechner (Einrichtung → bei ARRI laden). Sonst rendert sie der nächste Rechner mit ART CMD.`,
+          });
+        } else if (ohne.length) {
           mittelbilderVersucht.current.add(p.id);
+          setNachgetragen({ ton: "laeuft", text: `Rendert ${ohne.length} Mittelbilder im Hintergrund (ART CMD, aus der Clipdatei) …` });
           invoke<number>("mittelbilder_ablegen", { artCmd: art, takes: ohne })
             .then((n) => {
-              if (n > 0 && !lauf.laeuft) void laden(p);
+              if (n > 0) {
+                setNachgetragen({ ton: "ok", text: `${n} Mittelbilder neben die Metadaten gelegt` });
+                if (!lauf.laeuft) void laden(p);
+              } else {
+                setNachgetragen({
+                  ton: "warn",
+                  text: "Keine Mittelbilder gerendert: ART CMD konnte die Clips nicht lesen (ist die Kopie erreichbar, stimmt der Pfad zu ART CMD in der Einrichtung?)",
+                });
+              }
             })
-            .catch(() => {});
+            .catch((err) => setNachgetragen({ ton: "warn", text: `Mittelbilder nicht gerendert: ${String(err)}` }));
         }
       }
     } catch (err) {
