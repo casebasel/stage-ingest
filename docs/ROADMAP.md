@@ -22,6 +22,20 @@ Gebaut ist der Kern (siehe KONZEPT Kapitel 14). Offen, in dieser Reihenfolge:
      Byte 416/420/432 = 25000); eindeutig erst mit einem Clip, bei dem Sensor- und Projekt-fps verschieden sind
 4. Erst danach: Stage Ingest am Dreh einsetzen, die ersten Tage parallel zum bisherigen Werkzeug.
 
+## Code-Prüfung 19.10.2026: offene Punkte
+
+Vier Prüfer haben den Code gelesen (Kopierpfad, Löschen und Verschieben, Netz und Zugangsdaten, Oberfläche). Das Paket „Karten-Identität“ ist in 0.1.66 gebaut (KONZEPT, Abschnitt „Karten-Identität“). Offen, in dieser Reihenfolge:
+
+1. **Kopie aus Kopie übernimmt das erste Urteil.** Die Kaskade nimmt fest an, die ganze Karte sei gesichert, und vergleicht nur gegen die Historie der Quellkopie. Nötig: „ganze Karte“ und den Abgleich mit der Kartenhistorie in die Zusammenfassung schreiben; war das erste Einlesen nur ein Ordner oder wich die Karte von ihrer Historie ab, gibt die Kaskade nie frei.
+2. **Netzziele:** Lässt sich der Servername nicht auflösen, gilt die Kennung als unsicher und zählt nicht; sonst kann dasselbe NAS unter zwei Namen (Bonjour, IP) als zwei Platten zählen.
+3. **Beenden während einer Kopie:** Unter Windows beendet der Updater die App vor dem Installieren, am Mac geht Cmd+Q am Schutz vorbei (Tauri fängt nur das Fenster-X); der Klick aufs X gibt keine Rückmeldung (`ingest://schliessen-gesperrt` hört niemand ab). Einlesen sperren, solange ein Update lädt; Cmd+Q und Update mit Hinweis abfangen.
+4. **Testschwelle 1 vermerken:** in Zusammenfassung, Protokoll und Datenbank; im Protokoll „Fehlende Kopie erstellen“ anbieten, wenn die Karte nur mit einer Kopie freigegeben wurde.
+5. **Sackgassen beim Ergänzen:** „Stattdessen neu kopieren“ legt auch eine zu ergänzende Kopie zur Seite (heute endet es mit „Ziel existiert schon“); eine frühere Kopie, die beim Zurücklesen abweicht, bekommt einen Ausweg in der App (zur Seite legen und neu schreiben), damit niemand im Finder löschen muss.
+6. **HDRI-Dienst:** Aufnahme-ID vor jeder Pfadbildung auf `[A-Za-z0-9_-]{10,40}` prüfen, Arbeits- und Ergebnisordner nur unter der Wurzel.
+7. **ART CMD:** SHA-256 des heruntergeladenen Pakets je Plattform fest im Code prüfen, bevor es ausgeführt wird; CSV-Grösse und Laufzeit begrenzen.
+8. **Repo-Hygiene:** interne Rechner- und Benutzernamen aus Code, Tests und Doku entfernen (Regel in CLAUDE.md).
+9. **Niedrig:** Abbrechen wirkt beim Zurücklesen erst nach der laufenden Datei und während der Vorbereitung gar nicht; während des Laufs steht „Geprüft“ auch bei einer Abweichung; `ascmhl_chain.xml` atomar schreiben (Teildatei, dann umbenennen); Abgleich mit der Kartenhistorie bei Lesefehler als Abweichung werten; http-Adressen ablehnen; Token-Cache an Adresse und E-Mail binden; „Karte zweimal lesen“ als Standard erwägen (nur das erkennt einen Leser, der falsche Bytes liefert).
+
 ## Erster echter Dreh (14.10.2026)
 
 - ~~Weitergedrehte Karte nachtragen~~ gebaut (0.1.32): frühere geprüfte Kopie wird ergänzt (nur Neues), ALE/BIN der
