@@ -55,9 +55,28 @@ const TAKE_ANLEGEN: &[&str] = &[
 /// nie ein bestehendes Foto.
 const FOTO_FELDER: &[&str] = &["_anlegen"];
 
-/// An `studio_take` (gehört der Stage) nur Bewertung und Notiz (Systemkarte SCHNITTSTELLEN „Studio-Spiegel“: je Feld
-/// gewinnt die jüngere Zeit, die Stage holt sie zurück). Nie anlegen, nie verschieben.
-const STUDIO_TAKE_FELDER: &[&str] = &["bewertung", "notiz"];
+/// An `studio_take` (gehört der Stage; Systemkarte SCHNITTSTELLEN „Studio-Spiegel“: je Feld gewinnt die jüngere Zeit,
+/// die Stage holt sie zurück): Bewertung, Notiz und seit 0032/0033 die Art; dazu neue Takes aus Clips (`_anlegen`, nur
+/// mit `herkunft` „ingest“ und diesen Feldern) und `geloescht` an eigenen Takes (der Server prüft die Herkunft).
+/// Nie verschieben, nie die Nummer (ENTSCHEIDUNGEN 19.10.2026).
+const STUDIO_TAKE_FELDER: &[&str] = &["bewertung", "notiz", "art"];
+const STUDIO_TAKE_ANLEGEN: &[&str] = &[
+    "einstellung_id",
+    "nummer",
+    "art",
+    "herkunft",
+    "start_zeit",
+    "end_zeit",
+    "start_tc",
+    "end_tc",
+    "fps",
+    "tc_quelle",
+    "clip_name",
+    "kamera",
+    "bewertung",
+    "notiz",
+    "erstellt_am",
+];
 
 /// Felder, die der Ingest an `dreh` (= Drehort) schreiben darf (Systemkarte, Stufe A): anlegen, Name, Datum.
 /// Der Kurzname ist nach dem Anlegen fest; Ort, Kamera und gemessene Werte schreibt nur der Plate Assistant.
@@ -122,8 +141,22 @@ pub fn aenderungen_pruefen(body: &Value) -> Result<(), String> {
         if t == "foto" && (!FOTO_FELDER.contains(&feld) || a["wert"]["quelle"] != "clip") {
             return Err("Stage Ingest legt an „foto“ nur Mittelbilder an (quelle = clip)".into());
         }
-        if t == "studio_take" && !STUDIO_TAKE_FELDER.contains(&feld) {
-            return Err(format!("Stage Ingest ändert am Studio-Take „{feld}“ nicht (gehört der Stage)"));
+        if t == "studio_take" {
+            let w = &a["wert"];
+            let gut = match feld {
+                "_anlegen" => {
+                    w.as_object().is_some_and(|o| o.keys().all(|k| STUDIO_TAKE_ANLEGEN.contains(&k.as_str())))
+                        && w["herkunft"] == "ingest"
+                        && w["einstellung_id"].as_str().is_some_and(|e| !e.is_empty())
+                        && w["art"].as_str().is_some_and(|x| TAKE_ARTEN.contains(&x))
+                }
+                "art" => w.as_str().is_some_and(|x| TAKE_ARTEN.contains(&x)),
+                "geloescht" => *w == true,
+                f => STUDIO_TAKE_FELDER.contains(&f),
+            };
+            if !gut {
+                return Err(format!("Stage Ingest ändert am Studio-Take „{feld}“ nicht so (gehört der Stage)"));
+            }
         }
         // Einstellung (gehört dem Plate Assistant): nur die Art, Plate oder On Location (Marlon, 17.10.2026).
         if t == "plate" && !(feld == "art" && a["wert"].as_str().is_some_and(|w| PLATE_ARTEN.contains(&w))) {
@@ -897,12 +930,19 @@ impl Plate {
     }
 
     /// Hat der Take schon ein Mittelbild (`foto`, `art = vorschau`, `quelle = clip`)? Dann legt der Ingest kein zweites an.
-    pub fn mittelbild_vorhanden(&self, z: &Zugang, take_id: &str) -> Result<bool, String> {
+    pub fn mittelbild_vorhanden(&self, z: &Zugang, take_id: &str, studio: bool) -> Result<bool, String> {
+        let spalte = if studio { "studio_take_id" } else { "take_id" };
         let v = self.lesen(
             z,
-            &format!("foto?take_id=eq.{}&art=eq.vorschau&quelle=eq.clip&select=id&limit=1", url_teil(take_id)),
+            &format!("foto?{spalte}=eq.{}&art=eq.vorschau&quelle=eq.clip&select=id&limit=1", url_teil(take_id)),
         )?;
         Ok(v.as_array().is_some_and(|a| !a.is_empty()))
+    }
+
+    /// Nächste Nummer eines Studio-Takes in einer Einstellung (höchste + 1; bei Kollision nummeriert die Stage neu).
+    pub fn naechste_studio_nummer(&self, z: &Zugang, einstellung_id: &str) -> Result<i64, String> {
+        let v = self.lesen(z, &format!("studio_take?einstellung_id=eq.{}&select=nummer", url_teil(einstellung_id)))?;
+        Ok(v.as_array().into_iter().flatten().filter_map(|t| t["nummer"].as_i64()).max().unwrap_or(0) + 1)
     }
 
     /// Lädt das Mittelbild in den Bucket `fotos` (nie überschreiben) und legt den `foto`-Eintrag an.
@@ -1044,11 +1084,39 @@ impl Plate {
             return Ok(e);
         }
         let takes = self.lesen(z, &format!("studio_take?einstellung_id=in.({})&select=*", ids.join(",")))?;
+        // Fotos im Studio (0032): an der Einstellung oder am Studio-Take; bei einem älteren Server keine.
+        let take_ids: Vec<String> =
+            takes.as_array().into_iter().flatten().filter_map(|t| t["id"].as_str().map(url_teil)).collect();
+        let fotos = self
+            .lesen(
+                z,
+                &format!(
+                    "foto?or=(einstellung_id.in.({}),studio_take_id.in.({}))&geloescht=eq.false\
+                     &select=id,art,pfad,zeit,quelle,einstellung_id,studio_take_id,breite,hoehe",
+                    ids.join(","),
+                    if take_ids.is_empty() { "-".to_owned() } else { take_ids.join(",") }
+                ),
+            )
+            .unwrap_or(Value::Null);
         for x in e.as_array_mut().into_iter().flatten() {
             let id = x["id"].clone();
             let eigene: Vec<Value> =
                 takes.as_array().into_iter().flatten().filter(|t| t["einstellung_id"] == id).cloned().collect();
+            let take_ids: Vec<Value> = eigene.iter().map(|t| t["id"].clone()).collect();
+            // Wie bei Plates: `take_id` am Foto ist der Take dazu (hier der Studio-Take).
+            let eigene_fotos: Vec<Value> = fotos
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|f| f["einstellung_id"] == id || take_ids.contains(&f["studio_take_id"]))
+                .map(|f| {
+                    let mut f = f.clone();
+                    f["take_id"] = f["studio_take_id"].clone();
+                    f
+                })
+                .collect();
             x["studio_take"] = Value::Array(eigene);
+            x["foto"] = Value::Array(eigene_fotos);
         }
         Ok(e)
     }

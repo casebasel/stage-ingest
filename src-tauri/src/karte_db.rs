@@ -148,6 +148,8 @@ pub struct Mittelbild<'a> {
     pub dreh_id: &'a str,
     pub plate_id: &'a str,
     pub take_id: &'a str,
+    /// Studio-Take der Stage (0032): das Foto hängt an `studio_take_id`, ohne Plate und Take.
+    pub studio: bool,
     pub pfad: &'a str,
     pub zeit: DateTime<Utc>,
     pub breite: u32,
@@ -157,28 +159,27 @@ pub struct Mittelbild<'a> {
 }
 
 pub fn mittelbild_aenderung(m: &Mittelbild, jetzt: DateTime<Utc>, id: String) -> Value {
-    aenderung(
-        id,
-        "foto",
-        m.foto_id,
-        "_anlegen",
-        json!({
-            "dreh_id": m.dreh_id,
-            "plate_id": m.plate_id,
-            "take_id": m.take_id,
-            "art": "vorschau",
-            "quelle": "clip",
-            "pfad": m.pfad,
-            "zeit": zeit(m.zeit),
-            "breite": m.breite,
-            "hoehe": m.hoehe,
-            "xxh128": m.xxh128,
-            "original": m.original.chars().take(1000).collect::<String>(),
-            "geloescht": false,
-            "erstellt_am": zeit(jetzt),
-        }),
-        jetzt,
-    )
+    let mut wert = if m.studio {
+        json!({ "studio_take_id": m.take_id })
+    } else {
+        json!({ "plate_id": m.plate_id, "take_id": m.take_id })
+    };
+    for (k, v) in [
+        ("dreh_id", json!(m.dreh_id)),
+        ("art", json!("vorschau")),
+        ("quelle", json!("clip")),
+        ("pfad", json!(m.pfad)),
+        ("zeit", json!(zeit(m.zeit))),
+        ("breite", json!(m.breite)),
+        ("hoehe", json!(m.hoehe)),
+        ("xxh128", json!(m.xxh128)),
+        ("original", json!(m.original.chars().take(1000).collect::<String>())),
+        ("geloescht", json!(false)),
+        ("erstellt_am", json!(zeit(jetzt))),
+    ] {
+        wert[k] = v;
+    }
+    aenderung(id, "foto", m.foto_id, "_anlegen", wert, jetzt)
 }
 
 /// Neuer Speicherort einer Karte nach dem Einsortieren (`karte.speicherort` ist änderbar, Plate Assistant 0018).
@@ -280,6 +281,47 @@ pub fn zuordnung_aenderungen(
     neue_id: impl FnMut() -> String,
 ) -> Option<Vec<Value>> {
     zuordnung_aenderungen_als(karte_id, clip, take_id, dreh_id, "hand", jetzt, neue_id)
+}
+
+/// Zuordnung lösen, wenn ein vom Ingest angelegter Studio-Take wieder gelöscht wird: Clip ohne Take, ohne Drehort.
+pub fn zuordnung_loesen(
+    karte_id: &str,
+    clip: &str,
+    jetzt: DateTime<Utc>,
+    mut neue_id: impl FnMut() -> String,
+) -> Option<Vec<Value>> {
+    let name = clipname(clip)?;
+    let cid = clip_id(karte_id, &name);
+    Some(
+        ["studio_take_id", "take_id", "dreh_id", "zuordnung"]
+            .into_iter()
+            .map(|feld| aenderung(neue_id(), "clip", &cid, feld, Value::Null, jetzt))
+            .collect(),
+    )
+}
+
+/// Zuordnung von Hand zu einem Studio-Take der Stage: `clip.studio_take_id` statt `take_id` (Systemkarte, 0022).
+pub fn zuordnung_aenderungen_studio(
+    karte_id: &str,
+    clip: &str,
+    studio_take_id: &str,
+    dreh_id: Option<&str>,
+    jetzt: DateTime<Utc>,
+    mut neue_id: impl FnMut() -> String,
+) -> Option<Vec<Value>> {
+    let name = clipname(clip)?;
+    let cid = clip_id(karte_id, &name);
+    Some(
+        [
+            ("studio_take_id", json!(studio_take_id)),
+            ("take_id", Value::Null),
+            ("dreh_id", json!(dreh_id)),
+            ("zuordnung", json!("hand")),
+        ]
+        .into_iter()
+        .map(|(feld, wert)| aenderung(neue_id(), "clip", &cid, feld, wert, jetzt))
+        .collect(),
+    )
 }
 
 /// Wie [`zuordnung_aenderungen`], mit der Art der Zuordnung (`hand`, `clipname`, …; Prüfbedingung von `clip.zuordnung`).
@@ -434,6 +476,7 @@ mod tests {
             dreh_id: "dreh-happy_end-4_stock",
             plate_id: "01PLATE0000000000000000000",
             take_id: "01TAKE00000000000000000000",
+            studio: false,
             pfad: "01PLATE0000000000000000000/01JA2B3C4D5E6F7G8H9JKMNPQR.jpg",
             zeit: jetzt,
             breite: 1280,

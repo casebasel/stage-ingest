@@ -1447,19 +1447,43 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
             .and_then(|(z, pp)| plate.drehs_mit_plan(z, &pp.id, None).ok())
             .map(|v| zuordnung::take_zu_plate(&v))
             .unwrap_or_default();
+        // Studio-Takes (0032): Einstellung und Drehort je Take aus dem Spiegel der Stage.
+        let studio_takes: std::collections::HashMap<String, (String, String)> = datenbank_zugang
+            .and_then(|(z, pp)| plate.studio(z, &pp.id).ok())
+            .map(|v| {
+                v.as_array()
+                    .into_iter()
+                    .flatten()
+                    .flat_map(|e| {
+                        let t = |v: &serde_json::Value| v.as_str().unwrap_or_default().to_owned();
+                        let (eid, did) = (t(&e["id"]), t(&e["dreh_id"]));
+                        e["studio_take"]
+                            .as_array()
+                            .cloned()
+                            .unwrap_or_default()
+                            .into_iter()
+                            .filter_map(move |t| Some((t["id"].as_str()?.to_owned(), (eid.clone(), did.clone()))))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         let paare: Vec<(String, String)> = clips
             .iter()
             .filter_map(|c| {
                 let (t, _) = take_von.get(soll::ohne_endung(&c.pfad))?;
-                let plate_take = auftrag.soll.iter().any(|s| s.quelle == "plate" && &s.take_id == t);
-                plate_take.then(|| (t.clone(), c.pfad.clone()))
+                let mit_foto =
+                    auftrag.soll.iter().any(|s| (s.quelle == "plate" || s.quelle == "studio") && &s.take_id == t);
+                mit_foto.then(|| (t.clone(), c.pfad.clone()))
             })
             .collect();
         let (rel_karte, _, _) = karte_db::ort(&erstes.ordner, None);
         let auftraege: Vec<mittelbild::Auftrag> = mittelbild::je_take_ein_clip(paare)
             .into_iter()
             .filter_map(|(take, pfad)| {
-                let (plate_id, dreh_id) = take_plate.get(&take)?.clone();
+                let (studio, (plate_id, dreh_id)) = match take_plate.get(&take) {
+                    Some(p) => (false, p.clone()),
+                    None => (true, studio_takes.get(&take)?.clone()),
+                };
                 let original = if rel_karte.starts_with('/') || rel_karte.contains(':') {
                     pfad.clone()
                 } else {
@@ -1476,6 +1500,7 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
                     take_id: take,
                     plate_id,
                     dreh_id,
+                    studio,
                     original,
                     klappe,
                 })
@@ -2229,6 +2254,7 @@ struct ArtGeaendert {
 /// Teilweise macht man das falsch“; mit dem Plate Assistant abgestimmt): `take.art` im Plate Assistant, dann
 /// `02_PLATES` des Drehorts auf allen verbundenen Zielen neu (`plate.json` nennt die Art je Take).
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // die Angaben der Oberfläche, flach wie bei den anderen Befehlen
 async fn take_art_aendern(
     plate: State<'_, Arc<plate::Plate>>,
     zugang: plate::Zugang,
@@ -2237,11 +2263,17 @@ async fn take_art_aendern(
     dreh: Dreh,
     take_id: String,
     art: String,
+    studio: Option<bool>,
 ) -> Result<ArtGeaendert, String> {
     let p = Arc::clone(&plate);
     im_hintergrund(move || {
         if !plate::TAKE_ARTEN.contains(&art.as_str()) {
             return Err(format!("Unbekannte Art „{art}“"));
+        }
+        // Studio-Take der Stage (0032): nur die Art im Spiegel, die Stage holt sie zurück; kein 02_PLATES.
+        if studio == Some(true) {
+            p.art_aendern(&zugang, "studio_take", &take_id, &art)?;
+            return Ok(ArtGeaendert { drehordner: 0, beiseite: vec![], fehler: vec![] });
         }
         p.art_aendern(&zugang, "take", &take_id, &art)?;
         let drehordner = plates::drehordner_ueberall(&basis, &dreh);
@@ -2669,6 +2701,122 @@ async fn take_aus_clip(
     .await
 }
 
+/// „Zu klären“: aus dem Clip einen Studio-Take der Stage anlegen (0032/0033; ENTSCHEIDUNGEN 19.10.2026) und den Clip
+/// ihm zuordnen (`clip.studio_take_id`). Nummer = höchste in der Einstellung + 1; die Stage übernimmt den Take und
+/// nummeriert bei Kollision neu. Gibt die ID des neuen Takes zurück.
+#[tauri::command]
+async fn studio_take_aus_clip(
+    plate: State<'_, Arc<plate::Plate>>,
+    zugang: plate::Zugang,
+    anfrage: take_aus_clip::StudioAnfrage,
+) -> Result<String, String> {
+    let p = Arc::clone(&plate);
+    im_hintergrund(move || {
+        let a = anfrage;
+        let kartenordner = a
+            .clipdatei
+            .ancestors()
+            .find(|o| o.parent().and_then(|e| e.file_name()).is_some_and(|n| n == struktur::KAMERA))
+            .map(Path::to_path_buf);
+        let stamm = soll::ohne_endung(&a.clip).to_owned();
+        let csv = kartenordner
+            .as_ref()
+            .map(|k| struktur::metadatenordner(k).join(format!("{stamm}.csv")))
+            .filter(|c| c.is_file());
+        let werte = technik::lesen(&technik::Anfrage { datei: a.clipdatei.clone(), csv });
+        let angaben = ingest_kern::clip::lesen(&a.clipdatei).ok();
+        if let Some(pfad) = &a.aufnehmen {
+            aufnehmen_ueberall(&p, Some(&zugang), &a.dateien, &a.clip, pfad, Some(&a.clipdatei))?;
+        }
+        let nummer = p.naechste_studio_nummer(&zugang, &a.einstellung_id)?;
+        let take_id = plate::ulid_aehnlich();
+        let aenderung = take_aus_clip::studio_take_aenderung(
+            &a,
+            &take_id,
+            nummer,
+            angaben.as_ref(),
+            &werte,
+            chrono::Utc::now(),
+            plate::ulid_aehnlich(),
+        );
+        p.take_anlegen(&zugang, aenderung)?;
+        // Zusammenfassungen wie bei einem Take des Plate Assistant (`takeId`), in der Datenbank `studio_take_id`.
+        let mut karte_id = None;
+        let mut fehler: Vec<String> = Vec::new();
+        for d in &a.dateien {
+            match ingest_kern::uebersicht::zuordnen(d, &a.clip, Some(&take_id), Some(&a.dreh_id)) {
+                Ok(id) => karte_id = karte_id.or(id),
+                Err(e) => fehler.push(format!("{}: {e}", d.display())),
+            }
+        }
+        if let Some(kid) = &karte_id {
+            match karte_db::zuordnung_aenderungen_studio(
+                kid,
+                &a.clip,
+                &take_id,
+                Some(&a.dreh_id),
+                chrono::Utc::now(),
+                plate::ulid_aehnlich,
+            ) {
+                Some(x) => match p.karte_schreiben(&zugang, x) {
+                    Ok(abgelehnt) if abgelehnt.is_empty() => {}
+                    Ok(abgelehnt) => fehler.push(format!("Datenbank: {}", abgelehnt.join("; "))),
+                    Err(e) => fehler.push(format!("Datenbank: {e}")),
+                },
+                None => fehler.push(format!("Datenbank: Clipname {} nicht verwendbar", a.clip)),
+            }
+        }
+        if fehler.is_empty() {
+            Ok(take_id)
+        } else {
+            Err(format!("Take angelegt, Zuordnung nicht überall gespeichert: {}", fehler.join("; ")))
+        }
+    })
+    .await
+}
+
+/// Einen vom Ingest angelegten Studio-Take wieder weich löschen (nur `herkunft` „ingest“, der Server prüft es); sein
+/// Clip wird gelöst und steht wieder unter „Zu klären“.
+#[tauri::command]
+async fn studio_take_loeschen(
+    plate: State<'_, Arc<plate::Plate>>,
+    zugang: plate::Zugang,
+    take_id: String,
+    clip: Option<String>,
+    dateien: Vec<PathBuf>,
+) -> Result<(), String> {
+    let p = Arc::clone(&plate);
+    im_hintergrund(move || {
+        let a = serde_json::json!({ "id": plate::ulid_aehnlich(), "tabelle": "studio_take", "datensatz": take_id,
+                                    "feld": "geloescht", "wert": true, "zeit": chrono::Utc::now().timestamp_micros() });
+        p.take_aendern(&zugang, a)?;
+        let Some(clip) = clip.filter(|c| !c.is_empty()) else { return Ok(()) };
+        let mut karte_id = None;
+        let mut fehler: Vec<String> = Vec::new();
+        for d in &dateien {
+            match ingest_kern::uebersicht::zuordnen(d, &clip, None, None) {
+                Ok(id) => karte_id = karte_id.or(id),
+                Err(e) => fehler.push(format!("{}: {e}", d.display())),
+            }
+        }
+        if let Some(kid) = &karte_id {
+            if let Some(x) = karte_db::zuordnung_loesen(kid, &clip, chrono::Utc::now(), plate::ulid_aehnlich) {
+                match p.karte_schreiben(&zugang, x) {
+                    Ok(abgelehnt) if abgelehnt.is_empty() => {}
+                    Ok(abgelehnt) => fehler.push(format!("Datenbank: {}", abgelehnt.join("; "))),
+                    Err(e) => fehler.push(format!("Datenbank: {e}")),
+                }
+            }
+        }
+        if fehler.is_empty() {
+            Ok(())
+        } else {
+            Err(format!("Take gelöscht, Zuordnung nicht überall gelöst: {}", fehler.join("; ")))
+        }
+    })
+    .await
+}
+
 /// Vorschaubild eines Fotos oder HDRI aus dem Plate Assistant, verkleinert auf `breite` Pixel, als data-URL.
 /// Zwischengespeichert im Cache der App (Bilder ändern sich unter demselben Pfad nicht).
 #[tauri::command]
@@ -2745,6 +2893,9 @@ struct OhneMittelbild {
     take_id: String,
     plate_id: String,
     dreh_id: String,
+    /// Studio-Take der Stage (0032): Foto mit `studio_take_id`.
+    #[serde(default)]
+    studio: bool,
     datei: PathBuf,
     klappe: Option<String>,
 }
@@ -2765,7 +2916,7 @@ fn mittelbilder_nachholen(
         .filter(|t| t.datei.is_file())
         .map(|t| {
             let klappe = t.klappe.and_then(|k| chrono::DateTime::parse_from_rfc3339(&k).ok()).map(|k| k.to_utc());
-            mittelbild::auftrag(t.take_id, t.plate_id, t.dreh_id, t.datei, klappe)
+            mittelbild::auftrag(t.take_id, t.plate_id, t.dreh_id, t.studio, t.datei, klappe)
         })
         .collect();
     mittelbild::im_hintergrund(Some((Arc::clone(&plate), zugang)), art_cmd, cache, vec![], auftraege);
@@ -3160,6 +3311,8 @@ pub fn run() {
             protokoll_karte,
             historie_bereinigen,
             take_aus_clip,
+            studio_take_aus_clip,
+            studio_take_loeschen,
             stage_projekt,
             projekt_uebersicht,
             take_technik,

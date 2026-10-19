@@ -143,6 +143,79 @@ pub fn kamera_aenderungen(
         .collect()
 }
 
+/// Studio-Take aus einem Clip anlegen (Marlon, 19.10.2026; ENTSCHEIDUNGEN „Studio: Fotos, Takes anlegen, Art“): die
+/// Kamera hat aufgenommen, die Stage hat keinen Take. Der Ingest legt ihn in der gemeinsamen Datenbank an (`herkunft`
+/// „ingest“, Nummer höchste + 1), die Stage übernimmt ihn in ihre Datenbank und nummeriert bei Kollision neu.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioAnfrage {
+    pub einstellung_id: String,
+    pub dreh_id: String,
+    pub drehtag: Option<String>,
+    pub clip: String,
+    pub clipdatei: PathBuf,
+    pub dateien: Vec<PathBuf>,
+    #[serde(default)]
+    pub aufnehmen: Option<String>,
+}
+
+/// Baut die Änderung `studio_take` `_anlegen` (nur die Felder, die der Server dem Ingest erlaubt; `tc_quelle` und
+/// `nummer`-Änderungen bleiben der Stage). `clip_name` wie die Stage: der Dateiname mit Endung.
+#[allow(clippy::too_many_arguments)]
+pub fn studio_take_aenderung(
+    a: &StudioAnfrage,
+    take_id: &str,
+    nummer: i64,
+    angaben: Option<&ingest_kern::clip::ClipAngaben>,
+    werte: &std::collections::BTreeMap<String, String>,
+    jetzt: chrono::DateTime<Utc>,
+    aenderung_id: String,
+) -> Value {
+    let fps = angaben.and_then(|c| c.fps).filter(|f| *f > 0.0);
+    let start_tc = angaben.and_then(|c| c.start_tc.clone());
+    let start_zeit = match (&a.drehtag, &start_tc, fps) {
+        (Some(tag), Some(tc), Some(f)) => ingest_kern::soll::tc_als_zeit(tag, tc, f),
+        _ => None,
+    };
+    let dauer_ms = match (angaben.and_then(|c| c.bilder), fps) {
+        (Some(b), Some(f)) => Some((b as f64 / f * 1000.0) as i64),
+        _ => None,
+    };
+    let zeit = |t: chrono::DateTime<Utc>| t.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let mut wert = Map::new();
+    wert.insert("einstellung_id".into(), json!(a.einstellung_id));
+    wert.insert("nummer".into(), json!(nummer));
+    wert.insert("art".into(), json!("take"));
+    wert.insert("herkunft".into(), json!("ingest"));
+    wert.insert("start_zeit".into(), json!(zeit(start_zeit.unwrap_or(jetzt))));
+    if let (Some(s), Some(d)) = (start_zeit, dauer_ms) {
+        wert.insert("end_zeit".into(), json!(zeit(s + chrono::Duration::milliseconds(d))));
+    }
+    if let Some(tc) = &start_tc {
+        wert.insert("start_tc".into(), json!(tc));
+    }
+    if let Some(tc) = angaben.and_then(|c| c.end_tc.clone()) {
+        wert.insert("end_tc".into(), json!(tc));
+    }
+    if let Some(f) = fps {
+        wert.insert("fps".into(), json!(f));
+    }
+    let name = a.clipdatei.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| a.clip.clone());
+    wert.insert("clip_name".into(), json!(name.chars().take(100).collect::<String>()));
+    wert.insert("kamera".into(), kamera(werte));
+    wert.insert("bewertung".into(), json!(""));
+    wert.insert("notiz".into(), json!(""));
+    wert.insert("erstellt_am".into(), json!(zeit(jetzt)));
+    json!({
+        "id": aenderung_id,
+        "tabelle": "studio_take",
+        "datensatz": take_id,
+        "feld": "_anlegen",
+        "wert": Value::Object(wert),
+        "zeit": jetzt.timestamp_micros(),
+    })
+}
+
 /// Clipname, wie der Ingest ihn an einen Take schreibt: ohne Endung, gross, ohne Leerzeichen, höchstens 100 Zeichen.
 pub fn clip_name(clip: &str) -> String {
     ingest_kern::soll::ohne_endung(clip).to_uppercase().replace(' ', "").chars().take(100).collect()
@@ -290,6 +363,62 @@ mod tests {
             assert!(t.get(leer).is_none(), "{leer} nicht senden");
         }
         crate::plate::aenderungen_pruefen(&json!({ "p_aenderungen": [v] })).unwrap();
+    }
+
+    #[test]
+    fn studio_take_nach_den_regeln_des_plate_assistant() {
+        let a = StudioAnfrage {
+            einstellung_id: "E6".into(),
+            dreh_id: "dreh-x-studio".into(),
+            drehtag: Some("2026-10-19".into()),
+            clip: "A013C019_120101_R132".into(),
+            clipdatei: PathBuf::from(
+                "/Volumes/NAS/X/2026-10-19_STUDIO/01_KAMERA/A013R132/A013R132/A013C019_120101_R132.mxf",
+            ),
+            dateien: vec![],
+            aufnehmen: None,
+        };
+        let angaben = ingest_kern::clip::ClipAngaben {
+            start_tc: Some("17:50:00:00".into()),
+            end_tc: Some("17:50:10:00".into()),
+            fps: Some(25.0),
+            bilder: Some(250),
+            bildrate: None,
+            codec: None,
+            aufloesung_px: None,
+        };
+        let mut w = std::collections::BTreeMap::new();
+        w.insert("ei".into(), "800".into());
+        w.insert("nd".into(), "ND 1.2".into());
+        let jetzt = "2026-10-19T20:00:00Z".parse().unwrap();
+        let v = studio_take_aenderung(&a, "01STUDIOTAKE", 4, Some(&angaben), &w, jetzt, "X".into());
+        let t = &v["wert"];
+        assert_eq!((v["tabelle"].as_str(), v["feld"].as_str()), (Some("studio_take"), Some("_anlegen")));
+        assert_eq!(
+            (t["nummer"].as_i64(), t["art"].as_str(), t["herkunft"].as_str()),
+            (Some(4), Some("take"), Some("ingest"))
+        );
+        assert_eq!(t["clip_name"], "A013C019_120101_R132.mxf", "wie die Stage: Dateiname mit Endung");
+        assert_eq!(t["start_zeit"], "2026-10-19T15:50:00.000Z", "Tageszeit-TC in Ortszeit (Sommerzeit) → UTC");
+        assert_eq!(t["kamera"]["iso"], json!(800.0));
+        assert_eq!((t["kamera"]["nd"].as_str(), t["kamera"]["quelle"].as_str()), (Some("ND 1.2"), Some("ale")));
+        assert!(t.get("tc_quelle").is_none() && t.get("geloescht").is_none());
+        crate::plate::aenderungen_pruefen(&json!({ "p_aenderungen": [v] })).unwrap();
+        // Die Sperre: nie ohne herkunft „ingest“, nie mit fremden Feldern, Nummer danach nie.
+        for (feld, wert) in [
+            ("_anlegen", json!({ "einstellung_id": "E6", "art": "take", "herkunft": "" })),
+            ("_anlegen", json!({ "einstellung_id": "E6", "art": "take", "herkunft": "ingest", "nullpunkt": {} })),
+            ("nummer", json!(5)),
+            ("geloescht", json!(false)),
+            ("art", json!("plate")),
+        ] {
+            let a = json!({ "p_aenderungen": [{ "id": "X", "tabelle": "studio_take", "datensatz": "T", "feld": feld, "wert": wert }] });
+            assert!(crate::plate::aenderungen_pruefen(&a).is_err(), "{feld} = {wert}");
+        }
+        for (feld, wert) in [("art", json!("cleanplate")), ("geloescht", json!(true)), ("bewertung", json!("gut"))] {
+            let a = json!({ "p_aenderungen": [{ "id": "X", "tabelle": "studio_take", "datensatz": "T", "feld": feld, "wert": wert }] });
+            crate::plate::aenderungen_pruefen(&a).unwrap_or_else(|e| panic!("{feld}: {e}"));
+        }
     }
 
     /// Wie Predigerhof Plate 6 Take 7 (17.10.2026, Seriennummer erfunden): Take aus einem Clip mit Blende „0“ und ND als

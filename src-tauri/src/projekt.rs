@@ -1990,7 +1990,10 @@ fn studio_einhaengen(drehs: &mut Value, studio: &Value) {
             .flatten()
             .map(|t| {
                 let mut t = t.clone();
-                t["art"] = Value::from("take");
+                // Art seit 0032 am Studio-Take (Standard take); ältere Spiegel ohne das Feld.
+                if t["art"].as_str().is_none_or(str::is_empty) {
+                    t["art"] = Value::from("take");
+                }
                 t["studio"] = Value::from(true);
                 t
             })
@@ -1998,7 +2001,7 @@ fn studio_einhaengen(drehs: &mut Value, studio: &Value) {
         let plate = serde_json::json!({
             "id": e["id"], "nummer": e["nummer"], "name": e["titel"], "art": "studio", "studio_name": e["name"],
             "szene": "", "buchstabe": e["buchstabe"], "notiz": e["notiz"], "geloescht": false,
-            "foto": [], "take": takes,
+            "foto": e["foto"].as_array().cloned().unwrap_or_default(), "take": takes,
         });
         let dreh_id = e["dreh_id"].as_str().unwrap_or("studio").to_owned();
         let liste = drehs.as_array_mut().expect("Liste");

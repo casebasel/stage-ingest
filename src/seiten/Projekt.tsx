@@ -152,6 +152,8 @@ type ArtAendern = {
   laeuft: boolean;
   takeArt: (t: TakeStand, art: string) => Promise<void>;
   einstellungArt: (dreh: DrehStand, p: PlateStand, art: string) => Promise<void>;
+  /** Einen vom Ingest angelegten Studio-Take (herkunft „ingest“) wieder weich löschen. */
+  studioLoeschen: (t: TakeStand) => Promise<void>;
 };
 const ArtKontext = createContext<ArtAendern | null>(null);
 
@@ -165,7 +167,13 @@ function TakeArt({ t }: { t: TakeStand }) {
       aria-label={`Art Take ${t.nummer}`}
       value={ART_WAHL.includes(t.art) ? t.art : "take"}
       disabled={!k.darf || k.laeuft}
-      title={k.darf ? "Art ändern: im Plate Assistant und in 02_PLATES" : "Braucht die Verbindung zum Plate Assistant"}
+      title={
+        !k.darf
+          ? "Braucht die Verbindung zum Plate Assistant"
+          : t.studio
+            ? "Art ändern: in der gemeinsamen Datenbank, die Stage übernimmt sie"
+            : "Art ändern: im Plate Assistant und in 02_PLATES"
+      }
       onClick={(ev) => ev.stopPropagation()}
       onDoubleClick={(ev) => ev.stopPropagation()}
       onChange={(ev) => void k.takeArt(t, ev.target.value)}
@@ -320,9 +328,13 @@ function StudioBewertung({ t }: { t: TakeStand }) {
       setFehler(String(e));
     }
   };
+  // Seit 0032: Art am Studio-Take änderbar; einen vom Ingest angelegten Take darf er wieder löschen.
+  const k = useContext(ArtKontext);
+  const vomIngest = t.werte?.["take.herkunft"] === "ingest";
   return (
     <span className="ohne-umbruch" onClick={(ev) => ev.stopPropagation()}>
-      <span className="leise">Studio · </span>
+      <TakeArt t={t} />
+      <span className="leise"> · </span>
       <select
         className="bewertung-wahl"
         aria-label={`Bewertung Take ${t.nummer}`}
@@ -337,6 +349,16 @@ function StudioBewertung({ t }: { t: TakeStand }) {
         <option value="schlecht">Schlecht</option>
       </select>
       {fehler && <span className="baum-warn"> nicht gespeichert</span>}
+      {vomIngest && k && (
+        <button
+          className="knopf knopf-klein"
+          disabled={!k.darf || k.laeuft}
+          title="Vom Ingest angelegter Take: wieder löschen (weich); der Clip steht dann wieder unter „Zu klären“"
+          onClick={() => void k.studioLoeschen(t)}
+        >
+          Löschen
+        </button>
+      )}
     </span>
   );
 }
@@ -526,21 +548,21 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
       // zugeordnet). Im Hintergrund, je Take höchstens eines (Marlon, 17.10.2026).
       const art = e.artCmd.trim();
       if (verbunden && art && !lauf.laeuft) {
+        // Studio-Takes seit 0032 ebenfalls (Foto mit `studio_take_id`, Marlon 19.10.2026).
         const takes = neu.drehs.flatMap((d) =>
-          d.plates
-            .filter((pl) => pl.art !== "studio")
-            .flatMap((pl) =>
-              pl.takes
-                .filter((t) => !t.studio && (t.freigegeben || t.ungeprueft) && t.datei)
-                .filter((t) => !pl.fotos.some((f) => f.takeId === t.id && f.art === "vorschau" && f.quelle === "clip"))
-                .map((t) => ({
-                  takeId: t.id,
-                  plateId: pl.id,
-                  drehId: d.id,
-                  datei: t.datei!,
-                  klappe: typeof t.werte?.["take.start_zeit"] === "string" ? (t.werte["take.start_zeit"] as string) : null,
-                })),
-            ),
+          d.plates.flatMap((pl) =>
+            pl.takes
+              .filter((t) => (t.freigegeben || t.ungeprueft) && t.datei)
+              .filter((t) => !pl.fotos.some((f) => f.takeId === t.id && f.art === "vorschau" && f.quelle === "clip"))
+              .map((t) => ({
+                takeId: t.id,
+                plateId: pl.id,
+                drehId: d.id,
+                studio: !!t.studio,
+                datei: t.datei!,
+                klappe: typeof t.werte?.["take.start_zeit"] === "string" ? (t.werte["take.start_zeit"] as string) : null,
+              })),
+          ),
         );
         if (takes.length)
           invoke("mittelbilder_nachholen", { zugang: konto.zugang, artCmd: art, takes }).catch(() => {});
@@ -634,10 +656,15 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
     const alt = ART_WAHL.includes(t.art) ? t.art : "take";
     if (!o || !projekt || art === alt) return;
     const titel = `${plateTitel(o.plate)} · Take ${t.nummer}`;
-    const ja = await ask(
-      `${titel} von „${ART[alt]}“ zu „${ART[art]}“ ändern?\n\nDie Art ändert sich im Plate Assistant (für alle iPhones und die Stage) und in 02_PLATES dieses Drehorts auf allen verbundenen Zielen. Die Bewertung bleibt.`,
-      { title: "Art ändern", kind: "info", okLabel: "Ändern", cancelLabel: "Abbrechen" },
-    );
+    const folge = t.studio
+      ? "Die Art ändert sich in der gemeinsamen Datenbank; die Stage übernimmt sie in ihre Takes. Die Bewertung bleibt."
+      : "Die Art ändert sich im Plate Assistant (für alle iPhones und die Stage) und in 02_PLATES dieses Drehorts auf allen verbundenen Zielen. Die Bewertung bleibt.";
+    const ja = await ask(`${titel} von „${ART[alt]}“ zu „${ART[art]}“ ändern?\n\n${folge}`, {
+      title: "Art ändern",
+      kind: "info",
+      okLabel: "Ändern",
+      cancelLabel: "Abbrechen",
+    });
     if (!ja) return;
     setArtLaeuft(true);
     try {
@@ -648,6 +675,7 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
         dreh: drehFuer(o.dreh),
         takeId: t.id,
         art,
+        studio: !!t.studio,
       });
       artErgebnis(r, `${titel} ist jetzt ${ART[art]}`);
       await laden(projekt);
@@ -689,10 +717,32 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
       setArtLaeuft(false);
     }
   }
+  async function studioLoeschen(t: TakeStand) {
+    const o = artOrt.get(t.id);
+    if (!o || !projekt) return;
+    const titel = `${plateTitel(o.plate)} · Take ${t.nummer}`;
+    const ja = await ask(
+      `${titel} löschen?\n\nDer Take wurde vom Ingest aus dem Clip ${t.clip || ""} angelegt. Er wird in der gemeinsamen Datenbank weich gelöscht (die Stage übernimmt das), der Clip steht wieder unter „Zu klären“. Die Clipdatei bleibt.`,
+      { title: "Studio-Take löschen", kind: "warning", okLabel: "Löschen", cancelLabel: "Abbrechen" },
+    );
+    if (!ja) return;
+    setArtLaeuft(true);
+    try {
+      const dateien = (u?.karten ?? []).filter((k) => t.karte && k.inhalt.karte === t.karte).map((k) => k.datei);
+      await invoke("studio_take_loeschen", { zugang: konto.zugang, takeId: t.id, clip: t.clip || null, dateien });
+      setNachgetragen({ ton: "ok", text: `${titel} gelöscht` });
+      await laden(projekt);
+    } catch (x) {
+      setNachgetragen({ ton: "fehler", text: `${titel}: ${String(x)}` });
+    } finally {
+      setArtLaeuft(false);
+    }
+  }
   const artAendern: ArtAendern = {
     ort: artOrt,
     darf: verbunden && !!projekt?.id && !lauf.laeuft,
     laeuft: artLaeuft,
+    studioLoeschen,
     takeArt,
     einstellungArt,
   };
@@ -1649,19 +1699,37 @@ function ZuKlaeren({
     try {
       if (w.take.startsWith("neu:")) {
         const dreh = u.drehs.find((d) => d.id === w.dreh);
-        await invoke("take_aus_clip", {
-          zugang,
-          anfrage: {
-            plateId: w.take.slice(4),
-            drehId: w.dreh,
-            drehtag: dreh?.datum || null,
-            clip: c.clip,
-            clipdatei: c.clipdateien![0],
-            dateien: c.dateien,
-            aufnehmen: c.ohnePruefung ? (c.pfad ?? null) : null,
-          },
-        });
-        setStand((s) => ({ ...s, [schluessel]: { ton: "ok", text: "Take angelegt und zugeordnet" } }));
+        const ziel = dreh?.plates.find((p) => p.id === w.take.slice(4));
+        // Studio-Einstellung der Stage (0032/0033): Studio-Take mit Herkunft „ingest“, die Stage übernimmt ihn.
+        if (ziel?.art === "studio") {
+          await invoke("studio_take_aus_clip", {
+            zugang,
+            anfrage: {
+              einstellungId: ziel.id,
+              drehId: w.dreh,
+              drehtag: dreh?.datum || null,
+              clip: c.clip,
+              clipdatei: c.clipdateien![0],
+              dateien: c.dateien,
+              aufnehmen: c.ohnePruefung ? (c.pfad ?? null) : null,
+            },
+          });
+          setStand((s) => ({ ...s, [schluessel]: { ton: "ok", text: "Studio-Take angelegt und zugeordnet; die Stage übernimmt ihn" } }));
+        } else {
+          await invoke("take_aus_clip", {
+            zugang,
+            anfrage: {
+              plateId: w.take.slice(4),
+              drehId: w.dreh,
+              drehtag: dreh?.datum || null,
+              clip: c.clip,
+              clipdatei: c.clipdateien![0],
+              dateien: c.dateien,
+              aufnehmen: c.ohnePruefung ? (c.pfad ?? null) : null,
+            },
+          });
+          setStand((s) => ({ ...s, [schluessel]: { ton: "ok", text: "Take angelegt und zugeordnet" } }));
+        }
       } else {
         // Bestehender Take ohne von der Kamera bestätigten Clip: den Clip von der Karte auch am Take eintragen (Marlon,
         // 16.10.2026); ein früher von Hand geschriebener Name wird dabei ersetzt.

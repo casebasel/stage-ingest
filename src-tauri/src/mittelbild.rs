@@ -21,6 +21,8 @@ pub struct Auftrag {
     pub take_id: String,
     pub plate_id: String,
     pub dreh_id: String,
+    /// Studio-Take der Stage (0032): Foto mit `studio_take_id`, Pfad unter dem Drehort STUDIO.
+    pub studio: bool,
     pub datei: PathBuf,
     /// Pfad des Clips relativ zum Projektordner (Pfadregel), ohne `#bild`.
     pub original: String,
@@ -129,7 +131,7 @@ pub fn dateien_ablegen(art: &Path, cache: &Path, auftraege: &[DateiAuftrag]) -> 
 }
 
 fn eins(p: &Plate, z: &Zugang, art: &Path, cache: &Path, a: &Auftrag) -> Result<(), String> {
-    if p.mittelbild_vorhanden(z, &a.take_id)? {
+    if p.mittelbild_vorhanden(z, &a.take_id, a.studio)? {
         return Ok(());
     }
     let Gerendert { daten, breite, hoehe, mitte, fps } = rendern(art, cache, &a.datei)?;
@@ -146,13 +148,15 @@ fn eins(p: &Plate, z: &Zugang, art: &Path, cache: &Path, a: &Auftrag) -> Result<
     let halb = fps.filter(|f| *f > 0.0).map(|f| (mitte as f64 / f * 1000.0) as i64).unwrap_or(0);
     let zeit = a.klappe.map(|k| k + chrono::Duration::milliseconds(halb)).unwrap_or_else(Utc::now);
     let foto_id = crate::plate::ulid_aehnlich();
-    let pfad = format!("{}/{foto_id}.jpg", a.plate_id);
+    // Plate: `<plate_id>/<foto_id>.jpg`; Studio: `<dreh_id>/<foto_id>.jpg` (Regel für Fotos ohne Plate, 0032).
+    let pfad = format!("{}/{foto_id}.jpg", if a.studio { &a.dreh_id } else { &a.plate_id });
     let original = format!("{}#bild={mitte}", a.original);
     let m = crate::karte_db::Mittelbild {
         foto_id: &foto_id,
         dreh_id: &a.dreh_id,
         plate_id: &a.plate_id,
         take_id: &a.take_id,
+        studio: a.studio,
         pfad: &pfad,
         zeit,
         breite,
@@ -206,6 +210,7 @@ pub fn auftrag(
     take_id: String,
     plate_id: String,
     dreh_id: String,
+    studio: bool,
     datei: PathBuf,
     klappe: Option<DateTime<Utc>>,
 ) -> Auftrag {
@@ -228,7 +233,7 @@ pub fn auftrag(
         }
         None => datei.display().to_string(),
     };
-    Auftrag { take_id, plate_id, dreh_id, datei, original, klappe }
+    Auftrag { take_id, plate_id, dreh_id, studio, datei, original, klappe }
 }
 
 #[cfg(test)]
@@ -253,6 +258,7 @@ mod tests {
             "T".into(),
             "P".into(),
             "D".into(),
+            false,
             PathBuf::from("/Volumes/Footage/ingest/HAPPY_END_TEST/2026-10-16_PREDIGERHOF/01_KAMERA/A010R132/A010R132/A010C005_120101_R132.mxf"),
             None,
         );
