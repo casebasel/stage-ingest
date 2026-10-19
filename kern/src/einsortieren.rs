@@ -126,9 +126,13 @@ pub fn verschieben(
         nach_dreh.join(METADATEN).join(format!("{name}.ale")),
     );
     for c in &inhalt.clips {
-        let csv = format!("{}.csv", crate::soll::ohne_endung(&c.pfad));
-        if !c.pfad.is_empty() {
-            mitnehmen(von_dreh.join(METADATEN).join(&csv), nach_dreh.join(METADATEN).join(&csv));
+        if c.pfad.is_empty() {
+            continue;
+        }
+        // ART-CMD-Tabelle und Mittelbild des Clips wandern mit.
+        for endung in ["csv", "jpg"] {
+            let name = format!("{}.{endung}", crate::soll::ohne_endung(&c.pfad));
+            mitnehmen(von_dreh.join(METADATEN).join(&name), nach_dreh.join(METADATEN).join(&name));
         }
     }
 

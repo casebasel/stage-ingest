@@ -1420,19 +1420,33 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
         _ => None,
     };
 
-    // Mittelbild je Take für das iPhone (0029, foto.quelle = clip): nur Takes des Plate Assistant (nie Studio), mit ART
-    // CMD und erfolgreich geschriebener Karte; im Hintergrund, das Ergebnis wartet nicht darauf.
-    if let (Some(z), Some(pp), Some(art), Some(erstes), Some(Ok(_)), Ok(cache)) = (
-        &auftrag.plate_zugang,
-        &auftrag.plate_projekt,
-        &auftrag.art_cmd,
-        urteile.iter().find(|u| u.gut()),
-        datenbank.as_ref(),
-        app.path().app_cache_dir(),
-    ) {
+    // Mittelbild je Take (ART CMD, im Hintergrund, das Ergebnis wartet nicht darauf): neben die Metadaten jeder guten
+    // Kopie (`05_METADATEN/<Clip>.jpg`, Studio wie Plate; Marlon, 19.10.2026), für Takes des Plate Assistant zusätzlich
+    // in die Datenbank (0029, foto.quelle = clip), wenn die Karte dort geschrieben ist.
+    if let (Some(art), Some(erstes), Ok(cache)) =
+        (&auftrag.art_cmd, urteile.iter().find(|u| u.gut()), app.path().app_cache_dir())
+    {
+        let gute: Vec<PathBuf> = urteile.iter().filter(|u| u.gut()).map(|u| u.ordner.clone()).collect();
+        let mit_take: Vec<(String, String)> = clips
+            .iter()
+            .filter_map(|c| take_von.get(soll::ohne_endung(&c.pfad)).map(|(t, _)| (t.clone(), c.pfad.clone())))
+            .collect();
+        let dateien: Vec<mittelbild::DateiAuftrag> = mittelbild::je_take_ein_clip(mit_take)
+            .into_iter()
+            .map(|(_, pfad)| mittelbild::DateiAuftrag {
+                datei: erstes.ordner.join(&pfad),
+                kopien: gute.iter().map(|g| g.join(&pfad)).collect(),
+            })
+            .collect();
         let plate = Arc::clone(&app.state::<Arc<plate::Plate>>());
-        let take_plate =
-            plate.drehs_mit_plan(z, &pp.id, None).map(|v| zuordnung::take_zu_plate(&v)).unwrap_or_default();
+        let datenbank_zugang = match (&auftrag.plate_zugang, &auftrag.plate_projekt, datenbank.as_ref()) {
+            (Some(z), Some(pp), Some(Ok(_))) => Some((z, pp)),
+            _ => None,
+        };
+        let take_plate = datenbank_zugang
+            .and_then(|(z, pp)| plate.drehs_mit_plan(z, &pp.id, None).ok())
+            .map(|v| zuordnung::take_zu_plate(&v))
+            .unwrap_or_default();
         let paare: Vec<(String, String)> = clips
             .iter()
             .filter_map(|c| {
@@ -1467,7 +1481,8 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
                 })
             })
             .collect();
-        mittelbild::im_hintergrund(plate, z.clone(), art.clone(), cache, auftraege);
+        let datenbank = datenbank_zugang.map(|(z, _)| (plate, z.clone()));
+        mittelbild::im_hintergrund(datenbank, art.clone(), cache, dateien, auftraege);
     }
 
     // Zusammenfassung der Karte neben den Bericht, auf jedes gute Ziel (für die Projektübersicht).
@@ -2753,8 +2768,50 @@ fn mittelbilder_nachholen(
             mittelbild::auftrag(t.take_id, t.plate_id, t.dreh_id, t.datei, klappe)
         })
         .collect();
-    mittelbild::im_hintergrund(Arc::clone(&plate), zugang, art_cmd, cache, auftraege);
+    mittelbild::im_hintergrund(Some((Arc::clone(&plate), zugang)), art_cmd, cache, vec![], auftraege);
     Ok(())
+}
+
+/// Ein Take ohne Mittelbild neben den Metadaten: derselbe Clip auf allen erreichbaren Kopien.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OhneMittelbildDatei {
+    kopien: Vec<PathBuf>,
+}
+
+/// Mittelbilder neben die Metadaten nachholen (`05_METADATEN/<Clip>.jpg`; Marlon, 19.10.2026: auch Studio-Takes), für
+/// Takes mit erreichbarem Clip ohne Bild; gerendert wird aus der ersten erreichbaren Kopie. Gibt die Zahl der neuen
+/// Bilder zurück, wenn alle fertig sind (die Projektseite lädt dann neu).
+#[tauri::command]
+async fn mittelbilder_ablegen(
+    app: AppHandle,
+    art_cmd: PathBuf,
+    takes: Vec<OhneMittelbildDatei>,
+) -> Result<usize, String> {
+    let cache = app.path().app_cache_dir().map_err(|e| e.to_string())?;
+    let auftraege: Vec<mittelbild::DateiAuftrag> = takes
+        .into_iter()
+        .filter_map(|t| {
+            let datei = t.kopien.iter().find(|k| k.exists())?.clone();
+            Some(mittelbild::DateiAuftrag { datei, kopien: t.kopien })
+        })
+        .collect();
+    im_hintergrund(move || Ok(mittelbild::dateien_ablegen(&art_cmd, &cache, &auftraege))).await
+}
+
+/// Ein Bild von der Platte als JPEG-Daten-URL (Mittelbild neben den Metadaten), höchstens 8 MB.
+#[tauri::command]
+async fn bild_datei(pfad: PathBuf) -> Result<String, String> {
+    use base64::Engine;
+    im_hintergrund(move || {
+        let m = std::fs::metadata(&pfad).map_err(|e| e.to_string())?;
+        if m.len() > 8 * 1024 * 1024 {
+            return Err("Bild zu gross".into());
+        }
+        let b = std::fs::read(&pfad).map_err(|e| e.to_string())?;
+        Ok(format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(b)))
+    })
+    .await
 }
 
 /// Projektübersicht: Plan aus dem Plate Assistant und eingelesene Karten auf den Zielordnern.
@@ -3135,6 +3192,8 @@ pub fn run() {
             im_art_viewer,
             arriraw_oeffnen,
             mittelbilder_nachholen,
+            mittelbilder_ablegen,
+            bild_datei,
             art_viewer_installieren,
             abbrechen,
             laeuft,

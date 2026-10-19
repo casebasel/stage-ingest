@@ -395,6 +395,12 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
     await warte(2500);
     return { pfad: "/Volumes/NAS/Footage/HAPPY_END/2026-10-28_RHEINUFER/06_EXPORT/ProRes_HQ_709Look/A001C002_261028_R131_709Look_HQ.mov", hinweis: null };
   },
+  mittelbilder_ablegen: async () => 0,
+  bild_datei: async (a) => {
+    const n = String(a.pfad).length;
+    const farbe = ["#3a4250", "#6b5a3e", "#2f3d33", "#4a3550", "#35504a"][n % 5];
+    return `data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="480" height="270"><rect width="480" height="270" fill="${farbe}"/><rect x="${120 + (n % 5) * 40}" y="90" width="120" height="90" fill="#c8b48a"/></svg>`)}`;
+  },
   clip_mittelbild: async (a) => {
     await warte(150);
     const n = String(a.datei).length;
@@ -471,7 +477,7 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
         id: "d3", name: "Studio", kurzname: "STUDIO", datum: "", karten: [], hdri: [],
         plates: [
           { id: "e1", nummer: 1, slate: "STUDIO-01", name: "Fenster Küche", art: "studio", szene: "", fotos: [], hdri: [],
-            takes: [1, 2].map((n) => ({ id: `s${n}`, nummer: n, art: "take", bewertung: n === 1 ? "gut" : "", clip: `A007C00${n}_261010_R11A`, karte: null, freigegeben: false, studio: true, werte: { "take.notiz": n === 1 ? "Licht zu warm" : "" } })) },
+            takes: [1, 2].map((n) => ({ id: `s${n}`, nummer: n, art: "take", bewertung: n === 1 ? "gut" : "", clip: `A007C00${n}_261010_R11A`, karte: null, freigegeben: false, studio: true, mittelbild: n === 1 ? `/Volumes/NAS/Footage/HAPPY_END/2026-10-10_STUDIO/05_METADATEN/A007C00${n}_261010_R11A.jpg` : null, werte: { "take.notiz": n === 1 ? "Licht zu warm" : "" } })) },
         ],
       },
     ],

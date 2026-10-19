@@ -441,6 +441,7 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
   const zuordnungVersucht = useRef(new Set<string>());
   const ausClipVersucht = useRef(new Set<string>());
   const technikVersucht = useRef(new Set<string>());
+  const mittelbilderVersucht = useRef(new Set<string>());
   async function laden(p: ProjektT) {
     setLaedt(true);
     setFehler(null);
@@ -531,6 +532,25 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
         );
         if (takes.length)
           invoke("mittelbilder_nachholen", { zugang: konto.zugang, artCmd: art, takes }).catch(() => {});
+      }
+      // Mittelbilder neben die Metadaten (Studio wie Plate; Marlon, 19.10.2026): für Takes mit erreichbarem Clip ohne
+      // Bild, je Sitzung und Projekt einmal; danach neu laden, damit sie unter „Fotos“ erscheinen.
+      if (art && !lauf.laeuft && !mittelbilderVersucht.current.has(p.id)) {
+        const ohne = neu.drehs.flatMap((d) =>
+          d.plates.flatMap((pl) =>
+            pl.takes
+              .filter((t) => t.datei && !t.mittelbild && (t.studio || t.freigegeben || t.ungeprueft))
+              .map((t) => ({ kopien: t.dateien?.length ? t.dateien : [t.datei!] })),
+          ),
+        );
+        if (ohne.length) {
+          mittelbilderVersucht.current.add(p.id);
+          invoke<number>("mittelbilder_ablegen", { artCmd: art, takes: ohne })
+            .then((n) => {
+              if (n > 0 && !lauf.laeuft) void laden(p);
+            })
+            .catch(() => {});
+        }
       }
     } catch (err) {
       setFehler(String(err));
@@ -1270,6 +1290,12 @@ const hdriTon = (h: HdriStand) => {
 function PlateDetail({ dreh, p, drehWaehlen }: { dreh: DrehStand; p: PlateStand; drehWaehlen: () => void }) {
   const [gross, setGross] = useState<number | null>(null);
   const sp = useTakeSpalten(GRUNDSPALTEN, p.takes);
+  // Mittelbilder neben den Metadaten (`05_METADATEN/<Clip>.jpg`), Studio wie Plate: als Kachel wie ein Foto, für Takes
+  // ohne Mittelbild aus der Datenbank (Studio-Takes haben dort nie eines).
+  const mitten: FotoStand[] = p.takes
+    .filter((t) => t.mittelbild && !p.fotos.some((f) => f.takeId === t.id && f.art === "vorschau" && f.quelle === "clip"))
+    .map((t) => ({ id: `mitte-${t.id}`, art: "vorschau", pfad: "", takeId: t.id, quelle: "clip" }));
+  const fotos = [...p.fotos, ...mitten];
   const spalten = [GRUNDSPALTEN[0], ABSPIELEN, ...sp.sichtbar.filter((x) => x.id !== "take")];
   return (
     <>
@@ -1282,10 +1308,10 @@ function PlateDetail({ dreh, p, drehWaehlen }: { dreh: DrehStand; p: PlateStand;
           {dreh.name} · {datumKurz(dreh.datum)}
         </button>
       </div>
-      <h3 className="detail-titel">Fotos ({p.fotos.length})</h3>
-      {p.fotos.length ? (
+      <h3 className="detail-titel">Fotos ({fotos.length})</h3>
+      {fotos.length ? (
         <ul className="foto-raster">
-          {p.fotos.map((f, i) => (
+          {fotos.map((f, i) => (
             <li key={f.id}>
               <button className="foto-knopf" onClick={() => setGross(i)} aria-label={`Foto ${i + 1} gross anzeigen`}>
                 <FotoOderMitte f={f} takes={p.takes} breite={320} />
@@ -1335,7 +1361,7 @@ function PlateDetail({ dreh, p, drehWaehlen }: { dreh: DrehStand; p: PlateStand;
       ) : (
         <p className="leer-zeile">Noch keine Takes.</p>
       )}
-      {gross !== null && <Grossbild fotos={p.fotos} index={gross} setIndex={setGross} takes={p.takes} />}
+      {gross !== null && <Grossbild fotos={fotos} index={gross} setIndex={setGross} takes={p.takes} />}
     </>
   );
 }
@@ -1400,6 +1426,18 @@ function MittelbildKlein({ datei }: { datei: string }) {
 /** Standbild eines Takes (`art = vorschau`, vom iPhone per CAP nach dem Stopp geholt, oft nichtssagend): Ist die
  *  Kopie des Clips erreichbar, zeigt die App stattdessen das Bild aus der Mitte des Clips (Marlon, 14.10.2026); bis es
  *  da ist und falls es fehlt, das Standbild. Andere Fotos unverändert. */
+// Bilder von der Platte (Mittelbild neben den Metadaten), je Pfad einmal geladen.
+const bilderGemerkt = new Map<string, Promise<string>>();
+function bildDatei(pfad: string): Promise<string> {
+  let p = bilderGemerkt.get(pfad);
+  if (!p) {
+    p = invoke<string>("bild_datei", { pfad });
+    bilderGemerkt.set(pfad, p);
+    p.catch(() => bilderGemerkt.delete(pfad));
+  }
+  return p;
+}
+
 function FotoOderMitte({ f, takes, breite }: { f: FotoStand; takes: TakeStand[]; breite: number }) {
   const artCmd = useEinstellungen().artCmd.trim();
   const t = f.art === "vorschau" && f.takeId ? takes.find((x) => x.id === f.takeId) : undefined;
@@ -1407,14 +1445,19 @@ function FotoOderMitte({ f, takes, breite }: { f: FotoStand; takes: TakeStand[];
   useEffect(() => {
     let aus = false;
     setMitte(null);
-    if (t?.datei)
+    // Zuerst das abgelegte Mittelbild (auch ohne ART CMD auf diesem Rechner), sonst aus der Clipdatei gerendert.
+    if (t?.mittelbild)
+      bildDatei(t.mittelbild)
+        .then((b) => !aus && setMitte(b))
+        .catch(() => {});
+    else if (t?.datei)
       vorschauLaden(t.datei, artCmd)
         .then((b) => !aus && setMitte(b.length >= 3 ? b[1] : (b[0] ?? null)))
         .catch(() => {});
     return () => {
       aus = true;
     };
-  }, [t?.datei, artCmd]);
+  }, [t?.datei, t?.mittelbild, artCmd]);
   if (mitte) return <img src={mitte} alt={`Take ${t?.nummer}: Bild aus der Mitte des Clips`} loading="lazy" />;
   return <Vorschau bucket="fotos" pfad={f.pfad} breite={breite} alt={FOTO[f.art] ?? (f.art || "Bild")} />;
 }

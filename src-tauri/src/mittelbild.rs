@@ -1,7 +1,10 @@
 //! Mittelbild je Take (Marlon, 14.10.2026: „das Endframe ist nicht gut“; abgestimmt mit dem Plate Assistant, 0029):
-//! Nach dem Einlesen rendert ART CMD das Bild aus der Mitte des Clips (A-Kamera) in 1280 px, die App lädt es in den
-//! Bucket `fotos` und legt ein `foto` mit `quelle = clip` an. Das iPhone zeigt es dann im Take-Blatt vor dem Standbild
-//! nach dem Stopp. Läuft im Hintergrund nach dem Einlesen; ein Fehler kostet nur das Bild.
+//! Nach dem Einlesen rendert ART CMD das Bild aus der Mitte des Clips (A-Kamera) in 1280 px. Es liegt als
+//! `05_METADATEN/<Clip>.jpg` neben den Metadaten jeder guten Kopie (Marlon, 19.10.2026: „ein Frame-Capture, auch bei
+//! Aufnahmen im Studio“; Studio-Takes haben keine Plate in der Datenbank, ihr Bild gibt es nur dort). Für Takes des
+//! Plate Assistant lädt die App es zusätzlich in den Bucket `fotos` und legt ein `foto` mit `quelle = clip` an; das
+//! iPhone zeigt es im Take-Blatt vor dem Standbild nach dem Stopp. Läuft im Hintergrund nach dem Einlesen; ein Fehler
+//! kostet nur das Bild.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -52,20 +55,95 @@ fn jpeg(bild: image::DynamicImage) -> Result<(Vec<u8>, u32, u32), String> {
     Ok((aus, b, h))
 }
 
+/// Das Mittelbild neben den Metadaten der Kopie: `<Dreh>/05_METADATEN/<Clip>.jpg`. `None`, wenn der Clip in keinem
+/// Kartenordner (`01_KAMERA/<Karte>/…`) liegt.
+pub fn datei_pfad(clipdatei: &Path) -> Option<PathBuf> {
+    let kartenordner = clipdatei
+        .ancestors()
+        .find(|o| o.parent().and_then(Path::file_name).is_some_and(|n| n == ingest_kern::struktur::KAMERA))?;
+    let name = clipdatei.file_name()?.to_string_lossy().into_owned();
+    let stamm = ingest_kern::soll::ohne_endung(&name);
+    (!stamm.is_empty()).then(|| ingest_kern::struktur::metadatenordner(kartenordner).join(format!("{stamm}.jpg")))
+}
+
+/// Gerendertes Mittelbild: JPEG-Daten, Breite, Höhe, Nummer des mittleren Bilds, fps des Clips.
+struct Gerendert {
+    daten: Vec<u8>,
+    breite: u32,
+    hoehe: u32,
+    mitte: u64,
+    fps: Option<f64>,
+}
+
+/// Rendert das Bild aus der Mitte des Clips; liegt es schon als `05_METADATEN/<Clip>.jpg` neben der Kopie, nimmt es
+/// das (kein zweiter Lauf von ART CMD für die Datenbank).
+fn rendern(art: &Path, cache: &Path, datei: &Path) -> Result<Gerendert, String> {
+    let c = ingest_kern::clip::lesen(datei).map_err(|e| e.to_string())?;
+    let bilder = c.bilder.unwrap_or(1).max(1);
+    let mitte = bilder / 2;
+    if let Some(daten) = datei_pfad(datei).filter(|p| p.is_file()).and_then(|p| std::fs::read(p).ok()) {
+        if let Ok((breite, hoehe)) = image::load_from_memory(&daten).map(|b| (b.width(), b.height())) {
+            return Ok(Gerendert { daten, breite, hoehe, mitte, fps: c.fps });
+        }
+    }
+    let tmp = cache.join("mittelbild.tmp");
+    let bild = crate::vorschaubilder::art_cmd_bild(art, datei, mitte, BREITE, &tmp)?;
+    let (daten, breite, hoehe) = jpeg(bild)?;
+    Ok(Gerendert { daten, breite, hoehe, mitte, fps: c.fps })
+}
+
+/// Ein Clip mit Take, dessen Mittelbild neben die Metadaten jeder Kopie soll: `datei` zum Rendern, `kopien` derselbe
+/// Clip auf allen guten Zielen (die Datei selbst eingeschlossen).
+pub struct DateiAuftrag {
+    pub datei: PathBuf,
+    pub kopien: Vec<PathBuf>,
+}
+
+/// Legt Mittelbilder neben die Metadaten (nur wo sie fehlen), eines nach dem anderen; gibt die Zahl der neuen zurück.
+pub fn dateien_ablegen(art: &Path, cache: &Path, auftraege: &[DateiAuftrag]) -> usize {
+    let _eins_nach_dem_andern = ARBEIT.lock();
+    let mut neu = 0;
+    for a in auftraege {
+        let ziele: Vec<PathBuf> = a.kopien.iter().filter_map(|k| datei_pfad(k)).filter(|p| !p.is_file()).collect();
+        if ziele.is_empty() || !a.datei.exists() {
+            continue;
+        }
+        let g = match rendern(art, cache, &a.datei) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("Mittelbild {}: {e}", a.datei.display());
+                continue;
+            }
+        };
+        for z in ziele {
+            if let Some(o) = z.parent() {
+                let _ = std::fs::create_dir_all(o);
+            }
+            match ingest_kern::sicher_schreiben(&z, &g.daten) {
+                Ok(()) => neu += 1,
+                Err(e) => eprintln!("Mittelbild {}: {e}", z.display()),
+            }
+        }
+    }
+    neu
+}
+
 fn eins(p: &Plate, z: &Zugang, art: &Path, cache: &Path, a: &Auftrag) -> Result<(), String> {
     if p.mittelbild_vorhanden(z, &a.take_id)? {
         return Ok(());
     }
-    let c = ingest_kern::clip::lesen(&a.datei).map_err(|e| e.to_string())?;
-    let bilder = c.bilder.unwrap_or(1).max(1);
-    let mitte = bilder / 2;
-    let tmp = cache.join("mittelbild.tmp");
-    let bild = crate::vorschaubilder::art_cmd_bild(art, &a.datei, mitte, BREITE, &tmp)?;
-    let (daten, breite, hoehe) = jpeg(bild)?;
+    let Gerendert { daten, breite, hoehe, mitte, fps } = rendern(art, cache, &a.datei)?;
+    // Auch neben die Kopie, aus der gerendert wurde (Studio und Plate gleich).
+    if let Some(pfad) = datei_pfad(&a.datei).filter(|p| !p.is_file()) {
+        if let Some(o) = pfad.parent() {
+            let _ = std::fs::create_dir_all(o);
+        }
+        let _ = ingest_kern::sicher_schreiben(&pfad, &daten);
+    }
     let mut r = ingest_kern::pruefsumme::Rechner::neu(false);
     r.dazu(&daten);
     let xxh = r.fertig().xxh128_hex();
-    let halb = c.fps.filter(|f| *f > 0.0).map(|f| (mitte as f64 / f * 1000.0) as i64).unwrap_or(0);
+    let halb = fps.filter(|f| *f > 0.0).map(|f| (mitte as f64 / f * 1000.0) as i64).unwrap_or(0);
     let zeit = a.klappe.map(|k| k + chrono::Duration::milliseconds(halb)).unwrap_or_else(Utc::now);
     let foto_id = crate::plate::ulid_aehnlich();
     let pfad = format!("{}/{foto_id}.jpg", a.plate_id);
@@ -92,16 +170,25 @@ static ARBEIT: Mutex<()> = Mutex::new(());
 /// damit es je Take nur eines gibt.
 static ANSTEHEND: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
 
-/// Mittelbilder nacheinander im Hintergrund, je Take höchstens eines.
-pub fn im_hintergrund(p: Arc<Plate>, z: Zugang, art: PathBuf, cache: PathBuf, auftraege: Vec<Auftrag>) {
+/// Mittelbilder nacheinander im Hintergrund: erst neben die Metadaten jeder Kopie (`dateien`), dann für Takes des
+/// Plate Assistant in die Datenbank (`auftraege`, je Take höchstens eines; ohne Zugang entfällt das).
+pub fn im_hintergrund(
+    datenbank: Option<(Arc<Plate>, Zugang)>,
+    art: PathBuf,
+    cache: PathBuf,
+    dateien: Vec<DateiAuftrag>,
+    auftraege: Vec<Auftrag>,
+) {
     let neu: Vec<Auftrag> = {
         let Ok(mut anstehend) = ANSTEHEND.lock() else { return };
         auftraege.into_iter().filter(|a| anstehend.insert(a.take_id.clone())).collect()
     };
-    if neu.is_empty() {
+    if neu.is_empty() && dateien.is_empty() {
         return;
     }
     std::thread::spawn(move || {
+        dateien_ablegen(&art, &cache, &dateien);
+        let Some((p, z)) = datenbank else { return };
         let _eins_nach_dem_andern = ARBEIT.lock();
         for a in &neu {
             if let Err(e) = eins(&p, &z, &art, &cache, a) {
@@ -147,6 +234,18 @@ pub fn auftrag(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mittelbild_neben_den_metadaten() {
+        let clip = PathBuf::from(
+            "/Volumes/Footage/ingest/X/2026-10-19_STUDIO/01_KAMERA/A013R132/A013R132/A013C016_120101_R132.mxf",
+        );
+        assert_eq!(
+            datei_pfad(&clip),
+            Some(PathBuf::from("/Volumes/Footage/ingest/X/2026-10-19_STUDIO/05_METADATEN/A013C016_120101_R132.jpg"))
+        );
+        assert_eq!(datei_pfad(Path::new("/irgendwo/A013C016.mxf")), None, "kein Kartenordner");
+    }
 
     #[test]
     fn original_relativ_zum_projektordner() {

@@ -1142,6 +1142,8 @@ pub struct TakeStand {
     /// Alle erreichbaren Kopien der Clipdatei (NAS, Platten), für „Pfad kopieren“ per Rechtsklick (Marlon, 14.10.2026).
     pub dateien: Vec<PathBuf>,
     pub csv: Option<PathBuf>,
+    /// Mittelbild neben den Metadaten der Kopie (`05_METADATEN/<Clip>.jpg`), falls vorhanden.
+    pub mittelbild: Option<PathBuf>,
     /// Alle Werte der Clipdatei aus der gemeinsamen Datenbank (`clip.technik`, 0031), wie `take_technik` sie liefert:
     /// Ersatz, wenn die Datei hier nicht erreichbar ist.
     pub technik_db: Option<Value>,
@@ -1367,6 +1369,7 @@ struct Eingelesen {
     ungeprueft: bool,
     datei: Option<PathBuf>,
     csv: Option<PathBuf>,
+    mittelbild: Option<PathBuf>,
 }
 
 fn text(v: &Value) -> String {
@@ -1446,6 +1449,12 @@ pub fn zusammenfuehren(
                         .join(format!("{}.csv", ingest_kern::soll::ohne_endung(&c.pfad)))
                 })
                 .filter(|p| datei.is_some() && p.is_file());
+            let mittelbild = dreh
+                .map(|d| {
+                    d.join(ingest_kern::struktur::METADATEN)
+                        .join(format!("{}.jpg", ingest_kern::soll::ohne_endung(&c.pfad)))
+                })
+                .filter(|p| !c.pfad.is_empty() && p.is_file());
             if let Some(p) = &datei {
                 if let Some(t) = &c.take_id {
                     dazu(&mut pfade_take, t, p);
@@ -1459,6 +1468,7 @@ pub fn zusammenfuehren(
                 ungeprueft: c.ohne_pruefung,
                 datei,
                 csv,
+                mittelbild,
             };
             let besser = |alt: Option<&Eingelesen>| alt.is_none_or(|a| a.datei.is_none() && stand.datei.is_some());
             if let Some(t) = &c.take_id {
@@ -1491,6 +1501,7 @@ pub fn zusammenfuehren(
             ungeprueft: false,
             datei: None,
             csv: None,
+            mittelbild: None,
         };
         for t in [text(&c["take_id"]), text(&c["studio_take_id"])].into_iter().filter(|t| !t.is_empty()) {
             nach_take.entry(t).or_insert_with(|| stand.clone());
@@ -1576,6 +1587,7 @@ pub fn zusammenfuehren(
                     datei: stand.and_then(|s| s.datei.clone()),
                     dateien,
                     csv: stand.and_then(|s| s.csv.clone()),
+                    mittelbild: stand.and_then(|s| s.mittelbild.clone()),
                     // Werte der Datei aus der Datenbank (alle Rechner), für Takes ohne erreichbare Datei.
                     technik_db: stand
                         .map(|s| s.clip.to_uppercase())

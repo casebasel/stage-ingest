@@ -34,6 +34,8 @@ export type TakeMitWerten = {
   /** Alle erreichbaren Kopien (Rechtsklick: Pfad kopieren). */
   dateien?: string[];
   csv?: string | null;
+  /** Mittelbild neben den Metadaten der Kopie (`05_METADATEN/<Clip>.jpg`), Studio wie Plate. */
+  mittelbild?: string | null;
   /** Alle Werte der Clipdatei aus der gemeinsamen Datenbank (`clip.technik`): Ersatz, wenn die Datei hier fehlt. */
   technikDb?: Technik | null;
   werte?: Record<string, unknown>;
