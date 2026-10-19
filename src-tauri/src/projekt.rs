@@ -1704,8 +1704,11 @@ pub fn zusammenfuehren(
                     .join(&c.pfad)
             })
             .filter(|p| !c.pfad.is_empty() && p.is_file());
-        // Dieselbe Karte liegt auf mehreren Zielen: eine Zeile, alle Dateien.
-        match zu_klaeren.iter_mut().find(|o| o.karte == k.inhalt.karte && o.clip.eq_ignore_ascii_case(&c.name)) {
+        // Dieselbe Karte liegt auf mehreren Zielen: eine Zeile, alle Dateien. Nur im selben Drehordner: Eine
+        // gleichnamige Karte an einem anderen Drehtag ist eine andere Karte (Prüfung 19.10.2026).
+        match zu_klaeren.iter_mut().find(|o| {
+            o.karte == k.inhalt.karte && o.dreh_ordner == k.dreh_ordner && o.clip.eq_ignore_ascii_case(&c.name)
+        }) {
             Some(o) => {
                 o.dateien.push(k.datei.clone());
                 o.clipdateien.extend(clipdatei);
@@ -2332,6 +2335,34 @@ mod tests {
             "Zwischen Take 1 (A010C022) und Take 3 (A010C023) liegt kein Clip für diesen Take"
         );
         assert_eq!(u.drehs[0].plates[0].takes[2].karte.as_deref(), Some("A010R132"));
+    }
+
+    /// Zwei Karten „Untitled“ an zwei Drehtagen, beide mit `C0001.MP4` ohne Take: zwei Zeilen, nicht eine. Sonst
+    /// löschte „Endgültig löschen“ den Clip der anderen Karte mit (Prüfung 19.10.2026).
+    #[test]
+    fn zu_klaeren_trennt_karten_gleichen_namens_nach_drehordner() {
+        let t = tempfile::tempdir().unwrap();
+        let karte = |dreh: &str| -> GefundeneKarte {
+            let inhalt: KartenZusammenfassung = serde_json::from_value(json!({
+                "format": 1, "karte": "Untitled", "beginn": "", "version": "t", "freigegeben": true,
+                "unabhaengigeKopien": 2, "grund": "",
+                "clips": [{ "name": "C0001", "pfad": "C0001.MP4", "startTc": null, "endTc": null, "takeId": null,
+                            "zuordnung": "" }]
+            }))
+            .unwrap();
+            GefundeneKarte {
+                dreh_ordner: dreh.into(),
+                datei: t.path().join(dreh).join("04_BERICHTE/Untitled_ingest.json"),
+                inhalt,
+            }
+        };
+        let p: Projekt =
+            serde_json::from_value(json!({"id": "projekt-x", "name": "X", "kurzname": "X", "aktiv": true})).unwrap();
+        let karten = vec![karte("2026-10-18_A"), karte("2026-10-19_B"), karte("2026-10-19_B")];
+        let u = zusammenfuehren(p, &json!([]), &json!([]), karten, vec![], &Value::Null);
+        let zeilen: Vec<(String, usize)> =
+            u.zu_klaeren.iter().map(|o| (o.dreh_ordner.clone(), o.dateien.len())).collect();
+        assert_eq!(zeilen, [("2026-10-18_A".to_owned(), 1), ("2026-10-19_B".to_owned(), 2)]);
     }
 
     #[test]

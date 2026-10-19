@@ -293,10 +293,14 @@ function useLaufHalten() {
     };
   }, [quelle?.pfad, zieleSchluessel, e.mitMd5, e.mindestKopien, laeuft, zurSeite.join("|"), fortsetzen.join("|"), standZaehler]);
 
+  // Nur ein hier gestarteter Vorgang setzt die Phase. Einsortieren und Export schicken dieselben Ereignisse; bis 0.1.65
+  // blieb die App danach bis zum Neustart „beschäftigt“ (Prüfung 19.10.2026).
+  const laufAktiv = useRef(false);
   useEffect(() => {
     // Phase ausserhalb des Zustands-Updaters setzen: React darf Updater mehrfach und spät ausführen, ein setPhase
     // darin könnte „prüft“ nach dem fertigen Ergebnis wieder setzen.
     const weg = aufFortschritt((f: Fortschritt) => {
+      if (!laufAktiv.current) return;
       // Bei „Kopie aus Kopie“ bleibt die Phase „nachpruefen“ (Kopf und Einlesen-Seite zeigen keinen Kartenlauf).
       if (f.phase !== "kopieren" && f.phase !== "freigabe" && !kaskadeAktiv.current) setPhase(f.phase);
       // Gesammelt und höchstens alle 100 ms angewendet: eine Karte mit Zehntausenden Dateien schickt sonst für jede
@@ -333,6 +337,7 @@ function useLaufHalten() {
     puffer.current = [];
     setStand({ ...LEER, beginn: Date.now(), zielZahl: ziele.length });
     setPhase("kopieren");
+    laufAktiv.current = true;
     try {
       // Soll-Liste frisch holen; ist die Stage nicht erreichbar, wird trotzdem kopiert.
       const sollStage = await sollLaden();
@@ -361,8 +366,9 @@ function useLaufHalten() {
           sollStudio = [];
         }
       }
-      // Merkdatei jeder Ablage anlegen, falls sie fehlt (feste ID und Name, auf Mac und Windows gleich).
-      for (const z of e.ziele) await invoke("ablage_sicherstellen", { pfad: z }).catch(() => {});
+      // Merkdatei jeder Ablage anlegen, falls sie fehlt (feste ID und Name, auf Mac und Windows gleich); nie auf die
+      // Karte (Rust prüft es gegen die Quelle und die erkannten Karten).
+      for (const z of e.ziele) await invoke("ablage_sicherstellen", { pfad: z, quelle: quelle.pfad }).catch(() => {});
       const r = await karteEinlesen({
         quelle: quelle.pfad,
         ziele,
@@ -402,6 +408,8 @@ function useLaufHalten() {
     } catch (err) {
       setFehler(String(err));
       setPhase("fehler");
+    } finally {
+      laufAktiv.current = false;
     }
   }
 
@@ -413,11 +421,13 @@ function useLaufHalten() {
     puffer.current = [];
     setStand({ ...LEER, beginn: Date.now() });
     setPhase("nachpruefen");
+    laufAktiv.current = true;
     try {
       setNachpruefung(await zielNachpruefen(ordner));
     } catch (err) {
       setNachpruefFehler({ ordner, text: String(err) });
     }
+    laufAktiv.current = false;
     setPhase(vorher === "fertig" || vorher === "fehler" ? vorher : "bereit");
   }
 
@@ -433,6 +443,7 @@ function useLaufHalten() {
     setStand({ ...LEER, beginn: Date.now() });
     setPhase("nachpruefen");
     kaskadeAktiv.current = true;
+    laufAktiv.current = true;
     setKaskadeLaeuft(true);
     try {
       setKaskade(
@@ -448,6 +459,7 @@ function useLaufHalten() {
       setKaskadeFehler(String(err));
     }
     kaskadeAktiv.current = false;
+    laufAktiv.current = false;
     setKaskadeLaeuft(false);
     setPhase(vorher === "fertig" || vorher === "fehler" ? vorher : "bereit");
   }

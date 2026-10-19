@@ -211,6 +211,19 @@ struct KartenErgebnis {
     /// Probleme nach dem Bericht (Datenbank, Zusammenfassung, 02_PLATES, Stage): stehen nicht im PDF, darum in
     /// `04_BERICHTE/<Karte>_Nachtrag_<Zeit>.txt`, im Verlauf und in der Anzeige (Systemkarte „Datenfluss“, 10.10.2026).
     nachtraege: Vec<String>,
+    /// Fingerabdruck der Karte (Dateiliste mit Grössen, wie im Kartengedächtnis): Daran erkennt die App, ob beim
+    /// Auswerfen noch dieselbe Karte steckt (Prüfung 19.10.2026: Der Name allein verwechselt zwei „Untitled“).
+    fingerabdruck: String,
+}
+
+/// Fingerabdruck einer Karte aus ihrer Dateiliste (relativer Pfad und Grösse), unabhängig vom Namen.
+fn fingerabdruck_von(dateien: &std::collections::BTreeMap<String, u64>) -> String {
+    ingest_kern::gedaechtnis::abdruck("", dateien).fingerabdruck
+}
+
+/// Fingerabdruck der Karte, die gerade unter `pfad` steckt.
+fn karte_fingerabdruck_lesen(pfad: &Path) -> Result<String, String> {
+    kopie::ueberblick_dateien(pfad).map(|d| fingerabdruck_von(&d)).map_err(|e| e.to_string())
 }
 
 const FORTSCHRITT: &str = "ingest://fortschritt";
@@ -1546,6 +1559,8 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
             let _ = ingest_kern::sicher_schreiben(&ordner.join(&name), text.as_bytes());
         }
     }
+    let kopie_dateien: std::collections::BTreeMap<String, u64> =
+        kopie.dateien.iter().map(|d| (d.pfad.clone(), d.groesse)).collect();
     let ergebnis = KartenErgebnis {
         kopie,
         urteile,
@@ -1562,6 +1577,7 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
         freigabe,
         datenbank_abgelehnt,
         nachtraege,
+        fingerabdruck: fingerabdruck_von(&kopie_dateien),
     };
     if let Err(e) = verlauf_anhaengen(app, &ergebnis) {
         eprintln!("Verlauf nicht geschrieben: {e}"); // die Karte ist trotzdem kopiert und belegt
@@ -1731,7 +1747,8 @@ fn kaskade_ausfuehren(
         let name = quelle.file_name().map(|n| n.to_string_lossy().to_uppercase()).unwrap_or_default();
         for d in dateien.flatten() {
             let n = d.file_name().to_string_lossy().into_owned();
-            if n.ends_with(ingest_kern::uebersicht::ENDUNG) && n.to_uppercase().starts_with(&name) {
+            // Genau diese Karte, nicht jede mit demselben Namensanfang („Untitled“ träfe sonst „Untitled 1“).
+            if n.eq_ignore_ascii_case(&format!("{name}{}", ingest_kern::uebersicht::ENDUNG)) {
                 if let Ok(mut z) = serde_json::from_slice::<ingest_kern::uebersicht::KartenZusammenfassung>(
                     &std::fs::read(d.path()).unwrap_or_default(),
                 ) {
@@ -2373,6 +2390,19 @@ async fn clip_loeschen(
         let mut aus = ClipGeloescht { kopien: 0, dateien: 0, bytes: 0, protokolle: vec![] };
         let mut fehler: Vec<String> = Vec::new();
         let mut kopien: Vec<PathBuf> = Vec::new();
+        // Nur eine Karte in einem Drehordner (auf allen Zielen): Eine gleichnamige Karte an einem anderen Drehtag ist
+        // eine andere Karte, ihr gleichnamiger Clip bleibt (Prüfung 19.10.2026).
+        let drehordner: std::collections::BTreeSet<String> = dateien
+            .iter()
+            .filter_map(|d| d.parent().and_then(Path::parent).and_then(Path::file_name))
+            .map(|n| n.to_string_lossy().to_uppercase())
+            .collect();
+        if drehordner.len() > 1 {
+            return Err(format!(
+                "Die Zusammenfassungen liegen in verschiedenen Drehordnern ({}); gelöscht wird nur je Drehordner",
+                drehordner.into_iter().collect::<Vec<_>>().join(", ")
+            ));
+        }
         for d in &dateien {
             let Some(z) = ingest_kern::uebersicht::lesen_datei(d) else {
                 fehler.push(format!("{}: Zusammenfassung nicht lesbar", d.display()));
@@ -2838,9 +2868,13 @@ async fn ablage_pruefen(pfad: PathBuf) -> ingest_kern::ablage::Pruefung {
 
 /// Vor dem Einlesen: Merkdatei der Ablage anlegen, falls sie fehlt.
 #[tauri::command]
-async fn ablage_sicherstellen(pfad: PathBuf) -> Result<ingest_kern::ablage::Ablage, String> {
-    im_hintergrund(move || ingest_kern::ablage::sicherstellen(&pfad, plate::ulid_aehnlich).map_err(|e| e.to_string()))
-        .await
+async fn ablage_sicherstellen(pfad: PathBuf, quelle: Option<PathBuf>) -> Result<ingest_kern::ablage::Ablage, String> {
+    im_hintergrund(move || {
+        // Nie auf die Karte (Prüfung 19.10.2026): weder auf die Quelle noch auf ein als Karte erkanntes Laufwerk.
+        ingest_kern::ablage::nie_auf_der_karte(&pfad, quelle.as_deref())?;
+        ingest_kern::ablage::sicherstellen(&pfad, plate::ulid_aehnlich).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 /// MOV/MP4 (iPhone, Fotoapparat) im Player der App abspielen: gibt genau diese Datei für das Fenster frei
@@ -2975,15 +3009,35 @@ async fn laufwerke() -> Vec<ingest_kern::laufwerke::Laufwerk> {
     tauri::async_runtime::spawn_blocking(ingest_kern::laufwerke::auflisten).await.unwrap_or_default()
 }
 
-/// Karte auswerfen. Nie während eines Kopiervorgangs: dann könnte es die Karte oder ein Ziel treffen.
+/// Karte auswerfen. Nie während eines Kopiervorgangs: dann könnte es die Karte oder ein Ziel treffen. Mit
+/// `fingerabdruck` (der eingelesenen Karte) nur, wenn unter dem Pfad noch dieselbe Karte steckt: Zwei Karten gleichen
+/// Namens im selben Leser sähen sonst gleich aus, und die zweite würde ausgeworfen und formatiert (Prüfung 19.10.2026).
 #[tauri::command]
-async fn auswerfen(pfad: PathBuf, laufend: State<'_, Laufend>) -> Result<(), String> {
+async fn auswerfen(pfad: PathBuf, fingerabdruck: Option<String>, laufend: State<'_, Laufend>) -> Result<(), String> {
     if laufend.aktiv.load(Ordering::SeqCst) {
         return Err("Während des Kopierens wird nichts ausgeworfen.".into());
     }
-    tauri::async_runtime::spawn_blocking(move || ingest_kern::laufwerke::auswerfen(&pfad))
-        .await
-        .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Some(erwartet) = fingerabdruck {
+            let jetzt = karte_fingerabdruck_lesen(&pfad)?;
+            if jetzt != erwartet {
+                return Err(
+                    "Im Leser steckt eine andere Karte als die eingelesene (andere Dateien). Nicht ausgeworfen: \
+                            Diese Karte ist nicht gesichert."
+                        .into(),
+                );
+            }
+        }
+        ingest_kern::laufwerke::auswerfen(&pfad)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Fingerabdruck der Karte unter `pfad` (für die Anzeige: Steckt noch die eingelesene Karte?).
+#[tauri::command]
+async fn karte_fingerabdruck(pfad: PathBuf) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || karte_fingerabdruck_lesen(&pfad)).await.map_err(|e| e.to_string())?
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -3087,6 +3141,7 @@ pub fn run() {
             verlauf,
             laufwerke,
             auswerfen,
+            karte_fingerabdruck,
             ziel_geraete
         ])
         .build(tauri::generate_context!())

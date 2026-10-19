@@ -25,6 +25,7 @@ import {
 import {
   ablagePruefen,
   auswerfen,
+  karteFingerabdruck,
   bytesText,
   laufwerke as laufwerkeHolen,
   zielGeraete,
@@ -67,12 +68,40 @@ export function Einlesen({
     };
   }, [lauf.laeuft]);
 
-  // Eine neu erkannte Karte wird angeboten, nie von selbst gewählt (Marlon: „Ja, aber erst nachfragen“).
+  // Steckt noch die eingelesene Karte? Zwei Karten gleichen Namens im selben Leser sehen am Pfad gleich aus (Prüfung
+  // 19.10.2026): deshalb der Fingerabdruck der Dateiliste, neu gelesen, sobald sich der Eintrag des Laufwerks ändert.
+  const letzte = lauf.letzteQuelle;
+  const dran = lauf.ergebnis && letzte?.laufwerk ? laufwerke.find((l) => l.pfad === letzte.pfad) : undefined;
+  const kennzeichen = dran
+    ? [dran.pfad, dran.karte?.clips, dran.karte?.bytes, dran.gesamt, dran.frei].map((x) => x ?? "").join("|")
+    : null;
+  const [steckend, setSteckend] = useState<{ kennzeichen: string; abdruck: string | null } | null>(null);
+  useEffect(() => {
+    if (!kennzeichen) {
+      setSteckend(null);
+      return;
+    }
+    const pfad = kennzeichen.split("|")[0];
+    let aktuell = true;
+    setSteckend((s) => (s?.kennzeichen === kennzeichen ? s : { kennzeichen, abdruck: null }));
+    karteFingerabdruck(pfad)
+      .then((a) => aktuell && setSteckend({ kennzeichen, abdruck: a }))
+      .catch(() => aktuell && setSteckend({ kennzeichen, abdruck: null }));
+    return () => {
+      aktuell = false;
+    };
+  }, [kennzeichen]);
+  const gleicheKarte = !!steckend?.abdruck && steckend.abdruck === lauf.ergebnis?.fingerabdruck;
+  const andereKarte = !!steckend?.abdruck && !gleicheKarte ? dran : undefined;
+
+  // Eine neu erkannte Karte wird angeboten, nie von selbst gewählt (Marlon: „Ja, aber erst nachfragen“). Eine andere
+  // Karte unter dem Pfad der eingelesenen wird angeboten wie jede neue.
   const [abgelehnt, setAbgelehnt] = useState<string[]>([]);
   const angebot =
     !lauf.quelle && !lauf.laeuft
       ? laufwerke.find(
-          (l) => l.karte && !abgelehnt.includes(l.pfad) && l.pfad !== lauf.letzteQuelle?.pfad && !istZiel(l, e.ziele),
+          (l) =>
+            l.karte && !abgelehnt.includes(l.pfad) && (l.pfad !== letzte?.pfad || !!andereKarte) && !istZiel(l, e.ziele),
         )
       : undefined;
 
@@ -100,7 +129,7 @@ export function Einlesen({
         {lauf.laeuft && lauf.phase !== "nachpruefen" ? (
           <Fortschritt />
         ) : lauf.ergebnis && !lauf.quelle ? (
-          <Urteil ergebnis={lauf.ergebnis} laufwerke={laufwerke} zumProtokoll={zumProtokoll} />
+          <Urteil ergebnis={lauf.ergebnis} steckt={gleicheKarte} andereKarte={andereKarte} zumProtokoll={zumProtokoll} />
         ) : (
           <Auftrag pflicht={pflicht} zurEinrichtung={zurEinrichtung} laufwerke={laufwerke} />
         )}
@@ -1047,11 +1076,15 @@ type Reiter = "ziele" | "abgleich" | "dateien" | "metadaten";
 
 function Urteil({
   ergebnis,
-  laufwerke,
+  steckt,
+  andereKarte,
   zumProtokoll,
 }: {
   ergebnis: KartenErgebnis;
-  laufwerke: Laufwerk[];
+  /** Die eingelesene Karte steckt noch (gleicher Fingerabdruck), nicht nur ein Laufwerk mit demselben Pfad. */
+  steckt: boolean;
+  /** Unter dem Pfad der eingelesenen Karte steckt jetzt eine andere. */
+  andereKarte?: Laufwerk;
   zumProtokoll: () => void;
 }) {
   const lauf = useLauf();
@@ -1061,7 +1094,6 @@ function Urteil({
   // Rot heisst Datenverlust droht: jede nicht freigegebene Karte (gemeinsames Design).
   const ton = freigabe.sicher ? "ok" : "rot";
   const karte = lauf.letzteQuelle;
-  const steckt = !!karte?.laufwerk && laufwerke.some((l) => l.pfad === karte.pfad);
   const [auswurf, setAuswurf] = useState<{ ton: Ton; text: string } | null>(null);
   const [reiter, setReiter] = useState<Reiter>("ziele");
   const neu = useRef(ergebnis);
@@ -1087,7 +1119,7 @@ function Urteil({
     if (!karte) return;
     setAuswurf({ ton: "laeuft", text: "Wirft aus …" });
     try {
-      await auswerfen(karte.pfad);
+      await auswerfen(karte.pfad, ergebnis.fingerabdruck);
       setAuswurf({ ton: "ok", text: `${karte.name} ausgeworfen. Die Karte kann entnommen und in der Kamera formatiert werden.` });
     } catch (err) {
       setAuswurf({ ton: "fehler", text: String(err) });
@@ -1109,6 +1141,14 @@ function Urteil({
           <p>
             {karte?.name ?? name(ergebnis.kopie.quelle)} · {freigabe.grund}
           </p>
+          {andereKarte && (
+            <p className="urteil-grund">
+              Im Leser steckt jetzt eine andere Karte
+              {andereKarte.karte ? ` (${andereKarte.karte.kamera}, ${andereKarte.karte.clips} Clips)` : ""}, nicht die
+              eingelesene. Dieses Urteil gilt nur für {karte?.name ?? name(ergebnis.kopie.quelle)}; die neue Karte wird
+              links angeboten und ist noch nicht gesichert.
+            </p>
+          )}
           {!freigabe.sicher && !fehlerhaft && freigabe.unabhaengige_kopien < freigabe.mindest_kopien && (
             <p className="urteil-grund">
               Alle Dateien sind fehlerfrei kopiert und geprüft. Es fehlt nur{" "}
@@ -1196,7 +1236,7 @@ function Urteil({
               <Eject size={18} strokeWidth={1.75} aria-hidden /> Karte auswerfen
             </button>
           )}
-          {!freigabe.sicher && karte && (
+          {!freigabe.sicher && karte && !andereKarte && (
             // Fehlen nur Kopien: „Kopie ergänzen“. Zurück zum Auftrag; die vorhandene Kopie wird dort erkannt und nur
             // nachgeprüft, ein weiteres Ziel kommt dazu. Sonst: nochmals einlesen.
             <button className="knopf knopf-gross" onClick={() => lauf.quelleWaehlen(karte)}>

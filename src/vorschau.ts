@@ -70,6 +70,7 @@ function ergebnis(ziele: string[]) {
     plates: null,
     stage: null,
     datenbank: null,
+    fingerabdruck: "vorschau",
     abgleich: {
       gefunden: clips.slice(0, 11).map((c, i) => [{ clip: c, szene: "42A", take: String(i + 1), startTc: "", endTc: "", bewertung: "", quelle: "plate" }, c]),
       fehlt: sicher
@@ -162,6 +163,8 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
   },
   abbrechen: () => null,
   laufwerke,
+  // `?andereKarte=1`: unter dem Pfad der eingelesenen Karte steckt eine andere (Urteil ohne Auswerfen).
+  karte_fingerabdruck: async () => (new URLSearchParams(location.search).get("andereKarte") ? "fremd" : "vorschau"),
   auswerfen: async () => {
     await warte(600);
     karteSteckt = false;

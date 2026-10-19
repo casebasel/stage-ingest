@@ -1037,7 +1037,7 @@ function ZurSeiteGelegt({ kurzname }: { kurzname: string }) {
   if (!liste.length) return null;
   async function wegwerfen(z: ZurSeite) {
     const ja = await ask(
-      `${z.pfad}\n\n${z.dateien} Dateien, ${bytesKurz(z.bytes)}. Der Ordner kommt in den Papierkorb des Systems (dort noch wiederherstellbar). Die Karte ${z.karte} ist mit ${z.kopien} geprüften Kopien freigegeben.`,
+      `${z.pfad}\n\n${z.dateien} Dateien, ${bytesKurz(z.bytes)}. Der Ordner kommt in den Papierkorb des Systems (dort noch wiederherstellbar; auf einem NAS gibt es keinen). Die Karte ${z.karte} ist mit ${z.kopien} geprüften Kopien freigegeben. Vorher wird geprüft, dass jede Datei darin mit gleicher Prüfsumme in der aktuellen Kopie steckt; das kann dauern.`,
       { title: "Zur Seite gelegten Ordner wegwerfen", kind: "warning", okLabel: "In den Papierkorb", cancelLabel: "Abbrechen" },
     );
     if (!ja) return;

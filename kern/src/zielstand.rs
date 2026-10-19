@@ -319,8 +319,10 @@ pub fn zur_seite_gelegte(basis: &Path, kurzname: &str) -> Vec<ZurSeite> {
     aus
 }
 
-/// Darf dieser Ordner in den Papierkorb? Nur ein zur Seite gelegter Kartenordner (`…/01_KAMERA/<Karte>_ALT_…`), und nur
-/// wenn die Karte im selben Drehordner freigegeben ist. Sonst ist er vielleicht die einzige Kopie von etwas.
+/// Darf dieser Ordner in den Papierkorb? Nur ein zur Seite gelegter Kartenordner (`…/01_KAMERA/<Karte>_ALT_…`), nur
+/// wenn die Karte im selben Drehordner freigegeben ist, und nur, wenn jede Datei darin mit gleicher Prüfsumme in der
+/// aktuellen Kopie dieser Karte steckt (Prüfung 19.10.2026: Der Name allein reicht nicht. Eine andere Karte gleichen
+/// Namens, etwa „Untitled“, hätte sonst die einzige Kopie ihres Materials verloren).
 pub fn wegwerfen_erlaubt(pfad: &Path) -> Result<(), String> {
     let name = pfad.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let karte = karte_von(&name).ok_or("Nur zur Seite gelegte Ordner (…_ALT_…) lassen sich hier wegwerfen")?;
@@ -330,10 +332,69 @@ pub fn wegwerfen_erlaubt(pfad: &Path) -> Result<(), String> {
         return Err(format!("Ordner nicht gefunden: {}", pfad.display()));
     }
     match zusammenfassung(drehordner, karte) {
-        Some(z) if z.freigegeben => Ok(()),
-        Some(_) => Err(format!("{karte} ist noch nicht freigegeben; der alte Ordner bleibt, bis die Karte sicher ist")),
-        None => Err(format!("Zu {karte} gibt es in diesem Drehordner keine eingelesene Karte; der alte Ordner bleibt")),
+        Some(z) if z.freigegeben => {}
+        Some(_) => {
+            return Err(format!("{karte} ist noch nicht freigegeben; der alte Ordner bleibt, bis die Karte sicher ist"))
+        }
+        None => {
+            return Err(format!(
+                "Zu {karte} gibt es in diesem Drehordner keine eingelesene Karte; der alte Ordner bleibt"
+            ))
+        }
     }
+    let kopie = drehordner.join(crate::struktur::KAMERA).join(crate::struktur::ordnername(karte));
+    let aktuell =
+        crate::mhl::bekannte_hashes(&kopie).map(|(_, h)| h).ok().filter(|h| !h.is_empty()).ok_or_else(|| {
+            format!("Die aktuelle Kopie {} hat keine lesbare ASC-MHL-Historie; der alte Ordner bleibt", kopie.display())
+        })?;
+    let fehlt = nicht_gedeckt(pfad, &aktuell)?;
+    if fehlt.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "{} von ihm stecken nicht mit gleicher Prüfsumme in der aktuellen Kopie von {karte} (z. B. {}); der alte \
+             Ordner bleibt, bis das geklärt ist. Vielleicht war es eine andere Karte mit demselben Namen.",
+            if fehlt.len() == 1 { "1 Datei".to_owned() } else { format!("{} Dateien", fehlt.len()) },
+            fehlt.iter().take(3).cloned().collect::<Vec<_>>().join(", ")
+        ))
+    }
+}
+
+/// Dateien unter `ordner` (ohne `ascmhl/`, Systemdateien und halbe Dateien), die nicht mit gleichem XXH3-128 in
+/// `hashes` stehen. Hat der Ordner eine eigene Historie, gilt deren Hash; sonst wird jede Datei gelesen.
+fn nicht_gedeckt(ordner: &Path, hashes: &crate::mhl::Hashes) -> Result<Vec<String>, String> {
+    let eigene = crate::mhl::bekannte_hashes(ordner).map(|(_, h)| h).unwrap_or_default();
+    let mut fehlt = Vec::new();
+    let gang =
+        walkdir::WalkDir::new(ordner).min_depth(1).follow_links(false).sort_by_file_name().into_iter().filter_entry(
+            |e| {
+                !(e.depth() == 1 && e.file_name() == crate::mhl::ORDNER)
+                    && !crate::kopie::vom_system(&e.file_name().to_string_lossy())
+            },
+        );
+    for e in gang {
+        let e = e.map_err(|e| e.to_string())?;
+        if !e.file_type().is_file() || e.file_name().to_string_lossy().ends_with(crate::TEIL_ENDUNG) {
+            continue;
+        }
+        let rel = crate::kopie::relativ(ordner, e.path());
+        let Some(soll) = hashes.get(rel.as_str()).and_then(|h| h.0.as_deref()) else {
+            fehlt.push(rel);
+            continue;
+        };
+        let ist = match eigene.get(rel.as_str()).and_then(|h| h.0.clone()) {
+            Some(h) => h,
+            None => {
+                let (p, _) = crate::ohne_cache::pruefsumme(e.path(), false)
+                    .map_err(|x| format!("{} nicht lesbar: {x}", e.path().display()))?;
+                format!("{:032x}", p.xxh128)
+            }
+        };
+        if !ist.eq_ignore_ascii_case(soll) {
+            fehlt.push(rel);
+        }
+    }
+    Ok(fehlt)
 }
 
 #[cfg(test)]
@@ -465,8 +526,27 @@ mod tests {
         assert!(wegwerfen_erlaubt(&alt).is_err(), "nicht freigegeben");
         z.freigegeben = true;
         crate::uebersicht::schreiben(&dreh.join("04_BERICHTE"), &z).unwrap();
-        assert!(wegwerfen_erlaubt(&alt).is_ok());
+        // Freigegeben, aber ohne aktuelle Kopie mit Historie: `halb.mxf` steckt nirgends, der Ordner bleibt.
+        assert!(wegwerfen_erlaubt(&alt).unwrap_err().contains("keine lesbare ASC-MHL-Historie"));
         assert!(wegwerfen_erlaubt(&dreh.join("01_KAMERA/A004R132")).is_err(), "nie die aktuelle Kopie");
+
+        // Aktuelle Kopie derselben Karte mit echter Historie: Nur was darin mit gleicher Prüfsumme steckt, darf weg.
+        let k = karte(t.path());
+        let ziel = dreh.join("01_KAMERA/A004R132");
+        let auftrag = crate::kopie::Auftrag { quelle: k.clone(), ziele: vec![ziel.clone()], ..Default::default() };
+        let kopiert = crate::kopie::kopieren(&auftrag, &std::sync::atomic::AtomicBool::new(false), |_| {}).unwrap();
+        let angaben =
+            crate::mhl::Angaben { werkzeug: "t".into(), version: "0".into(), zeit: kopiert.beginn, nur_pruefen: false };
+        crate::mhl::schreiben(&ziel, &kopiert, &angaben).unwrap();
+        let e = wegwerfen_erlaubt(&alt).unwrap_err();
+        assert!(e.contains("1 Datei") && e.contains("halb.mxf"), "{e}");
+        fs::remove_file(alt.join("halb.mxf")).unwrap();
+        kopie(&k, &alt); // dieselben Dateien, ohne eigene Historie: wird gelesen und verglichen
+        fs::write(alt.join("A004R132/A004C001.mxf.ingest-teil"), b"01").unwrap(); // halbe Datei zählt nicht
+        assert!(wegwerfen_erlaubt(&alt).is_ok());
+        // Gleicher Name, anderer Inhalt (andere Karte gleichen Namens): bleibt.
+        fs::write(alt.join("A004R132/A004C001.mxf"), b"0123456789X").unwrap();
+        assert!(wegwerfen_erlaubt(&alt).unwrap_err().contains("A004C001.mxf"));
     }
 
     #[test]

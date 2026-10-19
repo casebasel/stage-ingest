@@ -125,6 +125,26 @@ pub fn pruefen(gewaehlt: &Path) -> Pruefung {
 
 /// Legt die Merkdatei an, falls sie fehlt (beim Einlesen in eine neue oder bestehende Ablage). Name: Ordnername und
 /// die ersten vier Zeichen der ID (`ingest · 7K3F`), damit zwei Ablagen gleichen Namens unterscheidbar bleiben.
+/// Nie auf die Karte: Die Merkdatei darf nicht auf die Quelle eines Einlesens oder in sie hinein (Prüfung 19.10.2026:
+/// Fehlt die Shuttle-Platte und der Kartenleser bekommt unter Windows ihren Buchstaben, zeigte die Ablage auf die
+/// Karte). Ebenso nie auf ein Laufwerk, das als Kamerakarte erkannt ist.
+pub fn nie_auf_der_karte(ablage: &Path, quelle: Option<&Path>) -> Result<(), String> {
+    let echt = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let a = echt(ablage);
+    if let Some(q) = quelle.map(echt) {
+        if a == q || a.starts_with(&q) {
+            return Err(format!(
+                "Die Ablage {} ist die Kamerakarte selbst; dort wird nichts angelegt",
+                ablage.display()
+            ));
+        }
+    }
+    if let Some(l) = crate::laufwerke::auflisten().into_iter().find(|l| l.karte.is_some() && echt(&l.pfad) == a) {
+        return Err(format!("{} ist eine Kamerakarte ({}); dort wird nichts angelegt", ablage.display(), l.name));
+    }
+    Ok(())
+}
+
 pub fn sicherstellen(ordner: &Path, neue_id: impl FnOnce() -> String) -> std::io::Result<Ablage> {
     if let Some(a) = lesen(ordner) {
         return Ok(a);
@@ -202,6 +222,19 @@ pub fn finden_in(wurzeln: &[PathBuf]) -> Vec<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn merkdatei_nie_auf_der_karte() {
+        let t = tempfile::tempdir().unwrap();
+        let karte = t.path().join("KARTE");
+        std::fs::create_dir_all(karte.join("A004R132")).unwrap();
+        let ablage = t.path().join("ablage");
+        std::fs::create_dir_all(&ablage).unwrap();
+        assert!(super::nie_auf_der_karte(&ablage, Some(&karte)).is_ok());
+        assert!(super::nie_auf_der_karte(&karte, Some(&karte)).is_err(), "die Karte selbst");
+        assert!(super::nie_auf_der_karte(&karte.join("A004R132"), Some(&karte)).is_err(), "in der Karte");
+        assert!(super::nie_auf_der_karte(&ablage, None).is_ok());
+    }
+
     use super::*;
     use std::fs;
 

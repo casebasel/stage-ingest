@@ -50,6 +50,8 @@ export type KartenErgebnis = {
   datenbankAbgelehnt?: string[];
   /** Probleme nach dem Bericht (Datenbank, Zusammenfassung, 02_PLATES, Stage); stehen in …_Nachtrag_….txt. */
   nachtraege?: string[];
+  /** Fingerabdruck der Karte (Dateiliste mit Grössen): erkennt beim Auswerfen, ob noch dieselbe Karte steckt. */
+  fingerabdruck: string;
 };
 
 export type Meldung =
@@ -289,7 +291,10 @@ export type Laufwerk = {
   karte: { kamera: string; clips: number; bytes: number } | null;
 };
 export const laufwerke = () => invoke<Laufwerk[]>("laufwerke");
-export const auswerfen = (pfad: string) => invoke<void>("auswerfen", { pfad });
+/** Mit `fingerabdruck` der eingelesenen Karte: nur auswerfen, wenn noch dieselbe Karte steckt. */
+export const auswerfen = (pfad: string, fingerabdruck?: string) => invoke<void>("auswerfen", { pfad, fingerabdruck: fingerabdruck ?? null });
+/** Fingerabdruck (Dateiliste mit Grössen) der Karte unter `pfad`, vergleichbar mit `KartenErgebnis.fingerabdruck`. */
+export const karteFingerabdruck = (pfad: string) => invoke<string>("karte_fingerabdruck", { pfad });
 
 export type ZielGeraet = {
   pfad: string;
