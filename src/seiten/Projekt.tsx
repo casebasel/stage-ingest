@@ -22,6 +22,11 @@ import { ClipMitBild, vorschauLaden, SpaltenKopf, SpaltenMenue, SpaltenZellen, u
 let loeschReihe: Promise<unknown> = Promise.resolve();
 
 type TakeStand = TakeMitWerten;
+
+const sekunden = (ms: number) => `${(ms / 1000).toFixed(1).replace(".", ",")} s`;
+
+/** Zuletzt geladene Übersicht je Projekt, über Seitenwechsel hinweg (die Seite wird jedes Mal neu aufgebaut). */
+const uebersichtGemerkt = new Map<string, Uebersicht>();
 type FotoStand = { id: string; art: string; pfad: string; takeId?: string | null; quelle?: string };
 type HdriStand = {
   id: string;
@@ -105,6 +110,8 @@ type Uebersicht = {
   nachzutragen?: { clip: string; karte: string; karteId: string; takeId: string; drehId: string; dateien: string[] }[];
   /** Tilt und Roll am Take nach der Regel in `aus_clip.rs` (aus den Clips): die App trägt sie nach. */
   ausClipNachzutragen?: { takeId: string; wert: unknown }[];
+  /** Wie lange das Laden gedauert hat (Millisekunden): Ziele und Datenbank laufen gleichzeitig. */
+  dauer?: { zieleMs: number; datenbankMs: number; technikMs: number; gesamtMs: number };
 };
 type TakeOhneAufnahme = {
   takeId: string;
@@ -445,8 +452,13 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
   async function laden(p: ProjektT) {
     setLaedt(true);
     setFehler(null);
+    // Der zuletzt geladene Stand erscheint sofort (die Seite wird bei jedem Wechsel neu aufgebaut), das Frische kommt
+    // nach (Marlon, 19.10.2026: „das bereits geladene schon anzeigen“).
+    const vorhin = uebersichtGemerkt.get(p.id);
+    if (vorhin) setU((aktuell) => aktuell ?? vorhin);
     try {
       const neu = await invoke<Uebersicht>("projekt_uebersicht", { zugang: verbunden ? konto.zugang : null, projekt: p, basis: e.ziele });
+      uebersichtGemerkt.set(p.id, neu);
       setU(neu);
       // Ohne Netz eingelesene Karten in die gemeinsame Datenbank nachtragen, sobald wieder Verbindung ist.
       if (verbunden && p.id && (neu.ohneDatenbank?.length ?? 0) > 0 && !lauf.laeuft) {
@@ -744,6 +756,15 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
           <button className="knopf" disabled={laedt} onClick={() => laden(projekt)}>
             <RefreshCw size={14} strokeWidth={2} aria-hidden className={laedt ? "dreht" : ""} /> {laedt ? "Lädt …" : "Neu laden"}
           </button>
+        )}
+        {u && laedt && <span className="leise">Stand von vorhin, lädt neu …</span>}
+        {u?.dauer && !laedt && (
+          <span
+            className="leise zahl"
+            title={`Ziele ${sekunden(u.dauer.zieleMs)} · Datenbank ${sekunden(u.dauer.datenbankMs)} · Werte ${sekunden(u.dauer.technikMs)} (Ziele und Datenbank gleichzeitig)`}
+          >
+            geladen in {sekunden(u.dauer.gesamtMs)}
+          </span>
         )}
         {u && (
           <dl className="kennzahlen">

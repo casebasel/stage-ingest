@@ -42,6 +42,21 @@ pub struct Uebersicht {
     /// Tilt und Roll am Take, die nicht der Regel in `aus_clip` entsprechen: die App trägt sie nach (Marlon, 17.10.2026:
     /// „Das normale Spalte Tilt und Roll kommt aus den File, das soll der Ingest machen“).
     pub aus_clip_nachzutragen: Vec<AusClipNachtrag>,
+    /// Wie lange das Laden gedauert hat, in Millisekunden (Marlon, 19.10.2026: „Es dauert immer länger“).
+    #[serde(default)]
+    pub dauer: Dauer,
+}
+
+#[derive(Debug, Default, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Dauer {
+    /// Ziele durchsuchen (Zusammenfassungen lesen, Belege, fehlende Einträge), gleichzeitig mit der Datenbank.
+    pub ziele_ms: u128,
+    /// Datenbank (Drehorte, Studio, Karten und Clips).
+    pub datenbank_ms: u128,
+    /// Werte der Dateien aus der Datenbank, nur für Takes ohne erreichbare Datei.
+    pub technik_ms: u128,
+    pub gesamt_ms: u128,
 }
 
 /// Ein Take mit seinem Soll für `take.aus_clip` (leer = `null`).
@@ -1152,6 +1167,29 @@ pub struct TakeStand {
     pub werte: std::collections::BTreeMap<String, Value>,
 }
 
+/// Ob eine Datei existiert, über eine einmal gelesene Liste ihres Ordners: Über SMB kostet jedes `is_file` eine
+/// Anfrage ans NAS; je Karte sind es Hunderte (Clip, CSV, Mittelbild). Ein Ordner wird einmal gelesen und gemerkt.
+#[derive(Default)]
+struct Verzeichnisse {
+    gelistet: HashMap<PathBuf, HashMap<std::ffi::OsString, bool>>,
+}
+
+impl Verzeichnisse {
+    /// Gibt es `pfad` als Datei (keinen Ordner)? Unlesbare Ordner zählen als leer.
+    fn hat_datei(&mut self, pfad: &Path) -> bool {
+        let (Some(ordner), Some(name)) = (pfad.parent(), pfad.file_name()) else { return false };
+        let liste = self.gelistet.entry(ordner.to_path_buf()).or_insert_with(|| {
+            std::fs::read_dir(ordner)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|e| (e.file_name(), e.file_type().map(|t| t.is_file()).unwrap_or(false)))
+                .collect()
+        });
+        liste.get(name).copied().unwrap_or(false)
+    }
+}
+
 /// Flacht die Felder eines Datensatzes für die Spalten ab (Zahlen, Text, Wahrheitswerte; Objekte mit Punkt).
 fn flach(praefix: &str, v: &Value, aus: &mut std::collections::BTreeMap<String, Value>) {
     let Some(o) = v.as_object() else { return };
@@ -1425,6 +1463,7 @@ pub fn zusammenfuehren(
             v.push(p.clone());
         }
     };
+    let mut verzeichnisse = Verzeichnisse::default();
     for k in &karten {
         // `<Dreh>/04_BERICHTE/<Karte>_ingest.json` → Clips in `<Dreh>/01_KAMERA/<Karte>/`, ART CMD in `05_METADATEN`.
         let dreh = k.datei.parent().and_then(|b| b.parent());
@@ -1438,7 +1477,7 @@ pub fn zusammenfuehren(
         for c in k.inhalt.clips.iter().filter(|c| !c.ohne_pruefung || c.take_id.is_some()) {
             let datei = ordner.as_ref().and_then(|o| {
                 let direkt = o.join(&c.pfad);
-                if !c.pfad.is_empty() && direkt.is_file() {
+                if !c.pfad.is_empty() && verzeichnisse.hat_datei(&direkt) {
                     return Some(direkt);
                 }
                 nach_name.get_or_insert_with(|| clips_im_ordner(o)).get(&c.name.to_uppercase()).cloned()
@@ -1448,13 +1487,13 @@ pub fn zusammenfuehren(
                     d.join(ingest_kern::struktur::METADATEN)
                         .join(format!("{}.csv", ingest_kern::soll::ohne_endung(&c.pfad)))
                 })
-                .filter(|p| datei.is_some() && p.is_file());
+                .filter(|p| datei.is_some() && verzeichnisse.hat_datei(p));
             let mittelbild = dreh
                 .map(|d| {
                     d.join(ingest_kern::struktur::METADATEN)
                         .join(format!("{}.jpg", ingest_kern::soll::ohne_endung(&c.pfad)))
                 })
-                .filter(|p| !c.pfad.is_empty() && p.is_file());
+                .filter(|p| !c.pfad.is_empty() && verzeichnisse.hat_datei(p));
             if let Some(p) = &datei {
                 if let Some(t) = &c.take_id {
                     dazu(&mut pfade_take, t, p);
@@ -1865,6 +1904,7 @@ pub fn zusammenfuehren(
         ohne_datenbank,
         nachzutragen,
         aus_clip_nachzutragen,
+        dauer: Dauer::default(),
     }
 }
 
@@ -1977,22 +2017,19 @@ fn studio_einhaengen(drehs: &mut Value, studio: &Value) {
     }
 }
 
-pub fn laden(plate: &Plate, zugang: Option<&Zugang>, projekt: Projekt, basis: &[PathBuf]) -> Uebersicht {
-    let mut karten = Vec::new();
-    let mut unlesbar = Vec::new();
-    // Eingetragene Ziele und alle erreichbaren Ablagen (Merkdatei), jede einmal.
-    let mut orte: Vec<PathBuf> = Vec::new();
-    for b in basis.iter().cloned().chain(ingest_kern::ablage::finden()) {
-        let echt = std::fs::canonicalize(&b).unwrap_or_else(|_| b.clone());
-        if !orte.iter().any(|o| std::fs::canonicalize(o).unwrap_or_else(|_| o.clone()) == echt) {
-            orte.push(b);
+/// Eingelesene Karten des Projekts auf allen Zielen: Zusammenfassungen lesen, fehlende Einträge und Belege nachholen.
+/// Die Ziele werden gleichzeitig durchsucht (jedes ist eine andere Platte oder ein anderes NAS).
+fn karten_suchen(orte: &[PathBuf], kurzname: &str) -> (Vec<GefundeneKarte>, Vec<PathBuf>) {
+    let (mut karten, mut unlesbar) = (Vec::new(), Vec::new());
+    std::thread::scope(|s| {
+        let laeufe: Vec<_> = orte.iter().map(|b| s.spawn(move || uebersicht::suchen(b, kurzname))).collect();
+        for l in laeufe {
+            if let Ok((g, k)) = l.join() {
+                karten.extend(g);
+                unlesbar.extend(k);
+            }
         }
-    }
-    for b in &orte {
-        let (g, k) = uebersicht::suchen(b, &projekt.kurzname);
-        karten.extend(g);
-        unlesbar.extend(k);
-    }
+    });
     // Alle Kopien bleiben drin (Einsortieren, Clip-Suche und „Zu klären“ brauchen jede Platte); nur die Kartenliste
     // der Anzeige fasst dieselbe Karte zusammen (in `zusammenfuehren`).
     karten.sort_by(|a, b| (&a.inhalt.karte, &b.inhalt.beginn).cmp(&(&b.inhalt.karte, &a.inhalt.beginn)));
@@ -2000,8 +2037,13 @@ pub fn laden(plate: &Plate, zugang: Option<&Zugang>, projekt: Projekt, basis: &[
         ohne_eintrag_ergaenzen(k);
         belege_nachholen(k);
     }
+    (karten, unlesbar)
+}
+
+/// Plan aus der Datenbank: Drehorte mit Plates, Takes, Fotos, HDRI (plus HDRI-Jobs), Studio der Stage, Karten und Clips.
+fn plan_laden(plate: &Plate, zugang: Option<&Zugang>, projekt: &Projekt) -> (Value, Value, Value, Option<String>) {
     let (drehs, jobs, hinweis) = match zugang {
-        Some(z) => match plate.projekt_drehs(z, &projekt) {
+        Some(z) => match plate.projekt_drehs(z, projekt) {
             Ok(v) => {
                 let ids: Vec<String> = v
                     .as_array()
@@ -2022,17 +2064,84 @@ pub fn laden(plate: &Plate, zugang: Option<&Zugang>, projekt: Projekt, basis: &[
     if let Some(Ok(studio)) = zugang.map(|z| plate.studio(z, &projekt.id)) {
         studio_einhaengen(&mut drehs, &studio);
     }
-    let mut db = zugang.map(|z| plate.karten_und_clips(z, &projekt.id)).unwrap_or(Value::Null);
-    // Alle Werte aus den Dateien (`clip.technik`, 0031): Ersatz in der Take-Tabelle, wenn die Datei hier fehlt.
-    if let Some(z) = zugang.filter(|z| plate.technik_spalte_da(z)) {
-        if let Ok(t) = plate.technik_lesen(z, &projekt.id) {
-            let je_name: serde_json::Map<String, Value> =
-                t.into_iter().filter(|(_, _, w)| w.is_object()).map(|(_, n, w)| (n.to_uppercase(), w)).collect();
-            db["technik"] = Value::Object(je_name);
+    let db = zugang.map(|z| plate.karten_und_clips(z, &projekt.id)).unwrap_or(Value::Null);
+    (drehs, jobs, db, hinweis)
+}
+
+/// Werte der Dateien aus der Datenbank (`clip.technik`, 0031) nur für Takes, deren Clipdatei hier nicht erreichbar
+/// ist: Mit erreichbarer Datei liest die Tabelle die Werte selbst, und alle `technik` eines Projekts zu laden kostete
+/// bei jedem Öffnen Megabytes (Marlon, 19.10.2026: „Es dauert immer länger“).
+fn technik_nachladen(plate: &Plate, z: &Zugang, u: &mut Uebersicht, db: &Value) {
+    if !plate.technik_spalte_da(z) {
+        return;
+    }
+    // Clip-ID je (Karte, Clipname) aus der Datenbank.
+    let karten: HashMap<String, String> = db["karten"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|k| (text(&k["id"]), text(&k["name"]).to_uppercase()))
+        .collect();
+    let clip_id: HashMap<(String, String), String> = db["clips"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|c| {
+            let karte = karten.get(&text(&c["karte_id"]))?;
+            Some(((karte.clone(), text(&c["name"]).to_uppercase()), text(&c["id"])))
+        })
+        .collect();
+    let takes = u.drehs.iter_mut().flat_map(|d| d.plates.iter_mut()).flat_map(|p| p.takes.iter_mut());
+    let mut offen: Vec<(&mut TakeStand, String)> = Vec::new();
+    for t in takes.filter(|t| t.datei.is_none() && t.technik_db.is_none() && !t.clip.is_empty()) {
+        let karte = t.karte.as_deref().map(|k| ingest_kern::struktur::ordnername(k).to_uppercase());
+        let Some(id) = karte.and_then(|k| clip_id.get(&(k, t.clip.to_uppercase())).cloned()) else { continue };
+        offen.push((t, id));
+    }
+    if offen.is_empty() {
+        return;
+    }
+    let mut ids: Vec<String> = offen.iter().map(|(_, id)| id.clone()).collect();
+    ids.sort();
+    ids.dedup();
+    let Ok(technik) = plate.technik_der_clips(z, &ids) else { return };
+    for (t, id) in offen {
+        t.technik_db = technik.get(&id).cloned().filter(Value::is_object);
+    }
+}
+
+pub fn laden(plate: &Plate, zugang: Option<&Zugang>, projekt: Projekt, basis: &[PathBuf]) -> Uebersicht {
+    let beginn = std::time::Instant::now();
+    // Eingetragene Ziele und alle erreichbaren Ablagen (Merkdatei), jede einmal.
+    let mut orte: Vec<PathBuf> = Vec::new();
+    for b in basis.iter().cloned().chain(ingest_kern::ablage::finden()) {
+        let echt = std::fs::canonicalize(&b).unwrap_or_else(|_| b.clone());
+        if !orte.iter().any(|o| std::fs::canonicalize(o).unwrap_or_else(|_| o.clone()) == echt) {
+            orte.push(b);
         }
     }
+    // Ziele und Datenbank gleichzeitig: Das eine wartet aufs NAS, das andere aufs Netz.
+    let ((karten, unlesbar, ziele_ms), (drehs, jobs, db, hinweis, datenbank_ms)) = std::thread::scope(|s| {
+        let ziele = s.spawn(|| {
+            let t = std::time::Instant::now();
+            let (k, u) = karten_suchen(&orte, &projekt.kurzname);
+            (k, u, t.elapsed().as_millis())
+        });
+        let plan = s.spawn(|| {
+            let t = std::time::Instant::now();
+            let (d, j, db, h) = plan_laden(plate, zugang, &projekt);
+            (d, j, db, h, t.elapsed().as_millis())
+        });
+        (ziele.join().unwrap_or_default(), plan.join().unwrap_or_default())
+    });
     let mut u = zusammenfuehren(projekt, &drehs, &jobs, karten, unlesbar, &db);
     u.hinweis = hinweis;
+    let t = std::time::Instant::now();
+    if let Some(z) = zugang {
+        technik_nachladen(plate, z, &mut u, &db);
+    }
+    u.dauer =
+        Dauer { ziele_ms, datenbank_ms, technik_ms: t.elapsed().as_millis(), gesamt_ms: beginn.elapsed().as_millis() };
     u
 }
 
