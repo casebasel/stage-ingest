@@ -13,7 +13,7 @@ import { gemerkt, merken, useEinstellungen } from "../einstellungen";
 import { Status, type Ton } from "../teile";
 import { kurz } from "./Einlesen";
 import { PfadMenue, type PfadMenueStand } from "./PfadMenue";
-import { ExportDialog } from "./Export";
+import { ExportDialog, type ExportClip } from "./Export";
 import { Abspieler, type AbspielEintrag } from "./Abspieler";
 import { ClipMitBild, vorschauLaden, SpaltenKopf, SpaltenMenue, SpaltenZellen, useTakeSpalten, type Spalte, type TakeMitWerten } from "./TakeSpalten";
 
@@ -156,6 +156,11 @@ type ArtAendern = {
   studioLoeschen: (t: TakeStand) => Promise<void>;
 };
 const ArtKontext = createContext<ArtAendern | null>(null);
+
+/** Markierte Takes der Plate-Tabelle (Klick, ⌘/Ctrl-Klick, Shift-Klick), für den Export mehrerer auf einmal (Marlon,
+ *  20.10.2026: „mehrere Takes selektieren und sie dann mit Rechtsklick exportieren“). */
+type Markierung = { ids: Set<string>; setzen: (ids: Set<string>) => void; anker: React.MutableRefObject<string | null> };
+const MarkierungKontext = createContext<Markierung | null>(null);
 
 /** Art eines Takes, änderbar; ohne Verbindung nur angezeigt. */
 function TakeArt({ t }: { t: TakeStand }) {
@@ -760,9 +765,27 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
   const [spieler, setSpieler] = useState<number | null>(null);
   const [einzeln, setEinzeln] = useState<AbspielEintrag | null>(null);
   const [pfadMenue, setPfadMenue] = useState<PfadMenueStand | null>(null);
-  const [exportClip, setExportClip] = useState<{ datei: string; titel: string } | null>(null);
+  const [exportAuftrag, setExportAuftrag] = useState<{ dateien: ExportClip[]; titel: string } | null>(null);
+  const [markiert, setMarkiert] = useState<Set<string>>(() => new Set());
+  const anker = useRef<string | null>(null);
+  const markierung: Markierung = { ids: markiert, setzen: setMarkiert, anker };
+  useEffect(() => {
+    setMarkiert(new Set());
+    anker.current = null;
+  }, [auswahl]);
+  // Markierte Takes mit erreichbarer Clipdatei, in der Reihenfolge der Tabelle.
+  const markierteClips: ExportClip[] = plates.flatMap(({ plate }) =>
+    plate.takes
+      .filter((t) => markiert.has(t.id) && t.datei)
+      .map((t) => ({ datei: t.datei!, titel: `${plateTitel(plate)} · Take ${t.nummer}` })),
+  );
   pfadMenueOeffnen = (ev, t, titel) => {
     ev.preventDefault();
+    // Rechtsklick auf einen nicht markierten Take markiert nur ihn (wie im Finder).
+    if (!markiert.has(t.id)) {
+      setMarkiert(new Set([t.id]));
+      anker.current = t.id;
+    }
     setPfadMenue({ x: ev.clientX, y: ev.clientY, titel, dateien: t.dateien ?? (t.datei ? [t.datei] : []) });
   };
   spielerOeffnen = (id) => {
@@ -904,6 +927,7 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
         </div>
       ) : (
         <ArtKontext.Provider value={artAendern}>
+          <MarkierungKontext.Provider value={markierung}>
           <div className="projekt-rumpf">
             <nav className="baum" aria-label="Projekt">
               <ul>
@@ -953,6 +977,7 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
                 })()}
             </section>
           </div>
+          </MarkierungKontext.Provider>
         </ArtKontext.Provider>
       )}
       {spieler !== null && abspielListe[spieler] && <Abspieler liste={abspielListe} index={spieler} setIndex={setSpieler} />}
@@ -961,10 +986,14 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
         <PfadMenue
           m={pfadMenue}
           zu={() => setPfadMenue(null)}
-          exportieren={() => setExportClip({ datei: pfadMenue.dateien[0], titel: pfadMenue.titel })}
+          exportieren={() => setExportAuftrag({ dateien: [{ datei: pfadMenue.dateien[0], titel: pfadMenue.titel }], titel: pfadMenue.titel })}
+          mehrere={{
+            anzahl: markierteClips.length,
+            exportieren: () => setExportAuftrag({ dateien: markierteClips, titel: `${markierteClips.length} Takes` }),
+          }}
         />
       )}
-      {exportClip && <ExportDialog datei={exportClip.datei} titel={exportClip.titel} zu={() => setExportClip(null)} />}
+      {exportAuftrag && <ExportDialog dateien={exportAuftrag.dateien} titel={exportAuftrag.titel} zu={() => setExportAuftrag(null)} />}
     </div>
   );
 }
@@ -1375,6 +1404,30 @@ const hdriTon = (h: HdriStand) => {
 
 function PlateDetail({ dreh, p, drehWaehlen }: { dreh: DrehStand; p: PlateStand; drehWaehlen: () => void }) {
   const [gross, setGross] = useState<number | null>(null);
+  // Takes markieren: Klick = nur dieser, ⌘/Ctrl-Klick = dazu oder weg, Shift-Klick = Bereich ab dem zuletzt geklickten.
+  const mk = useContext(MarkierungKontext);
+  const markieren = (ev: React.MouseEvent, t: TakeStand) => {
+    if (!mk) return;
+    const ids = new Set(mk.ids);
+    if (ev.shiftKey && mk.anker.current) {
+      const reihe = p.takes.map((x) => x.id);
+      const a = reihe.indexOf(mk.anker.current);
+      const b = reihe.indexOf(t.id);
+      if (a >= 0 && b >= 0) {
+        for (const id of reihe.slice(Math.min(a, b), Math.max(a, b) + 1)) ids.add(id);
+        mk.setzen(ids);
+        return;
+      }
+    }
+    mk.anker.current = t.id;
+    if (ev.metaKey || ev.ctrlKey) {
+      if (ids.has(t.id)) ids.delete(t.id);
+      else ids.add(t.id);
+      mk.setzen(ids);
+      return;
+    }
+    mk.setzen(new Set([t.id]));
+  };
   const sp = useTakeSpalten(GRUNDSPALTEN, p.takes);
   // Mittelbilder neben den Metadaten (`05_METADATEN/<Clip>.jpg`), Studio wie Plate: als Kachel wie ein Foto, für Takes
   // ohne Mittelbild aus der Datenbank (Studio-Takes haben dort nie eines).
@@ -1418,7 +1471,7 @@ function PlateDetail({ dreh, p, drehWaehlen }: { dreh: DrehStand; p: PlateStand;
         )}
       </div>
       {p.takes.length ? (
-        <table className="tabelle">
+        <table className="tabelle tabelle-waehlbar">
           <thead>
             <tr>
               <SpaltenKopf spalten={spalten} />
@@ -1429,7 +1482,13 @@ function PlateDetail({ dreh, p, drehWaehlen }: { dreh: DrehStand; p: PlateStand;
               <tr
                 key={t.id}
                 tabIndex={t.datei ? 0 : undefined}
-                title={t.datei ? "Leertaste oder Doppelklick spielt den Take (MXF im ARRI Reference Tool) · Rechtsklick: Pfad kopieren" : undefined}
+                aria-selected={mk?.ids.has(t.id) || undefined}
+                title={
+                  t.datei
+                    ? "Klick markiert (⌘ oder Shift für mehrere) · Leertaste oder Doppelklick spielt den Take · Rechtsklick: Pfad kopieren, exportieren"
+                    : "Klick markiert (⌘ oder Shift für mehrere)"
+                }
+                onClick={(ev) => markieren(ev, t)}
                 onDoubleClick={() => t.datei && spielerOeffnen(t.id)}
                 onContextMenu={(ev) => pfadMenueOeffnen(ev, t, `${plateTitel(p)} · Take ${t.nummer}`)}
                 onKeyDown={(ev) => {

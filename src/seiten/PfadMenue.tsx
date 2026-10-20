@@ -20,7 +20,18 @@ async function kopieren(text: string) {
   }
 }
 
-export function PfadMenue({ m, zu, exportieren }: { m: PfadMenueStand; zu: () => void; exportieren?: () => void }) {
+export function PfadMenue({
+  m,
+  zu,
+  exportieren,
+  mehrere,
+}: {
+  m: PfadMenueStand;
+  zu: () => void;
+  exportieren?: () => void;
+  /** Mehrere markierte Takes (Marlon, 20.10.2026): alle mit denselben Einstellungen exportieren. */
+  mehrere?: { anzahl: number; exportieren: () => void };
+}) {
   const [kopiert, setKopiert] = useState<string | null>(null);
   useEffect(() => {
     const taste = (ev: KeyboardEvent) => ev.key === "Escape" && zu();
@@ -62,20 +73,35 @@ export function PfadMenue({ m, zu, exportieren }: { m: PfadMenueStand; zu: () =>
             </button>
           ))
         )}
-        {exportieren && m.dateien.length > 0 && (
+        {exportieren && (m.dateien.length > 0 || (mehrere && mehrere.anzahl > 1)) && (
           <>
             <div className="pfad-menue-trenner" />
-            <button
-              role="menuitem"
-              className="pfad-menue-eintrag"
-              onClick={() => {
-                zu();
-                exportieren();
-              }}
-            >
-              <Film size={13} aria-hidden />
-              <span>Exportieren … (ProRes, MP4, EXR)</span>
-            </button>
+            {mehrere && mehrere.anzahl > 1 && (
+              <button
+                role="menuitem"
+                className="pfad-menue-eintrag"
+                onClick={() => {
+                  zu();
+                  mehrere.exportieren();
+                }}
+              >
+                <Film size={13} aria-hidden />
+                <span>{mehrere.anzahl} markierte Takes exportieren … (ProRes, MP4, EXR)</span>
+              </button>
+            )}
+            {m.dateien.length > 0 && (
+              <button
+                role="menuitem"
+                className="pfad-menue-eintrag"
+                onClick={() => {
+                  zu();
+                  exportieren();
+                }}
+              >
+                <Film size={13} aria-hidden />
+                <span>{mehrere && mehrere.anzahl > 1 ? "Nur diesen Take exportieren …" : "Exportieren … (ProRes, MP4, EXR)"}</span>
+              </button>
+            )}
           </>
         )}
       </div>

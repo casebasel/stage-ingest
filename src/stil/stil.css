@@ -2306,6 +2306,10 @@ input[type="checkbox"][role="switch"]:checked::before {
   display: grid;
   gap: 4px;
 }
+.export-liste {
+  margin: 0 0 12px;
+  line-height: 1.5;
+}
 .export-fuss {
   display: flex;
   gap: 12px;

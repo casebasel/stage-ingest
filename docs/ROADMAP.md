@@ -54,8 +54,11 @@ Vier Prüfer haben den Code gelesen (Kopierpfad, Löschen und Verschieben, Netz 
 - ~~Clip exportieren~~ gebaut (0.1.39): Rechtsklick auf eine Take-Zeile → „Exportieren …“. ProRes MOV (422 LT bis
   4444 XQ; ART CMD → MXF, ohne Neukodieren in MOV), MP4 H.264/H.265 (über ProRes HQ und `avconvert`, nur Mac), EXR
   (linear ACES AP0, PIZ). Farbe Rec.709 mit Look, Rec.709 oder Log (Vorgabe der Kamera); Breite Original/3840/1920/1280.
-  Ziel `<Drehordner>/06_EXPORT/<Art>/` oder frei; nie überschreiben. Offen: MP4 unter Windows (ffmpeg), Ton (ART CMD
-  `export … .wav`), mehrere Clips auf einmal, Abspielfassung der Stage (`plate_version`).
+  Ziel `<Drehordner>/06_EXPORT/<Art>/` oder frei; nie überschreiben. ~~Mehrere Clips auf einmal~~ gebaut (0.1.71,
+  20.10.2026): Takes in der Plate-Tabelle markieren (Klick, ⌘/Ctrl, Shift), Rechtsklick → „N markierte Takes
+  exportieren …“, dieselben Einstellungen und derselbe Zielordner, einer nach dem anderen, Abbrechen nach dem
+  laufenden Take. Offen: MP4 unter Windows (ffmpeg), Ton (ART CMD `export … .wav`), Abspielfassung der Stage
+  (`plate_version`).
 
 ## Prüfung und Konkurrenzvergleich (09.10.2026)
 
