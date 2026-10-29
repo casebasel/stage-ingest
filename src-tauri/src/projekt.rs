@@ -2113,6 +2113,153 @@ fn technik_nachladen(plate: &Plate, z: &Zugang, u: &mut Uebersicht, db: &Value) 
     }
 }
 
+/// Brennweite aus User Info 2 (`<Name>;<mm>mm;<T-Stop>`).
+fn info2_mm(s: &str) -> Option<f64> {
+    s.split(';').nth(1)?.trim().trim_end_matches("mm").trim().parse().ok()
+}
+
+/// Kamera zwischen zwei Takes bewegt: Tilt oder Roll aus den Clips weichen um mehr als 0,5° ab.
+fn bewegt((ta, ra): (f64, f64), (tb, rb): (f64, f64)) -> bool {
+    (ta - tb).abs().max((ra - rb).abs()) > 0.5
+}
+
+/// Objektivwechsel und Kamerabewegung zwischen Takes (Marlon, 28.10.2026: „häufig vergessen, die Brennweite zu
+/// aktualisieren … wurde die Kamera bewegt“; ENTSCHEIDUNGEN 28.10.2026). Aus den Clips: Brennweite uneinheitlich
+/// (Klappe/CAP am Take, Einrichtung, Kamera-Eintrag oder LDS im Clip, User Info 2) oder Tilt/Roll-Sprung zwischen
+/// aufeinanderfolgenden Takes derselben Einrichtung ohne neue Messung. Nur Meldungen unter „Zu klären“, nichts wird
+/// geändert; „Zur Kenntnis genommen“ blendet sie aus (`stimmt_so`). Im Studio keine Bewegungsprüfung (Tracking).
+fn objektiv_und_bewegung(u: &mut Uebersicht, db: &Value, kamerawerte: &HashMap<String, Value>) {
+    let ok: HashSet<String> = u.karten.iter().flat_map(|k| &k.inhalt.stimmt_so).map(|s| s.schluessel.clone()).collect();
+    let aus_clip: HashMap<String, Value> = db["clips"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|c| c["geloescht"] != true)
+        .map(|c| (text(&c["name"]).to_uppercase(), c["aus_clip"].clone()))
+        .collect();
+    let zusammenfassungen = |karte: Option<&str>| -> Vec<PathBuf> {
+        u.karten
+            .iter()
+            .filter(|k| karte.is_some_and(|x| k.inhalt.karte.eq_ignore_ascii_case(x)))
+            .map(|k| k.datei.clone())
+            .collect()
+    };
+    let zahl = |t: &TakeStand, f: &str| t.werte.get(f).and_then(Value::as_f64);
+    let mm = |x: f64| format!("{} mm", ((x * 10.0).round() / 10.0).to_string().replace('.', ","));
+    let grad = |x: f64| format!("{x:.1}").replace('.', ",");
+    let mut neu: Vec<Unstimmigkeit> = Vec::new();
+    for p in u.drehs.iter().flat_map(|d| d.plates.iter()) {
+        let mut takes: Vec<&TakeStand> = p.takes.iter().filter(|t| !t.clip.is_empty()).collect();
+        takes.sort_by_key(|t| t.nummer);
+        for t in &takes {
+            let kw = kamerawerte.get(&t.clip.to_uppercase());
+            let mut quellen: Vec<(String, f64)> = Vec::new();
+            if let Some(x) = zahl(t, "take.kamera.brennweiteMm") {
+                let q = match t.werte.get("take.kamera.quelle").and_then(Value::as_str).unwrap_or("") {
+                    "klappe" => "Klappe",
+                    "cap" => "CAP",
+                    "clip" => "Clip",
+                    _ => "Take",
+                };
+                quellen.push((q.into(), x));
+            }
+            if let Some(x) = zahl(t, "take.lage.brennweiteMm") {
+                quellen.push(("Einrichtung".into(), x));
+            } else if let Some(x) = zahl(t, "plate.kamera.brennweiteMm") {
+                quellen.push(("Plate".into(), x));
+            }
+            if let Some(k) = kw {
+                if let Some(x) = k["brennweiteMm"].as_f64() {
+                    let q = if k["objektivdaten"] == "lds" { "Objektiv (LDS)" } else { "Kamera-Eintrag" };
+                    quellen.push((q.into(), x));
+                }
+                if let Some(x) = k["objektivKlappe"].as_str().and_then(info2_mm) {
+                    quellen.push(("Klappe (Info 2)".into(), x));
+                }
+            }
+            if quellen.len() < 2 {
+                continue;
+            }
+            let (min, max) =
+                quellen.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), (_, x)| (a.min(*x), b.max(*x)));
+            if max - min <= 0.5 {
+                continue;
+            }
+            let werte: Vec<String> = quellen.iter().map(|(q, x)| format!("{q} {}", mm(*x))).collect();
+            let schluessel = format!("objektiv:{}:{}", t.id, werte.join("|"));
+            if ok.contains(&schluessel) {
+                continue;
+            }
+            neu.push(Unstimmigkeit {
+                schluessel,
+                art: "objektiv".into(),
+                clip: t.clip.clone(),
+                karte: t.karte.clone().unwrap_or_default(),
+                take_id: t.id.clone(),
+                vorschlag_take: None,
+                vorschlag_dreh: None,
+                text: format!(
+                    "{} · Take {}: Brennweite uneinheitlich ({}). Welche stimmt? Die Einrichtung am Take oder den \
+                     Objektiv-Eintrag an der Kamera nachführen; der Ingest ändert nichts.",
+                    plate_titel(p),
+                    t.nummer,
+                    werte.join(", ")
+                ),
+                dateien: zusammenfassungen(t.karte.as_deref()),
+                clipdateien: t.dateien.clone(),
+            });
+        }
+        if p.art == "studio" {
+            continue;
+        }
+        for w in takes.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            let einrichtung = |t: &TakeStand| zahl(t, "take.lage.einrichtung").unwrap_or(1.0);
+            if einrichtung(a) != einrichtung(b) {
+                continue;
+            }
+            let tr = |t: &TakeStand| {
+                let v = aus_clip.get(&t.clip.to_uppercase())?;
+                Some((v["tiltGrad"].as_f64()?, v["rollGrad"].as_f64()?))
+            };
+            let (Some(x), Some(y)) = (tr(a), tr(b)) else { continue };
+            if !bewegt(x, y) {
+                continue;
+            }
+            let schluessel = format!("bewegt:{}:{}", b.id, a.id);
+            if ok.contains(&schluessel) {
+                continue;
+            }
+            neu.push(Unstimmigkeit {
+                schluessel,
+                art: "bewegt".into(),
+                clip: b.clip.clone(),
+                karte: b.karte.clone().unwrap_or_default(),
+                take_id: b.id.clone(),
+                vorschlag_take: None,
+                vorschlag_dreh: None,
+                text: format!(
+                    "{} · Kamera zwischen Take {} und Take {} bewegt (Tilt {}° → {}°, Roll {}° → {}°), ohne \
+                     neue Einrichtung: Kamerahöhe und Abstand an Take {} stammen noch von Take {}. Messung am Set \
+                     nachholen (Plate Assistant); der Ingest ändert nichts.",
+                    plate_titel(p),
+                    a.nummer,
+                    b.nummer,
+                    grad(x.0),
+                    grad(y.0),
+                    grad(x.1),
+                    grad(y.1),
+                    b.nummer,
+                    a.nummer
+                ),
+                dateien: zusammenfassungen(b.karte.as_deref()),
+                clipdateien: b.dateien.clone(),
+            });
+        }
+    }
+    u.unstimmigkeiten.extend(neu);
+}
+
 pub fn laden(plate: &Plate, zugang: Option<&Zugang>, projekt: Projekt, basis: &[PathBuf]) -> Uebersicht {
     let beginn = std::time::Instant::now();
     // Eingetragene Ziele und alle erreichbaren Ablagen (Merkdatei), jede einmal.
@@ -2142,6 +2289,12 @@ pub fn laden(plate: &Plate, zugang: Option<&Zugang>, projekt: Projekt, basis: &[
     let t = std::time::Instant::now();
     if let Some(z) = zugang {
         technik_nachladen(plate, z, &mut u, &db);
+        let kamerawerte = if plate.technik_spalte_da(z) {
+            plate.kamerawerte_lesen(z, &u.projekt.id).unwrap_or_default()
+        } else {
+            Default::default()
+        };
+        objektiv_und_bewegung(&mut u, &db, &kamerawerte);
     }
     u.dauer =
         Dauer { ziele_ms, datenbank_ms, technik_ms: t.elapsed().as_millis(), gesamt_ms: beginn.elapsed().as_millis() };
@@ -2459,6 +2612,15 @@ mod tests {
             "Zwischen Take 1 (A010C022) und Take 3 (A010C023) liegt kein Clip für diesen Take"
         );
         assert_eq!(u.drehs[0].plates[0].takes[2].karte.as_deref(), Some("A010R132"));
+    }
+
+    #[test]
+    fn bewegung_und_info2() {
+        assert!(bewegt((5.1, 0.7), (18.3, 0.6)), "Plate 1 Demo, Take 2 → 3");
+        assert!(!bewegt((5.1, 0.7), (5.4, 0.9)), "Zittern unter 0,5°");
+        assert_eq!(info2_mm("Sony FE 35;35mm;T1.8"), Some(35.0));
+        assert_eq!(info2_mm("Sony;17.5mm;"), Some(17.5));
+        assert_eq!(info2_mm("Sony 35;;"), None);
     }
 
     /// Zwei Karten „Untitled“ an zwei Drehtagen, beide mit `C0001.MP4` ohne Take: zwei Zeilen, nicht eine. Sonst

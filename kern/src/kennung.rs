@@ -65,6 +65,52 @@ pub fn in_bytes(d: &[u8]) -> Vec<Kennung> {
     aus
 }
 
+/// Objektiv aus User Info 2 (`LENS:<Name>;<mm>mm;<T-Stop>`, Stage-Klappe, ENTSCHEIDUNGEN 28.10.2026): der Text nach
+/// `LENS:` bis zum ersten Steuerzeichen, Nullbyte oder Anführungszeichen, höchstens 128 Zeichen. Gesucht wie die
+/// Take-ID: als ASCII und als UTF-16 (MXF-Kopf). `None` ohne Eintrag.
+pub fn objektiv_in_bytes(d: &[u8]) -> Option<String> {
+    if let Some(o) = objektiv_in_ascii(d) {
+        return Some(o);
+    }
+    for anfang in [0, 1] {
+        let (paare, _) = d.get(anfang..).unwrap_or_default().as_chunks::<2>();
+        for zeichen in [0, 1] {
+            let schmal: Vec<u8> = paare.iter().map(|p| if p[1 - zeichen] == 0 { p[zeichen] } else { 0 }).collect();
+            if let Some(o) = objektiv_in_ascii(&schmal) {
+                return Some(o);
+            }
+        }
+    }
+    None
+}
+
+fn objektiv_in_ascii(d: &[u8]) -> Option<String> {
+    let praefix = b"LENS:";
+    let mut i = 0;
+    while let Some(p) = d[i..].windows(praefix.len()).position(|w| w.eq_ignore_ascii_case(praefix)) {
+        let a = i + p;
+        i = a + 1;
+        if a > 0 && d[a - 1].is_ascii_alphanumeric() {
+            continue;
+        }
+        let rest = &d[a + praefix.len()..];
+        let ende = rest.iter().position(|c| !(0x20..0x7f).contains(c) || *c == b'"').unwrap_or(rest.len()).min(128);
+        let text = String::from_utf8_lossy(&rest[..ende]).trim().to_owned();
+        if !text.is_empty() {
+            return Some(text);
+        }
+    }
+    None
+}
+
+/// Objektiv aus User Info 2 in der Datei (MXF: Kopf bis `kopf` Bytes; MOV: ganze Metadaten über die Take-ID-Suche
+/// entfällt, dort wird der Kopf ebenso gelesen).
+pub fn objektiv_schnell(pfad: &Path, kopf: u64) -> Option<String> {
+    let mut d = Vec::new();
+    std::fs::File::open(pfad).and_then(|f| f.take(kopf).read_to_end(&mut d)).ok()?;
+    objektiv_in_bytes(&d)
+}
+
 /// Take-ID in einem Text (z. B. ein Feld aus ART CMD).
 pub fn in_text(t: &str) -> Vec<Kennung> {
     let mut aus = Vec::new();
@@ -121,6 +167,17 @@ pub fn schnell(pfad: &Path, kopf: u64) -> Option<Kennung> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn objektiv_aus_user_info_2() {
+        assert_eq!(objektiv_in_bytes(b"xx LENS:Sony FE 35;35mm;T1.8\0yy"), Some("Sony FE 35;35mm;T1.8".into()));
+        assert_eq!(objektiv_in_bytes(b"LENS:Sony 35;35mm;\n"), Some("Sony 35;35mm;".into()));
+        assert_eq!(objektiv_in_bytes(b"GLENS:x"), None, "nur am Wortanfang");
+        // UTF-16BE wie im MXF-Kopf.
+        let utf16: Vec<u8> = "LENS:Sony FE 35;35mm;T1.8".encode_utf16().flat_map(|c| c.to_be_bytes()).collect();
+        assert_eq!(objektiv_in_bytes(&utf16), Some("Sony FE 35;35mm;T1.8".into()));
+        assert_eq!(objektiv_in_bytes(b"nichts"), None);
+    }
+
     use super::*;
 
     const ID: &str = "01JA2B3C4D5E6F7G8H9JKMNPQR";

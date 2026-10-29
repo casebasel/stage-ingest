@@ -140,13 +140,23 @@ pub fn lesen(a: &Anfrage) -> BTreeMap<String, String> {
             }
         }
         if let Ok(s) = artcmd::spalten(&text) {
-            let k = artcmd::kamerawerte(&s);
+            let mut k = artcmd::kamerawerte(&s);
+            // Objektiv der Klappe aus User Info 2 (`LENS:…`, Stage; ENTSCHEIDUNGEN 28.10.2026): im Kopf der Datei oder
+            // in der CSV.
+            if let Some(o) =
+                objektiv_klappe(&a.datei).or_else(|| ingest_kern::kennung::objektiv_in_bytes(text.as_bytes()))
+            {
+                w.insert("objektivKlappe".into(), o.clone());
+                k.insert("objektivKlappe".into(), Value::String(o));
+            }
             w.extend(anzeige(&k).into_iter().map(|(spalte, v)| (spalte.to_owned(), v)));
             if !k.is_empty() {
                 w.insert(KAMERAWERTE.into(), Value::Object(k).to_string());
             }
             w.extend(artcmd::felder(&s).into_iter().map(|(feld, v)| (format!("artcmd:{feld}"), v)));
         }
+    } else if let Some(o) = objektiv_klappe(&a.datei) {
+        w.insert("objektivKlappe".into(), o);
     }
     // Leer ist kein Wert: Er darf weder die Spalte füllen noch an einen Take gehen, sonst überdeckte er dort einen Wert
     // aus CAP oder von Hand (Plate Assistant, 17.10.2026).
@@ -154,6 +164,11 @@ pub fn lesen(a: &Anfrage) -> BTreeMap<String, String> {
         w.entry(z.to_owned()).or_insert(v);
     }
     w
+}
+
+/// Objektiv aus User Info 2 im Kopf der Clipdatei (64 KB, wie die Take-ID).
+fn objektiv_klappe(datei: &std::path::Path) -> Option<String> {
+    datei.is_file().then(|| ingest_kern::kennung::objektiv_schnell(datei, 64 * 1024)).flatten()
 }
 
 /// Spaltenwerte aus den typisierten Kamerawerten, damit die Take-Tabelle dasselbe zeigt wie die Datenbank. Shutter und

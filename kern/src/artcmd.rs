@@ -201,6 +201,16 @@ pub fn kamerawerte(s: &BTreeMap<String, Spalte>) -> Map<String, Value> {
     if let Some(b) = s.get("color/lookApplied").and_then(|w| w.erst.parse::<bool>().ok()) {
         k.insert("lookEingebrannt".into(), Value::Bool(b));
     }
+    // Woher die Objektivdaten stammen (ENTSCHEIDUNGEN 28.10.2026): „lds“ vom Objektiv (Seriennummer oder Encoder
+    // ungleich 0), sonst „manuell“ = Handeintrag „Lens Data“ an der Kamera (Sony-Objektive sind passiv).
+    if s.contains_key("lensDevice/lensModel") || s.contains_key(BRENNWEITE) {
+        let ungleich_null = |a: &str| s.get(a).and_then(|w| zahl(&w.erst)).is_some_and(|x| x != 0.0);
+        let lds = ungleich_null("lensDevice/lensSerialNumber")
+            || ungleich_null("lensState/lensScaleRawEncoderValueIris")
+            || ungleich_null("lensState/lensScaleRawEncoderValueFocus")
+            || ungleich_null("lensState/lensScaleRawEncoderValueFL");
+        k.insert("objektivdaten".into(), Value::String(if lds { "lds" } else { "manuell" }.into()));
+    }
     // (Schlüssel, Spalte, Faktor, Stellen); `brennweiteMm` nur mit Objektivdaten (0 = keine).
     for (schluessel, spalte, faktor, stellen) in [
         ("iso", "sensorState/exposureIndex", 1.0, 0),
@@ -355,7 +365,8 @@ mod tests {
                 "modell": "ARRI ALEXA Mini", "seriennummer": "12345", "objektiv": "SONY CA 35 0", "sensor": "ALEV III",
                 "look": "ARRI 709", "lookEingebrannt": false, "gamma": "LogC3", "farbraum": "AWG3",
                 "iso": 800, "weissK": 5600, "tint": 0, "belichtungS": 0.02, "shutterGrad": 180, "ndDichte": 2.1,
-                "sensorFps": 25, "projektFps": 25, "brennweiteMm": 35, "aufloesungPx": "2880x1620",
+                "sensorFps": 25, "projektFps": 25, "brennweiteMm": 35, "objektivdaten": "manuell",
+                "aufloesungPx": "2880x1620",
                 "filmbackBreiteMm": 23.76, "filmbackHoeheMm": 13.37,
                 "cdl": { "slope": [1, 1, 1], "offset": [0, 0, 0], "power": [1, 1, 1], "saturation": 1 },
                 "quelle": "artcmd"

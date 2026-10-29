@@ -2017,7 +2017,7 @@ function ZuKlaeren({
         {entfernteWidersprueche > 0 && (
           <>
             {entfernteWidersprueche === 1 ? "Ein Clip trägt" : "Clips tragen"} die ID eines Takes, den der Plate Assistant
-            automatisch entfernt hat, weil die Kamera keine Aufnahme meldete. Gehört der Clip dazu: Take wiederherstellen.
+            automatisch entfernt hat, weil die Kamera keine Aufnahme meldete. Gehört der Clip dazu: Take wiederherstellen. Brennweite uneinheitlich oder Kamera ohne neue Einrichtung bewegt: am Set nachführen, „Zur Kenntnis genommen“ blendet die Meldung aus.
           </>
         )}
       </p>
@@ -2057,7 +2057,18 @@ function ZuKlaeren({
                 </td>
                 <td>{x.text}</td>
                 <td className="spalte-aktion">
-                  {x.art === "entfernt" ? (
+                  {x.art === "bewegt" || x.art === "objektiv" ? (
+                    <span className="aktion-stapel">
+                      <button
+                        className="knopf knopf-klein"
+                        disabled={beschaeftigt}
+                        onClick={() => unstimmigAendern(x, "stimmt")}
+                        title="Zur Kenntnis genommen; die Meldung erscheint nicht mehr (am Set nachmessen bzw. nachführen)"
+                      >
+                        Zur Kenntnis genommen
+                      </button>
+                    </span>
+                  ) : x.art === "entfernt" ? (
                     <span className="aktion-stapel">
                       <button
                         className="knopf knopf-klein"

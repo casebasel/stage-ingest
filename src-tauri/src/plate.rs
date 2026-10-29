@@ -717,6 +717,28 @@ impl Plate {
             .collect())
     }
 
+    /// Nur die typisierten Kamerawerte aller Clips eines Projekts (Clipname gross → `technik.kamerawerte`), klein
+    /// genug für jedes Laden der Projektseite (Objektiv- und Bewegungsprüfung, ENTSCHEIDUNGEN 28.10.2026).
+    pub fn kamerawerte_lesen(
+        &self,
+        z: &Zugang,
+        projekt_id: &str,
+    ) -> Result<std::collections::HashMap<String, Value>, String> {
+        let v = self.lesen(
+            z,
+            &format!(
+                "clip?projekt_id=eq.{}&geloescht=not.is.true&select=name,kamerawerte:technik->kamerawerte",
+                url_teil(projekt_id)
+            ),
+        )?;
+        Ok(v.as_array()
+            .into_iter()
+            .flatten()
+            .filter(|c| c["kamerawerte"].is_object())
+            .map(|c| (text(&c["name"]).to_uppercase(), c["kamerawerte"].clone()))
+            .collect())
+    }
+
     /// `clip.technik` dieser Clips (Clip-ID → Wert); fehlt ein Clip, fehlt er auch hier.
     pub fn technik_der_clips(
         &self,

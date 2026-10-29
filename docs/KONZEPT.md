@@ -187,6 +187,15 @@ Pro Clip werden mit ARRI ART CMD die Werte **pro Bild** herausgezogen (positiona
 
 Doppelklick auf einen Clip (Take-Tabellen, „Zu klären“) spielt ihn in der App, Leertaste/Esc schliesst, ← → nächster Take, K Pause, `,` `.` Bild für Bild. **ARRIRAW in MXF** (ALEXA Mini) entwickelt die App selbst (`kern/src/arriraw.rs`, Protokoll `arriraw` in `src-tauri/src/arri_abspielen.rs`): Bild für Bild direkt aus dem Original, halbe Auflösung, Rec.709 wie ARRI 709, keine Zusatzdateien (Marlon, 15.10.2026: Vorschau-Videos „generieren zu viel Daten“; der ART Viewer lädt keinen Clip von aussen, ARRI dokumentiert nur Ziehen und Ablegen; einen freien ARRIRAW-Player gibt es nicht, ffmpeg kann es nicht). Gemessen an 40 Clips der Mini und gegen ART CMD abgeglichen (mittlere Abweichung unter 3 von 255): 12 Bit, stückweise verdichtet (oberhalb 1024 je 512 Werte doppelte Schrittweite), 44 Byte Vorspann je Bild, Bayer B G / G R, Weissabgleich und EI aus dem ARRI-Kopf. Volle 25 B/s brauchen etwa 175 MB/s vom Speicher; kommt das Netz nicht mit, überspringt der Player Bilder und sagt es. Anderer Aufbau (ALEXA 35/HDE, ARRICORE, ProRes in MXF) → Hinweis und „Im ART Viewer öffnen“. MOV/MP4 spielt das Video-Element.
 
+## 7b. Objektivwechsel und Kamerabewegung (0.1.72)
+
+Marlon (28.10.2026): nach einem Objektivwechsel wird die Brennweite oft nicht nachgeführt, und die Kamera wird zwischen Takes bewegt, ohne neue Einrichtung. Die Nachfrage nach „Cut“ bauen Plate Assistant und Stage (Systemkarte, ENTSCHEIDUNGEN 28.10.2026). Der Ingest prüft nachträglich aus den Clips und meldet unter „Zu klären“, ändert aber nichts; „Zur Kenntnis genommen“ blendet die Meldung aus (`stimmt_so`).
+
+- **Objektiv aus der Klappe:** Die Stage schreibt vor REC `LENS:<Name>;<mm>mm;<T-Stop>` in User Info 2 der Kamera. Der Ingest liest den Wert aus dem Clipkopf (`kennung::objektiv_schnell`, ASCII und UTF-16) oder aus der ART-CMD-Tabelle und legt ihn als `objektivKlappe` in `clip.technik.kamerawerte` ab (Spalte „Objektiv (Klappe)“).
+- **LDS oder Handeintrag:** Die Sony-Objektive sind passiv (Marlon, 29.10.2026). `kamerawerte.objektivdaten` ist `lds`, wenn das Objektiv eine Seriennummer oder Encoderwerte liefert, sonst `manuell`: dann ist `brennweiteMm` im Clip der Handeintrag „Lens Data“ der Mini, keine Messung. Rang: Clip `lds` > CAP > Klappe > Clip `manuell`.
+- **Brennweite uneinheitlich:** Je Take werden alle Angaben verglichen (Take: Klappe/CAP, Einrichtung oder Plate, Clip: LDS oder Kamera-Eintrag, Info 2). Weichen sie um mehr als 0,5 mm ab, erscheint „Brennweite uneinheitlich (Klappe 35 mm, Kamera-Eintrag 50 mm)“; welche stimmt, entscheidet das Set.
+- **Kamera bewegt:** Aufeinanderfolgende Takes derselben Einrichtung (`take.lage.einrichtung`) mit Tilt- oder Roll-Sprung über 0,5° aus `aus_clip` → „Kamera zwischen Take 2 und Take 3 bewegt, ohne neue Einrichtung“. Beispiel Plate 1 „Demo“ (Tilt 5,1° → 18,3° → −1,1°, eine Einrichtung). Im Studio keine Bewegungsprüfung (Tracking).
+
 ## 8. HDRI
 
 - Ein HDRI hängt an einer **Plate** oder an einem **Drehort**. Ein Take nimmt das HDRI seiner Plate, sonst das zeitlich nächste seines Drehorts.

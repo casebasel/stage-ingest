@@ -167,6 +167,8 @@ const KATALOG: Spalte[] = [
   tech("cdl", "CDL", "Kamerawerte", "Clip-Metadaten / ART CMD", undefined, false),
   tech("look", "Look", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Take (CAP), sonst Plate", "plate.kamera.look", false),
   tech("objektiv", "Objektiv", "Kamerawerte", "Clip-Metadaten / ART CMD, sonst Take (CAP), sonst Einrichtung am Take, sonst Plate", "plate.kamera.objektiv", false),
+  // Objektiv, wie es die Stage-Klappe vor REC in User Info 2 schreibt (`LENS:<Name>;<mm>mm;<T-Stop>`; ENTSCHEIDUNGEN 28.10.2026).
+  tech("objektivKlappe", "Objektiv (Klappe)", "Kamerawerte", "User Info 2 im Clip (Stage-Klappe)", undefined, false),
   tech("brennweite", "Brennweite mm", "Kamerawerte", "ART CMD, sonst Take (CAP), sonst Einrichtung am Take, sonst Plate", "plate.kamera.brennweiteMm"),
   // Blende und Fokus: am Take aus CAP oder von Hand (Plate Assistant Build 39), sonst die Plate; aus dem Clip erst, wenn
   // Objektivdaten an einem echten Clip geprüft sind (die rohen Werte stehen unter „Weitere“).
