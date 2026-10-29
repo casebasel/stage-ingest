@@ -22,6 +22,13 @@ Gebaut ist der Kern (siehe KONZEPT Kapitel 14). Offen, in dieser Reihenfolge:
      Byte 416/420/432 = 25000); eindeutig erst mit einem Clip, bei dem Sensor- und Projekt-fps verschieden sind
 4. Erst danach: Stage Ingest am Dreh einsetzen, die ersten Tage parallel zum bisherigen Werkzeug.
 
+## Objektivwechsel und Kamerabewegung (Marlon, 28.10.2026; Systemkarte ENTSCHEIDUNGEN 28.10.2026, in Abstimmung)
+
+Marlon vergisst beim Objektivwechsel zwischen Takes die Brennweite nachzuführen; die Kamera wird bewegt, ohne neue Einrichtung (Plate 1 „Demo“: Tilt laut Clips 5,1° → 18,3° → −1,1°, eine Einrichtung). Die Nachfrage nach „Cut“ bauen Plate Assistant und Stage. Teil des Ingest, nach der Karte:
+
+- **Brennweite aus dem Clip gegen den Take:** `clip.technik.kamerawerte.brennweiteMm` gegen `take.lage.brennweiteMm` / `plate.kamera.brennweiteMm`; Abweichung als Unstimmigkeit unter „Zu klären“ („Objektiv im Clip 50 mm, am Take 35 mm“). Die Spalte zeigt den Clip schon heute zuerst.
+- **Kamera bewegt:** Tilt/Roll aus dem Clip zwischen aufeinanderfolgenden Takes derselben Einrichtung; Sprung über eine Schwelle (z. B. 0,5°) → „Kamera zwischen Take 2 und 3 bewegt, Messung fehlt“ unter „Zu klären“. Korrigieren kann nur das Set; der Ingest zeigt, welche Takes falsche Höhen tragen.
+
 ## Code-Prüfung 19.10.2026: offene Punkte
 
 Vier Prüfer haben den Code gelesen (Kopierpfad, Löschen und Verschieben, Netz und Zugangsdaten, Oberfläche). Das Paket „Karten-Identität“ ist in 0.1.66 gebaut (KONZEPT, Abschnitt „Karten-Identität“). Offen, in dieser Reihenfolge:
