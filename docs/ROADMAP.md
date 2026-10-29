@@ -26,7 +26,7 @@ Gebaut ist der Kern (siehe KONZEPT Kapitel 14). Offen, in dieser Reihenfolge:
 
 Marlon vergisst beim Objektivwechsel zwischen Takes die Brennweite nachzuführen; die Kamera wird bewegt, ohne neue Einrichtung (Plate 1 „Demo“: Tilt laut Clips 5,1° → 18,3° → −1,1°, eine Einrichtung). Die Nachfrage nach „Cut“ bauen Plate Assistant und Stage. Teil des Ingest, nach der Karte:
 
-- **Brennweite aus dem Clip gegen den Take:** `clip.technik.kamerawerte.brennweiteMm` gegen `take.lage.brennweiteMm` / `plate.kamera.brennweiteMm`; Abweichung als Unstimmigkeit unter „Zu klären“ („Objektiv im Clip 50 mm, am Take 35 mm“). Die Spalte zeigt den Clip schon heute zuerst.
+- **Brennweite: Kamera-Eintrag gegen Take.** Die Sony-Objektive sind passiv (Marlon, 29.10.2026); `brennweiteMm` im Clip ist der Handeintrag „Lens Data“ der Mini (lensModel „SONY CA 35 0“, Seriennummer 0, Encoder 0), kein Messwert. Nur als Abgleich zweier Handangaben melden („Kamera sagt 50 mm, Take 35 mm“), nicht als Wahrheit; die Spaltenquelle entsprechend beschriften.
 - **Kamera bewegt:** Tilt/Roll aus dem Clip zwischen aufeinanderfolgenden Takes derselben Einrichtung; Sprung über eine Schwelle (z. B. 0,5°) → „Kamera zwischen Take 2 und 3 bewegt, Messung fehlt“ unter „Zu klären“. Korrigieren kann nur das Set; der Ingest zeigt, welche Takes falsche Höhen tragen.
 
 ## Code-Prüfung 19.10.2026: offene Punkte
