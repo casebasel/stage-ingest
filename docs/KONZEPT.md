@@ -200,6 +200,10 @@ Marlon (28.10.2026): nach einem Objektivwechsel wird die Brennweite oft nicht na
 
 Marlon (03.11.2026): „Die GPS-Daten lassen sich nicht kopieren … auf den Wert doppelklicken“, „Werte kopieren sollte man bei allen können.“ Ein Doppelklick auf eine Tabellenzelle mit Text kopiert ihren Wert in die Zwischenablage und zeigt kurz „Kopiert: …“ (`src/zwischenablage.ts`, in allen Tabellen). GPS kopiert die Koordinaten ungerundet (`data-kopie` an der Zelle). Zellen mit Knopf oder Bild und leere Zellen behalten ihr Verhalten (Vorschau: Take abspielen); in „Alle Takes“ öffnet ein einfacher Klick die Plate erst nach einer kurzen Pause, damit der Doppelklick kopieren kann. Die Dateiliste im Protokoll ist ausgenommen (Doppelklick öffnet wie im Finder, Pfad über Rechtsklick).
 
+## 7d. Himmelsrichtung, Sonne, Dauer ohne Clip (0.1.74)
+
+Marlon (03.11.2026): Himmelsrichtung „in Norden und ein Grad oder Nordwest … oder Süden“, Sonnenstand „auch weitergeben in die Ingest-App“. Spalte **Himmelsrichtung** zeigt den Kompasswert des Plate Assistant als Wort mit ganzen Grad in acht Sektoren („Südwest 212°“), dazu die Güte der Messung („±10°“, „Magnetfeld unruhig“); Quelle `take.lage.richtung`, sonst `plate.richtung`. Spalte **Sonne** zeigt `take.sonne.text` („von links hinten, 20° hoch“), vom iPhone aus Standort, Richtung und Startzeit gerechnet. **Dauer** rechnet ohne Clip `end_zeit − start_zeit`. Befund Predigerhof 16.10.: für Plates 4–6 wurde nie eine Messung übernommen (Sonne „Kamerarichtung fehlt“, kein Eintrag im Verlauf); der Plate Assistant fragt künftig nach, wenn das Messblatt ohne Übernehmen geschlossen wird. Spaltenabgleich mit dem Plate Assistant am 03.11.2026: alles, was am Set entsteht, schreibt die App; nur Clip oder Kamera liefern Vorschau, Container-Werte, Gamma, CDL, Tilt/Roll der Kamera und Objektiv (Klappe).
+
 ## 8. HDRI
 
 - Ein HDRI hängt an einer **Plate** oder an einem **Drehort**. Ein Take nimmt das HDRI seiner Plate, sonst das zeitlich nächste seines Drehorts.
