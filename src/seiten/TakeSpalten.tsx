@@ -70,6 +70,17 @@ function pa(t: TakeMitWerten, feld: string): string | undefined {
   return String(w);
 }
 
+/** Dauer des Takes aus der Klappe (`end_zeit − start_zeit`), wenn kein Clip da ist: „0:21“ oder „1:04:09“. */
+function takeDauer(t: TakeMitWerten): string | undefined {
+  const a = t.werte?.["take.start_zeit"];
+  const b = t.werte?.["take.end_zeit"];
+  if (typeof a !== "string" || typeof b !== "string") return undefined;
+  const s = Math.round((new Date(b).getTime() - new Date(a).getTime()) / 1000);
+  if (!isFinite(s) || s < 0) return undefined;
+  const zwei = (n: number) => String(n).padStart(2, "0");
+  return s >= 3600 ? `${Math.floor(s / 3600)}:${zwei(Math.floor((s % 3600) / 60))}:${zwei(s % 60)}` : `${Math.floor(s / 60)}:${zwei(s % 60)}`;
+}
+
 function uhrzeit(iso: string | undefined): string | undefined {
   if (!iso) return undefined;
   const d = new Date(iso);
@@ -150,7 +161,11 @@ const KATALOG: Spalte[] = [
   tech("aufloesung", "Auflösung", "Bild", "Clipdatei (Container)"),
   tech("bildrate", "FPS", "Bild", "Clipdatei (Container)"),
   tech("bilder", "Bilder", "Bild", "Clipdatei (Container)"),
-  tech("dauer", "Dauer", "Bild", "Clipdatei (Container)"),
+  // Ohne Clip aus Start- und Endzeit des Takes (Plate Assistant, 03.11.2026: „das ist eure Seite“).
+  {
+    ...tech("dauer", "Dauer", "Bild", "Clipdatei (Container), sonst Plate Assistant (take.end_zeit − take.start_zeit)"),
+    wert: (t, x) => x?.dauer ?? takeDauer(t),
+  },
   tech("startTc", "Start TC", "Bild", "Clipdatei (Timecode-Spur), sonst Plate Assistant", "take.start_tc"),
   tech("endTc", "End TC", "Bild", "Clipdatei (Timecode-Spur), sonst Plate Assistant", "take.end_tc"),
   tech("groesse", "Grösse", "Bild", "Clipdatei"),
@@ -213,8 +228,15 @@ const KATALOG: Spalte[] = [
     gruppe: "Plate Assistant",
     quelle: "Plate Assistant, Kompass beim Ausrichten (take.lage.richtung.azimutGrad, sonst plate.richtung.azimutGrad)",
     wert: (t) => {
-      const grad = zahlVon(t, "take.lage.richtung.azimutGrad") ?? zahlVon(t, "plate.richtung.azimutGrad");
-      return grad === undefined ? undefined : himmelsrichtung(grad);
+      const amTake = zahlVon(t, "take.lage.richtung.azimutGrad") !== undefined;
+      const q = amTake ? "take.lage.richtung" : "plate.richtung";
+      const grad = zahlVon(t, `${q}.azimutGrad`);
+      if (grad === undefined) return undefined;
+      // Güte der Messung dazu (Plate Assistant: `genauigkeitGrad`, `magnetfeldUnruhig`), damit niemand einer
+      // unruhigen Kompassmessung traut.
+      const genau = zahlVon(t, `${q}.genauigkeitGrad`);
+      const unruhig = t.werte?.[`${q}.magnetfeldUnruhig`] === true;
+      return `${himmelsrichtung(grad)}${genau !== undefined ? ` ±${Math.round(genau)}°` : ""}${unruhig ? ", Magnetfeld unruhig" : ""}`;
     },
   },
   // Sonnenstand je Take (Marlon, 03.11.2026, über den Plate Assistant: „das kannst du auch weitergeben in die Ingest-App“):
@@ -273,6 +295,11 @@ const IM_KATALOG = new Set([
   "take.sonne.azimutGrad",
   "take.sonne.hoeheGrad",
   "take.sonne.seiteGrad",
+  "take.lage.richtung.genauigkeitGrad",
+  "take.lage.richtung.magnetfeldUnruhig",
+  "plate.richtung.genauigkeitGrad",
+  "plate.richtung.magnetfeldUnruhig",
+  "take.end_zeit",
   "take.aus_clip.tiltGrad",
   "take.aus_clip.tiltBereich",
   "take.aus_clip.rollGrad",
