@@ -217,6 +217,15 @@ const KATALOG: Spalte[] = [
       return grad === undefined ? undefined : himmelsrichtung(grad);
     },
   },
+  // Sonnenstand je Take (Marlon, 03.11.2026, über den Plate Assistant: „das kannst du auch weitergeben in die Ingest-App“):
+  // das iPhone rechnet ihn aus Standort und Richtung der Plate und der Startzeit des Takes (`take.sonne`).
+  {
+    id: "sonne",
+    titel: "Sonne",
+    gruppe: "Plate Assistant",
+    quelle: "Plate Assistant (take.sonne: aus Standort, Richtung und Startzeit des Takes gerechnet)",
+    wert: (t) => pa(t, "take.sonne.text"),
+  },
   lageSpalte("hoehe", "Kamerahöhe cm", "kameraHoeheCm", "plate.kamera_hoehe_cm"),
   lageSpalte("abstand", "Abstand cm", "abstandCm", "plate.abstand_cm"),
   lageSpalte("stativ", "Stativ", "stativ", "plate.stativ", false),
@@ -260,6 +269,10 @@ const IM_KATALOG = new Set([
   "take.start_tc",
   "take.end_tc",
   "take.start_zeit",
+  "take.sonne.text",
+  "take.sonne.azimutGrad",
+  "take.sonne.hoeheGrad",
+  "take.sonne.seiteGrad",
   "take.aus_clip.tiltGrad",
   "take.aus_clip.tiltBereich",
   "take.aus_clip.rollGrad",
