@@ -111,6 +111,20 @@ const paSpalte = (id: string, titel: string, feld: string, rechts = false): Spal
   wert: (t) => pa(t, feld),
 });
 
+/** Himmelsrichtung als Wort mit ganzen Grad (Marlon, 03.11.2026: „Norden und ein Grad oder Nordwest … oder Süden“). */
+export function himmelsrichtung(azimutGrad: number): string {
+  const grad = ((Math.round(azimutGrad) % 360) + 360) % 360;
+  const namen = ["Norden", "Nordost", "Osten", "Südost", "Süden", "Südwest", "Westen", "Nordwest"];
+  return `${namen[Math.round(grad / 45) % 8]} ${grad}°`;
+}
+
+function zahlVon(t: TakeMitWerten, feld: string): number | undefined {
+  const w = t.werte?.[feld];
+  if (typeof w === "number") return w;
+  if (typeof w === "string" && w.trim() !== "" && !isNaN(Number(w))) return Number(w);
+  return undefined;
+}
+
 // Einrichtung je Take (Plate Assistant 0026, 09.10.2026): das Stativ kann sich zwischen Takes ändern. Zuerst
 // `take.lage` (am Take gemessen), sonst das Feld der Plate. Ohne 0026 gilt einfach die Plate.
 const lageSpalte = (id: string, titel: string, lage: string, plate: string, rechts = true): Spalte => ({
@@ -193,7 +207,16 @@ const KATALOG: Spalte[] = [
   lageSpalte("einrichtung", "Einrichtung", "einrichtung", "plate.einrichtung"),
   lageSpalte("neigungIphone", "Tilt iPhone °", "neigungGrad", "plate.neigung_grad"),
   lageSpalte("rollenIphone", "Roll iPhone °", "rollenGrad", "plate.rollen_grad"),
-  lageSpalte("richtung", "Richtung °", "richtung.azimutGrad", "plate.richtung.azimutGrad"),
+  {
+    id: "richtung",
+    titel: "Himmelsrichtung",
+    gruppe: "Plate Assistant",
+    quelle: "Plate Assistant, Kompass beim Ausrichten (take.lage.richtung.azimutGrad, sonst plate.richtung.azimutGrad)",
+    wert: (t) => {
+      const grad = zahlVon(t, "take.lage.richtung.azimutGrad") ?? zahlVon(t, "plate.richtung.azimutGrad");
+      return grad === undefined ? undefined : himmelsrichtung(grad);
+    },
+  },
   lageSpalte("hoehe", "Kamerahöhe cm", "kameraHoeheCm", "plate.kamera_hoehe_cm"),
   lageSpalte("abstand", "Abstand cm", "abstandCm", "plate.abstand_cm"),
   lageSpalte("stativ", "Stativ", "stativ", "plate.stativ", false),
