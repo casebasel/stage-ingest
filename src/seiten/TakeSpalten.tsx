@@ -56,6 +56,8 @@ export type Spalte = {
   // Braucht die Werte aus der Kopie (Container, Metadaten, ART CMD).
   technik?: boolean;
   wert: (t: TakeMitWerten, x: Technik | undefined) => ReactNode;
+  // Genauer Wert fürs Kopieren per Doppelklick, wenn die Anzeige rundet (GPS).
+  kopie?: (t: TakeMitWerten, x: Technik | undefined) => string | undefined;
 };
 
 const GRUPPEN: Gruppe[] = ["Take", "Bild", "Kamerawerte", "Bewegung", "Plate Assistant", "Weitere"];
@@ -206,6 +208,13 @@ const KATALOG: Spalte[] = [
       const lat = pa(t, amTake ? "take.lage.gps.lat" : "plate.gps.lat");
       const lon = pa(t, amTake ? "take.lage.gps.lon" : "plate.gps.lon");
       return lat && lon ? `${lat}, ${lon}` : undefined;
+    },
+    // Kopieren liefert die Koordinaten ungerundet, wie das iPhone sie gemessen hat.
+    kopie: (t) => {
+      const amTake = t.werte?.["take.lage.gps.lat"] != null && t.werte?.["take.lage.gps.lon"] != null;
+      const lat = t.werte?.[amTake ? "take.lage.gps.lat" : "plate.gps.lat"];
+      const lon = t.werte?.[amTake ? "take.lage.gps.lon" : "plate.gps.lon"];
+      return lat != null && lon != null && lat !== "" && lon !== "" ? `${lat}, ${lon}` : undefined;
     },
   },
   paSpalte("notiz", "Notiz", "plate.notiz"),
@@ -522,7 +531,11 @@ export function SpaltenZellen({ spalten, t, technik }: { spalten: Spalte[]; t: T
       {spalten.map((s) => {
         const w = s.wert(t, x);
         return (
-          <td key={s.id} className={s.rechts ? "rechts zahl" : s.technik || s.mono ? "zahl ohne-umbruch" : undefined}>
+          <td
+            key={s.id}
+            className={s.rechts ? "rechts zahl" : s.technik || s.mono ? "zahl ohne-umbruch" : undefined}
+            data-kopie={s.kopie?.(t, x)}
+          >
             {w ?? <span className="leise">–</span>}
           </td>
         );

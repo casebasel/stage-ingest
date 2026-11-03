@@ -196,6 +196,10 @@ Marlon (28.10.2026): nach einem Objektivwechsel wird die Brennweite oft nicht na
 - **Brennweite uneinheitlich:** Je Take werden alle Angaben verglichen (Take: Klappe/CAP, Einrichtung oder Plate, Clip: LDS oder Kamera-Eintrag, Info 2). Weichen sie um mehr als 0,5 mm ab, erscheint „Brennweite uneinheitlich (Klappe 35 mm, Kamera-Eintrag 50 mm)“; welche stimmt, entscheidet das Set.
 - **Kamera bewegt:** Aufeinanderfolgende Takes derselben Einrichtung (`take.lage.einrichtung`) mit Tilt- oder Roll-Sprung über 0,5° aus `aus_clip` → „Kamera zwischen Take 2 und Take 3 bewegt, ohne neue Einrichtung“. Beispiel Plate 1 „Demo“ (Tilt 5,1° → 18,3° → −1,1°, eine Einrichtung). Im Studio keine Bewegungsprüfung (Tracking).
 
+## 7c. Werte kopieren (0.1.73)
+
+Marlon (03.11.2026): „Die GPS-Daten lassen sich nicht kopieren … auf den Wert doppelklicken“, „Werte kopieren sollte man bei allen können.“ Ein Doppelklick auf eine Tabellenzelle mit Text kopiert ihren Wert in die Zwischenablage und zeigt kurz „Kopiert: …“ (`src/zwischenablage.ts`, in allen Tabellen). GPS kopiert die Koordinaten ungerundet (`data-kopie` an der Zelle). Zellen mit Knopf oder Bild und leere Zellen behalten ihr Verhalten (Vorschau: Take abspielen); in „Alle Takes“ öffnet ein einfacher Klick die Plate erst nach einer kurzen Pause, damit der Doppelklick kopieren kann. Die Dateiliste im Protokoll ist ausgenommen (Doppelklick öffnet wie im Finder, Pfad über Rechtsklick).
+
 ## 8. HDRI
 
 - Ein HDRI hängt an einer **Plate** oder an einem **Drehort**. Ein Take nimmt das HDRI seiner Plate, sonst das zeitlich nächste seines Drehorts.

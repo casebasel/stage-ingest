@@ -1022,6 +1022,8 @@ function AlleTakes({
   setFilter: (f: Filter) => void;
   plateWaehlen: (id: string) => void;
 }) {
+  // Klick öffnet die Plate erst nach einer kurzen Pause (Doppelklick kopiert stattdessen den Wert).
+  const oeffnenSpaeter = useRef(0);
   const sichtbar = zeilen.filter(
     (z) =>
       filter === "alle" ||
@@ -1067,8 +1069,13 @@ function AlleTakes({
               <tr
                 key={z.take.id}
                 tabIndex={0}
-                title="Plate öffnen · Leertaste spielt den Take · Rechtsklick: Pfad kopieren"
-                onClick={() => plateWaehlen(z.plate.id)}
+                title="Plate öffnen · Leertaste spielt den Take · Doppelklick kopiert den Wert · Rechtsklick: Pfad kopieren"
+                // Erst nach kurzer Pause öffnen: ein Doppelklick kopiert den Wert der Zelle, statt die Plate zu öffnen.
+                onClick={(ev) => {
+                  window.clearTimeout(oeffnenSpaeter.current);
+                  if (ev.detail > 1) return;
+                  oeffnenSpaeter.current = window.setTimeout(() => plateWaehlen(z.plate.id), 280);
+                }}
                 onContextMenu={(ev) => pfadMenueOeffnen(ev, z.take, `${plateTitel(z.plate)} · Take ${z.take.nummer}`)}
                 onKeyDown={(ev) => {
                   if (ev.key === " " && z.take.datei) {
@@ -1485,8 +1492,8 @@ function PlateDetail({ dreh, p, drehWaehlen }: { dreh: DrehStand; p: PlateStand;
                 aria-selected={mk?.ids.has(t.id) || undefined}
                 title={
                   t.datei
-                    ? "Klick markiert (⌘ oder Shift für mehrere) · Leertaste oder Doppelklick spielt den Take · Rechtsklick: Pfad kopieren, exportieren"
-                    : "Klick markiert (⌘ oder Shift für mehrere)"
+                    ? "Klick markiert (⌘ oder Shift für mehrere) · Leertaste spielt den Take · Doppelklick kopiert den Wert · Rechtsklick: Pfad kopieren, exportieren"
+                    : "Klick markiert (⌘ oder Shift für mehrere) · Doppelklick kopiert den Wert"
                 }
                 onClick={(ev) => markieren(ev, t)}
                 onDoubleClick={() => t.datei && spielerOeffnen(t.id)}
@@ -2040,7 +2047,7 @@ function ZuKlaeren({
             return (
               <tr
                 key={x.schluessel}
-                title={x.clipdateien.length ? "Doppelklick spielt den Clip" : undefined}
+                title={x.clipdateien.length ? "Doppelklick auf das Bild spielt den Clip · Doppelklick auf einen Wert kopiert ihn" : "Doppelklick kopiert den Wert"}
                 onDoubleClick={() => x.clipdateien[0] && abspielen(x.clipdateien[0], x.clip)}
               >
                 <td className="zelle-bild">
@@ -2168,7 +2175,7 @@ function ZuKlaeren({
             return (
               <tr
                 key={schluessel}
-                title={c.clipdateien?.length ? "Doppelklick spielt den Clip · Rechtsklick: Pfad kopieren" : undefined}
+                title={c.clipdateien?.length ? "Doppelklick auf das Bild spielt den Clip · Doppelklick auf einen Wert kopiert ihn · Rechtsklick: Pfad kopieren" : "Doppelklick kopiert den Wert"}
                 onDoubleClick={() => c.clipdateien?.[0] && abspielen(c.clipdateien[0], c.clip)}
                 onContextMenu={(ev) =>
                   pfadMenueOeffnen(

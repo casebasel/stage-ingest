@@ -2264,6 +2264,27 @@ input[type="checkbox"][role="switch"]:checked::before {
   background: var(--linie);
 }
 
+/* Doppelklick auf eine Zelle kopiert ihren Wert (zwischenablage.ts): kurze Bestätigung unten in der Mitte. */
+.kopiert-hinweis {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 80;
+  max-width: min(640px, calc(100vw - 32px));
+  padding: 8px 14px;
+  border: 1px solid var(--linie-stark);
+  border-radius: var(--rund);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 13px;
+  box-shadow: 0 10px 28px oklch(0 0 0 / 0.4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
 /* Export-Dialog (Export.tsx). */
 .dialog-hinter {
   position: fixed;

@@ -10,6 +10,7 @@ import { EinstellungenGeben, useEinstellungen } from "./einstellungen";
 import { KontoGeben, useKonto, type AbgleichStand } from "./konto";
 import { LaufGeben, useLauf } from "./lauf";
 import { Status, zahl } from "./teile";
+import { zellenKopierenEinrichten } from "./zwischenablage";
 import { Einlesen } from "./seiten/Einlesen";
 import { Protokoll } from "./seiten/Protokoll";
 import { Projekt } from "./seiten/Projekt";
@@ -69,6 +70,21 @@ function Gerust() {
     return () => window.clearTimeout(t);
   }, [konto.darfSchreiben, konto.zugang, lauf.laeuft, e.ziele]);
 
+  // Doppelklick auf eine Tabellenzelle kopiert ihren Wert; kurz anzeigen, was kopiert wurde.
+  const [kopiert, setKopiert] = useState<string | null>(null);
+  useEffect(() => {
+    let t = 0;
+    const ab = zellenKopierenEinrichten((text) => {
+      window.clearTimeout(t);
+      setKopiert(text);
+      t = window.setTimeout(() => setKopiert(null), 1800);
+    });
+    return () => {
+      ab();
+      window.clearTimeout(t);
+    };
+  }, []);
+
   const jetzt = WAHLEN.find((w) => w.wahl === wahl)!;
   const weiter = WAHLEN[(WAHLEN.indexOf(jetzt) + 1) % WAHLEN.length];
   const anteil = lauf.stand.bytes > 0 ? (lauf.stand.gelesen / lauf.stand.bytes) * 100 : 0;
@@ -76,6 +92,17 @@ function Gerust() {
 
   return (
     <div className="app">
+      {kopiert !== null && (
+        <div className="kopiert-hinweis" role="status" aria-live="polite">
+          {kopiert ? (
+            <>
+              Kopiert: <span className="zahl">{kopiert}</span>
+            </>
+          ) : (
+            "Kopieren fehlgeschlagen"
+          )}
+        </div>
+      )}
       <header className="kopf">
         <div className="marke">
           <span className="marke-name">Stage Ingest</span>
