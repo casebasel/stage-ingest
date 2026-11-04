@@ -196,7 +196,7 @@ export function kurzzeichenVorschlag(kurzname: string): string {
 export function kurznameMitKunde(kurzzeichen: string, projektKurz: string): string {
   if (!projektKurz) return "";
   const kz = kurzzeichen.trim().toUpperCase();
-  if (!kz) return projektKurz;
+  if (!kz || kz === "OFFEN") return projektKurz;
   return `${kz}_${projektKurz}`.slice(0, 32).replace(/_+$/, "");
 }
 
