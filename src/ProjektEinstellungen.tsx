@@ -182,12 +182,13 @@ export function ProjektEinstellungen({ projekt, schliessen }: { projekt: Projekt
 }
 
 /** Neues Projekt anlegen: Name, Kurzname wird vorgeschlagen und ist danach fest. */
-/** Kurzzeichen-Vorschlag aus dem Kundennamen: Anfangsbuchstaben bei mehreren Wörtern („Thurgauer Kantonalbank“ → TKB),
- *  sonst die ersten vier Zeichen; A–Z und 0–9, 2–6 Zeichen. */
+/** Kurzzeichen-Vorschlag aus dem Kundennamen, gemeinsame Regel aller Apps (Marlon, 04.11.2026): Umschrift wie beim
+ *  Kurznamen, bei mehreren Wörtern die Anfangsbuchstaben („Thurgauer Kantonalbank“ → TK, „Migros Basel“ → MB), bei einem
+ *  Wort die ersten vier Zeichen („Migros“ → MIGR); höchstens 6, unter 2 oder genau OFFEN → kein Vorschlag. */
 export function kurzzeichenVorschlag(kurzname: string): string {
   const woerter = kurzname.split("_").filter(Boolean);
-  const k = woerter.length >= 2 ? woerter.map((w) => w[0]).join("") : (woerter[0] ?? "").slice(0, 4);
-  return k.slice(0, 6);
+  const k = (woerter.length >= 2 ? woerter.map((w) => w[0]).join("") : (woerter[0] ?? "").slice(0, 4)).slice(0, 6);
+  return k.length < 2 || k === "OFFEN" ? "" : k;
 }
 
 /** Kurzname eines im Ingest angelegten Projekts (Marlon, 04.11.2026, Karte 85fa280): `KUNDE_PROJEKT` ohne Nummer,
