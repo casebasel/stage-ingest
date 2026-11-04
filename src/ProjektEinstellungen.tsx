@@ -8,6 +8,7 @@ import { Feld, Status } from "./teile";
 
 type Werte = Record<
   | "name"
+  | "kunde_id"
   | "art"
   | "firma"
   | "regie"
@@ -25,6 +26,9 @@ type Werte = Record<
 >;
 
 /** „3840 × 2160“ → „3840x2160“ (Schreibweise der Datenbank). */
+/** Platzhalter des Servers, wenn beim Anlegen kein Kunde mitkam (0034). */
+export const KUNDE_OFFEN = "kunde-offen";
+
 const pixel = (t: string) => t.trim().toLowerCase().replace(/[×*]/g, "x").replace(/\s+/g, "");
 
 const zahlText = (n: number | null | undefined) => (n == null ? "" : String(n).replace(".", ","));
@@ -32,6 +36,7 @@ const zahlText = (n: number | null | undefined) => (n == null ? "" : String(n).r
 function ausProjekt(p: Projekt): Werte {
   return {
     name: p.name,
+    kunde_id: p.kundeId ?? "",
     art: p.art ?? "",
     firma: p.firma ?? "",
     regie: p.regie ?? "",
@@ -122,7 +127,17 @@ export function ProjektEinstellungen({ projekt, schliessen }: { projekt: Projekt
           ))}
         </select>
       </Feld>
-      <Feld name="Produktionsfirma" hilfe="Steht im Bericht und geht mit dem Slate an die Kamera.">
+      <Feld name="Kunde" hilfe="Auftraggeber (Pflicht seit dem Katalog 0034). Fehlt er, steht das Projekt auf „Kunde fehlt“.">
+        <select aria-label="Kunde" value={w.kunde_id} onChange={(e) => setW({ ...w, kunde_id: e.target.value })}>
+          {(w.kunde_id === "" || w.kunde_id === KUNDE_OFFEN) && <option value={w.kunde_id}>– Kunde fehlt –</option>}
+          {konto.kunden.map((k) => (
+            <option key={k.id} value={k.id}>
+              {k.name} ({k.kurzzeichen})
+            </option>
+          ))}
+        </select>
+      </Feld>
+      <Feld name="Produktionsfirma" hilfe="Steht im Bericht und geht mit dem Slate an die Kamera. Oft der Kunde, nicht immer.">
         {eingabe("firma", "Produktionsfirma")}
       </Feld>
       <Feld name="Regie">{eingabe("regie", "Regie")}</Feld>
@@ -167,22 +182,56 @@ export function ProjektEinstellungen({ projekt, schliessen }: { projekt: Projekt
 }
 
 /** Neues Projekt anlegen: Name, Kurzname wird vorgeschlagen und ist danach fest. */
+/** Kurzzeichen-Vorschlag aus dem Kundennamen: Anfangsbuchstaben bei mehreren Wörtern („Thurgauer Kantonalbank“ → TKB),
+ *  sonst die ersten vier Zeichen; A–Z und 0–9, 2–6 Zeichen. */
+export function kurzzeichenVorschlag(kurzname: string): string {
+  const woerter = kurzname.split("_").filter(Boolean);
+  const k = woerter.length >= 2 ? woerter.map((w) => w[0]).join("") : (woerter[0] ?? "").slice(0, 4);
+  return k.slice(0, 6);
+}
+
+/** Kurzname eines im Ingest angelegten Projekts (Marlon, 04.11.2026, Karte 85fa280): `KUNDE_PROJEKT` ohne Nummer,
+ *  z. B. `TKB_IMAGEFILM`; ohne bekannten Kunden nur der Projektteil. Die Produktionsnummer kommt später als Feld. */
+export function kurznameMitKunde(kurzzeichen: string, projektKurz: string): string {
+  if (!projektKurz) return "";
+  const kz = kurzzeichen.trim().toUpperCase();
+  if (!kz) return projektKurz;
+  return `${kz}_${projektKurz}`.slice(0, 32).replace(/_+$/, "");
+}
+
 export function NeuesProjekt({ fertig }: { fertig: (p?: Projekt) => void }) {
   const konto = useKonto();
   const [name, setName] = useState("");
-  const [kurzname, setKurzname] = useState("");
+  // Projektteil des Kurznamens aus dem Namen; der Kunde kommt davor (`KUNDE_PROJEKT`), solange nicht von Hand geändert.
+  const [projektKurz, setProjektKurz] = useState("");
+  const [kurznameHand, setKurznameHand] = useState("");
   const [vonHand, setVonHand] = useState(false);
+  // Kunde ist Pflicht (0034): bestehender aus der (auch offline gemerkten) Liste oder ein neuer mit Kurzzeichen.
+  const [kundeId, setKundeId] = useState(konto.kunden.length === 0 ? "neu" : "");
+  const [kundeName, setKundeName] = useState("");
+  const [kurzzeichen, setKurzzeichen] = useState("");
+  const [kzVonHand, setKzVonHand] = useState(false);
   const [stand, setStand] = useState<{ ton: "fehler" | "laeuft"; text: string } | null>(null);
+  const kundeKz = kundeId === "neu" ? kurzzeichen : (konto.kunden.find((k) => k.id === kundeId)?.kurzzeichen ?? "");
+  const kurzname = vonHand ? kurznameHand : kurznameMitKunde(kundeKz, projektKurz);
   const vorhanden = konto.projekte.find((p) => p.kurzname === kurzname);
+  const kundeVorhanden = konto.kunden.find((k) => k.id === `kunde-${kurzzeichen.toLowerCase()}`);
 
   async function anlegen() {
     if (!name.trim()) return setStand({ ton: "fehler", text: "Der Name darf nicht leer sein." });
-    if (!/^[A-Z0-9]+(_[A-Z0-9]+)*$/.test(kurzname) || kurzname.length < 2 || kurzname.length > 24)
-      return setStand({ ton: "fehler", text: "Kurzname: 2–24 Zeichen, nur A–Z, 0–9 und _ (nicht vorne oder hinten)." });
+    if (!/^[A-Z0-9]+(_[A-Z0-9]+)*$/.test(kurzname) || kurzname.length < 2 || kurzname.length > 32)
+      return setStand({ ton: "fehler", text: "Kurzname: 2–32 Zeichen, nur A–Z, 0–9 und _ (nicht vorne oder hinten)." });
     if (vorhanden) return setStand({ ton: "fehler", text: `Den Kurznamen hat schon „${vorhanden.name}“.` });
+    if (!kundeId) return setStand({ ton: "fehler", text: "Kunde wählen (Pflicht)." });
+    if (kundeId === "neu") {
+      if (!kundeName.trim()) return setStand({ ton: "fehler", text: "Name des Kunden darf nicht leer sein." });
+      if (!/^[A-Z0-9]{2,6}$/.test(kurzzeichen) || kurzzeichen === "OFFEN")
+        return setStand({ ton: "fehler", text: "Kurzzeichen: 2–6 Zeichen, nur A–Z und 0–9 (OFFEN ist reserviert)." });
+    }
     setStand({ ton: "laeuft", text: "Legt an …" });
     try {
-      fertig(await konto.projektAnlegen(name.trim(), kurzname));
+      const kunde = kundeId === "neu" ? await konto.kundeAnlegen(kundeName.trim(), kurzzeichen) : kundeId;
+      fertig(await konto.projektAnlegen(name.trim(), kurzname, kunde));
     } catch (e) {
       setStand({ ton: "fehler", text: String(e) });
     }
@@ -204,29 +253,89 @@ export function NeuesProjekt({ fertig }: { fertig: (p?: Projekt) => void }) {
             const n = e.target.value;
             setName(n);
             setStand(null);
-            if (!vonHand) setKurzname(await konto.kurznameVorschlag(n));
+            setProjektKurz(await konto.kurznameVorschlag(n));
           }}
         />
       </Feld>
-      <Feld name="Kurzname" hilfe="Ordnername auf allen Platten. Nach dem Anlegen fest.">
+      <Feld name="Kurzname" hilfe="Ordnername auf allen Platten, Form KUNDE_PROJEKT (z. B. TKB_IMAGEFILM). Nach dem Anlegen fest.">
         <input
           aria-label="Kurzname"
           className="zahl"
-          placeholder="HAPPY_END"
+          placeholder="TKB_IMAGEFILM"
           value={kurzname}
           onChange={(e) => {
             setVonHand(true);
-            setKurzname(e.target.value.toUpperCase());
+            setKurznameHand(e.target.value.toUpperCase());
             setStand(null);
           }}
         />
       </Feld>
+      <Feld name="Kunde" hilfe="Auftraggeber, Pflicht. Die Liste ist auch ohne Netz da; ein neuer Kunde braucht ein Kurzzeichen (2–6 Zeichen).">
+        <select
+          aria-label="Kunde"
+          value={kundeId}
+          onChange={(e) => {
+            setKundeId(e.target.value);
+            setStand(null);
+          }}
+        >
+          <option value="">Kunde wählen …</option>
+          {konto.kunden.map((k) => (
+            <option key={k.id} value={k.id}>
+              {k.name} ({k.kurzzeichen})
+            </option>
+          ))}
+          <option value="neu">Neuer Kunde …</option>
+        </select>
+      </Feld>
+      {kundeId === "neu" && (
+        <>
+          <Feld name="Name des Kunden" hilfe="Marke, Agentur, Sender, Festival; für eigene Projekte INTERN.">
+            <input
+              aria-label="Name des Kunden"
+              placeholder="z. B. Thurgauer Kantonalbank"
+              value={kundeName}
+              onChange={async (e) => {
+                const n = e.target.value;
+                setKundeName(n);
+                setStand(null);
+                if (!kzVonHand) setKurzzeichen(kurzzeichenVorschlag(await konto.kurznameVorschlag(n)));
+              }}
+            />
+          </Feld>
+          <Feld
+            name="Kurzzeichen"
+            hilfe={
+              kundeVorhanden
+                ? `Gibt es schon: „${kundeVorhanden.name}“ wird genommen.`
+                : "Steht vorn im Kurznamen (KUNDE_PROJEKT). Nach dem Anlegen fest."
+            }
+          >
+            <input
+              aria-label="Kurzzeichen"
+              className="zahl"
+              placeholder="TKB"
+              maxLength={6}
+              value={kurzzeichen}
+              onChange={(e) => {
+                setKzVonHand(true);
+                setKurzzeichen(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""));
+                setStand(null);
+              }}
+            />
+          </Feld>
+        </>
+      )}
       <div className="knopfreihe einstellungen-knoepfe">
         {stand && <Status ton={stand.ton}>{stand.text}</Status>}
         <button className="knopf" onClick={() => fertig()}>
           Abbrechen
         </button>
-        <button className="knopf knopf-haupt" disabled={!name.trim() || !kurzname || stand?.ton === "laeuft"} onClick={anlegen}>
+        <button
+          className="knopf knopf-haupt"
+          disabled={!name.trim() || !kurzname || !kundeId || (kundeId === "neu" && (!kundeName.trim() || !kurzzeichen)) || stand?.ton === "laeuft"}
+          onClick={anlegen}
+        >
           Anlegen
         </button>
       </div>

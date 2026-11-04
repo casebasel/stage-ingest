@@ -59,10 +59,10 @@ pub fn ordnername(s: &str) -> String {
 /// Kurzname-Vorschlag aus dem Projektnamen, gemeinsame Regel von Plate Assistant und Paket `stage-projekt`
 /// (Systemkarte 3e1050f): 1. ä ö ü Ä Ö Ü ß ẞ → ae oe ue AE OE UE ss SS, 2. NFD, Akzente (Mn) weg,
 /// 3. Grossbuchstaben, 4. jede Folge anderer Zeichen als A–Z/0–9 → ein `_`, vorn/hinten keins,
-/// 5. höchstens 24 Zeichen, danach kein `_` am Ende, 6. unter 2 Zeichen: kein Vorschlag (`None`).
+/// 5. höchstens 32 Zeichen (0034, vorher 24), danach kein `_` am Ende, 6. unter 2 Zeichen: kein Vorschlag (`None`).
 /// Ein angelegtes Projekt hat seinen festen Kurznamen; dieser Vorschlag gilt nur für Text ohne Projekt.
 pub fn kurzname_vorschlag(name: &str) -> Option<String> {
-    kurzname_vorschlag_bis(name, 24)
+    kurzname_vorschlag_bis(name, 32)
 }
 
 /// Wie [`kurzname_vorschlag`], aber höchstens `laenge` Zeichen (Drehort-Kurzname: 12, Systemkarte 64185e7).
@@ -168,10 +168,13 @@ mod tests {
         assert_eq!(kurzname_vorschlag("X"), None);
         assert_eq!(
             kurzname_vorschlag("Die unendliche Geschichte der Stadt").as_deref(),
-            Some("DIE_UNENDLICHE_GESCHICHT")
+            Some("DIE_UNENDLICHE_GESCHICHTE_DER_ST")
         );
-        // 24. Zeichen wäre „_“: wird abgeschnitten
-        assert_eq!(kurzname_vorschlag("Abc defghijklmnopqrstuv w").as_deref(), Some("ABC_DEFGHIJKLMNOPQRSTUV"));
+        // 32. Zeichen wäre „_“: wird abgeschnitten
+        assert_eq!(
+            kurzname_vorschlag("Abcdefghijklmnopqrstuvwxyzabcde f").as_deref(),
+            Some("ABCDEFGHIJKLMNOPQRSTUVWXYZABCDE")
+        );
     }
 
     #[test]

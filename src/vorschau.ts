@@ -283,7 +283,16 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
       throw "Der Server lehnt den Zugangsschlüssel (Anon-Key) ab. E-Mail und Passwort wurden noch gar nicht geprüft.";
     return { email: "team@beispiel.invalid", ingestRecht: false };
   },
-  plate_projekte: () => [projekt, { id: "projekt-moevenpick", name: "Mövenpick Spot", kurzname: "MOEVENPICK", aktiv: false }],
+  plate_projekte: () => [
+    { ...projekt, kundeId: params.get("kunde") === "da" ? "kunde-bfag" : "kunde-offen" },
+    { id: "projekt-moevenpick", name: "Mövenpick Spot", kurzname: "MOEVENPICK", aktiv: false, kundeId: "kunde-mp" },
+  ],
+  plate_kunden: () => [
+    { id: "kunde-bfag", name: "Beispiel Film AG", kurzzeichen: "BFAG" },
+    { id: "kunde-mp", name: "Mövenpick", kurzzeichen: "MP" },
+    { id: "kunde-intern", name: "Intern", kurzzeichen: "INTERN" },
+  ],
+  plate_kunde_anlegen: (a) => `kunde-${String(a.kurzzeichen).toLowerCase()}`,
   plate_drehs: () => [
     { id: "d1", name: "Rheinufer", datum: "2026-10-28", projektId: projekt.id, produktion: "", kurzname: "RHEINUFER" },
     { id: "d2", name: "Münsterplatz", datum: "2026-10-28", projektId: projekt.id, produktion: "" },
@@ -333,7 +342,7 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
   plate_drehort_kurznamen: () => ["RHEINUFER", "BRUECKE"],
   plate_drehort_anlegen: (a) => `dreh-happy_end-${String(a.kurzname).toLowerCase()}`,
   plate_projekt_anlegen: (a) => `projekt-${String(a.kurzname).toLowerCase()}`,
-  kurzname_vorschlag: (a) => (kurz(String(a.name)) ?? "").slice(0, Number(a.laenge ?? 24)).replace(/_+$/, ""),
+  kurzname_vorschlag: (a) => (kurz(String(a.name)) ?? "").slice(0, Number(a.laenge ?? 32)).replace(/_+$/, ""),
   ziel_nachpruefen: async () => {
     await warte(800);
     return { ordner: "/Volumes/NAS/Footage/HAPPY_END/2026-10-27_Rheinufer/01_KAMERA/A001R130", generation: "0001_A001R130_2026-10-27_161000Z.mhl", geprueft: 10, abweichungen: [] };

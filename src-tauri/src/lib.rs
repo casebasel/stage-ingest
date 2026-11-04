@@ -704,9 +704,9 @@ fn stage_daten(
     let karte = geraet::kartenname(&auftrag.quelle);
     let mut daten = json!({
         "karte": karte.chars().take(40).collect::<String>(),
-        // Schema der Stage: Kurzname höchstens 24 Zeichen.
+        // Schema der Stage: Kurzname höchstens 32 Zeichen (Stage 804d098, 0034).
         "projekt": auftrag.dreh.as_ref().map(|d| {
-            d.kurzname.clone().unwrap_or_else(|| struktur::kurzname(&d.projekt)).chars().take(24).collect::<String>()
+            d.kurzname.clone().unwrap_or_else(|| struktur::kurzname(&d.projekt)).chars().take(32).collect::<String>()
         }),
         "freigegeben": freigabe.sicher,
         "version": version,
@@ -1927,13 +1927,13 @@ async fn karte_einsortieren(
                     .and_then(|b| serde_json::from_slice::<ingest_kern::uebersicht::KartenZusammenfassung>(&b).ok());
                 if let (Some(von), Some(nach), Some(k)) = (von, nach, inhalt) {
                     let mit_strich = |p: &Path| format!("{}/", p.display().to_string().trim_end_matches('/'));
-                    // Kurzname wie in ingest.karte (Ordner des Projekts, höchstens 24 Zeichen).
+                    // Kurzname wie in ingest.karte (Ordner des Projekts, höchstens 32 Zeichen).
                     let projekt: Option<String> = k
                         .projekt
                         .get("Kurzname")
                         .cloned()
                         .or_else(|| von.parent().and_then(Path::file_name).map(|n| n.to_string_lossy().into_owned()))
-                        .map(|p| p.chars().take(24).collect());
+                        .map(|p| p.chars().take(32).collect());
                     let _ = stage::karte_verschoben(
                         adresse,
                         &k.karte.chars().take(40).collect::<String>(),
@@ -2131,9 +2131,27 @@ async fn plate_projekt_anlegen(
     zugang: plate::Zugang,
     name: String,
     kurzname: String,
+    kunde_id: Option<String>,
 ) -> Result<String, String> {
     let p = Arc::clone(&plate);
-    im_hintergrund(move || p.projekt_anlegen(&zugang, &name, &kurzname)).await
+    im_hintergrund(move || p.projekt_anlegen(&zugang, &name, &kurzname, kunde_id.as_deref())).await
+}
+
+#[tauri::command]
+async fn plate_kunden(plate: State<'_, Arc<plate::Plate>>, zugang: plate::Zugang) -> Result<Vec<plate::Kunde>, String> {
+    let p = Arc::clone(&plate);
+    im_hintergrund(move || p.kunden(&zugang)).await
+}
+
+#[tauri::command]
+async fn plate_kunde_anlegen(
+    plate: State<'_, Arc<plate::Plate>>,
+    zugang: plate::Zugang,
+    name: String,
+    kurzzeichen: String,
+) -> Result<String, String> {
+    let p = Arc::clone(&plate);
+    im_hintergrund(move || p.kunde_anlegen(&zugang, &name, &kurzzeichen)).await
 }
 
 /// Projekt-Einstellungen ändern (Zahnrad). Nur erlaubte Felder, Kurzname nie.
@@ -3118,7 +3136,7 @@ async fn stage_projekt(adresse: String) -> Result<Option<serde_json::Value>, Str
 /// Kurzname-Vorschlag nach der gemeinsamen Regel (für das Formular „Neues Projekt“).
 #[tauri::command]
 fn kurzname_vorschlag(name: String, laenge: Option<usize>) -> Option<String> {
-    struktur::kurzname_vorschlag_bis(&name, laenge.unwrap_or(24))
+    struktur::kurzname_vorschlag_bis(&name, laenge.unwrap_or(32))
 }
 
 /// Vergebene Drehort-Kurznamen eines Projekts, einschliesslich gelöschter Drehorte.
@@ -3297,6 +3315,8 @@ pub fn run() {
             plate_soll,
             studio_soll,
             plate_projekt_anlegen,
+            plate_kunden,
+            plate_kunde_anlegen,
             plate_projekt_aendern,
             kurzname_vorschlag,
             plate_drehort_anlegen,

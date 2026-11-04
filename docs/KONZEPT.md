@@ -204,6 +204,15 @@ Marlon (03.11.2026): „Die GPS-Daten lassen sich nicht kopieren … auf den Wer
 
 Marlon (03.11.2026): Himmelsrichtung „in Norden und ein Grad oder Nordwest … oder Süden“, Sonnenstand „auch weitergeben in die Ingest-App“. Spalte **Himmelsrichtung** zeigt den Kompasswert des Plate Assistant als Wort mit ganzen Grad in acht Sektoren („Südwest 212°“), dazu die Güte der Messung („±10°“, „Magnetfeld unruhig“); Quelle `take.lage.richtung`, sonst `plate.richtung`. Spalte **Sonne** zeigt `take.sonne.text` („von links hinten, 20° hoch“), vom iPhone aus Standort, Richtung und Startzeit gerechnet. **Dauer** rechnet ohne Clip `end_zeit − start_zeit`. Befund Predigerhof 16.10.: für Plates 4–6 wurde nie eine Messung übernommen (Sonne „Kamerarichtung fehlt“, kein Eintrag im Verlauf); der Plate Assistant fragt künftig nach, wenn das Messblatt ohne Übernehmen geschlossen wird. Spaltenabgleich mit dem Plate Assistant am 03.11.2026: alles, was am Set entsteht, schreibt die App; nur Clip oder Kamera liefern Vorschau, Container-Werte, Gamma, CDL, Tilt/Roll der Kamera und Objektiv (Klappe).
 
+## 7e. Katalog: Typ, Kunde, Kurzname 32 (0.1.75)
+
+Migration 0034 des Plate Assistant (live 04.11.2026, Systemkarte ENTSCHEIDUNGEN 01./02.11.): `projekt.typ`, `phase`, `kunde_id` (Pflicht, Platzhalter `kunde-offen`), `produktionsnummer`, Tabelle `kunde`. Der Ingest (Marlon, 04.11.2026: „Ja, alles“):
+
+- **Nur Film:** Projekte mit `typ` ungleich `film` erscheinen nicht; ohne Typ (vor 0034) gilt Film (`plate.rs projekte_aus`).
+- **Kunde beim Anlegen:** Pflichtfeld „Kunde“ im Formular „Neues Projekt“, Liste aus `kunde` (auch ohne Netz gemerkt, `vorrat.kunden`) oder „Neuer Kunde“ mit Name und Kurzzeichen (`^[A-Z0-9]{2,6}$`, Vorschlag aus den Anfangsbuchstaben; `OFFEN` reserviert). Gibt es das Kurzzeichen schon, wird der vorhandene Kunde genommen, nie ein zweites `_anlegen` (ein jüngeres Anlegen überschriebe den Namen). Der Kunde wird vor dem Projekt angelegt, `kunde_id` kommt im `_anlegen` des Projekts mit.
+- **Kurzname-Vorschlag** (Karte 14b1009, gleich wie das iPhone ab Build 42): Kurzzeichen + `_` + Vorschlag aus dem Namen (`TKB_IMAGEFILM`), bei `kunde-offen` nur der Name; gekürzt auf höchstens 32 Zeichen ohne `_` am Ende; zieht nach, solange niemand den Kurznamen getippt hat. Kein `NEU_`, kein Umbenennen; die Produktionsnummer kommt später nur als Feld (Karte 85fa280). Grenze 32 auch in der Vorschlagsregel (`struktur.rs`), in der Oberfläche und im Stage-Befehl `ingest.karte` (Stage prüft 32 seit 804d098).
+- **Kunde fehlt:** Steht ein Projekt auf `kunde-offen`, zeigt die Projektseite einen Hinweis mit Sprung in die Projekt-Einstellungen; dort ist der Kunde wählbar (`projekt.kunde_id` je Feld, Recht des persönlichen Kontos).
+
 ## 8. HDRI
 
 - Ein HDRI hängt an einer **Plate** oder an einem **Drehort**. Ein Take nimmt das HDRI seiner Plate, sonst das zeitlich nächste seines Drehorts.

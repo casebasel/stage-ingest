@@ -224,6 +224,15 @@ pub struct Anmeldung {
     pub ingest_recht: bool,
 }
 
+/// Kunde (0034): Auftraggeber eines Projekts, Kurzzeichen ist Teil künftiger Kurznamen.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Kunde {
+    pub id: String,
+    pub name: String,
+    pub kurzzeichen: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Projekt {
@@ -231,6 +240,12 @@ pub struct Projekt {
     pub name: String,
     pub kurzname: String,
     pub aktiv: bool,
+    /// Katalog (0034): `typ` film/unreal/ki/anderes (leer = film; der Ingest zeigt nur Film), `kunde_id` Pflicht mit
+    /// Platzhalter `kunde-offen`.
+    #[serde(default)]
+    pub typ: Option<String>,
+    #[serde(default)]
+    pub kunde_id: Option<String>,
     /// Standard-Kameraeinstellungen (Migration 0016, alle freiwillig); fehlen vor 0016.
     #[serde(default)]
     pub fps: Option<f64>,
@@ -489,8 +504,11 @@ impl Plate {
         let mit_kopien = mit.replace("dop&", "dop,kopien&");
         // Mit Farbe (ab 0027).
         let mit_farbe = mit.replace("dop&", "dop,kopien,aufnahme_gamma,look&");
+        // Mit Katalog (ab 0034): Typ und Kunde.
+        let mit_katalog = mit.replace("dop&", "dop,kopien,aufnahme_gamma,look,typ,kunde_id&");
         match self
-            .lesen(z, &mit_farbe)
+            .lesen(z, &mit_katalog)
+            .or_else(|_| self.lesen(z, &mit_farbe))
             .or_else(|_| self.lesen(z, &mit_kopien))
             .or_else(|_| self.lesen(z, mit))
             .or_else(|_| self.lesen(z, ohne))
@@ -1169,10 +1187,65 @@ impl Plate {
         }
     }
 
-    /// Legt ein Projekt an (oder führt es zusammen, wenn es das schon gibt). Gibt die ID zurück.
-    pub fn projekt_anlegen(&self, z: &Zugang, name: &str, kurzname: &str) -> Result<String, String> {
+    /// Kunden (0034), ohne den Platzhalter `kunde-offen`.
+    pub fn kunden(&self, z: &Zugang) -> Result<Vec<Kunde>, String> {
+        let v = self.lesen(z, "kunde?select=id,name,kurzzeichen&geloescht=eq.false&order=name.asc")?;
+        Ok(v.as_array()
+            .into_iter()
+            .flatten()
+            .filter(|k| k["id"] != "kunde-offen")
+            .map(|k| Kunde { id: text(&k["id"]), name: text(&k["name"]), kurzzeichen: text(&k["kurzzeichen"]) })
+            .collect())
+    }
+
+    /// Legt einen Kunden an (0034): ID = `kunde-` + Kurzzeichen klein. Gibt es ihn schon, nicht aufrufen (ein jüngeres
+    /// Anlegen überschriebe den Namen; Regel des Plate Assistant, 04.11.2026).
+    pub fn kunde_anlegen(&self, z: &Zugang, name: &str, kurzzeichen: &str) -> Result<String, String> {
+        let kz = kurzzeichen.trim().to_uppercase();
+        if !(2..=6).contains(&kz.len())
+            || !kz.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+            || kz == "OFFEN"
+        {
+            return Err("Kurzzeichen: 2–6 Zeichen, nur A–Z und 0–9 (OFFEN ist reserviert).".into());
+        }
+        let id = format!("kunde-{}", kz.to_lowercase());
+        let jetzt = chrono::Utc::now();
+        let body = json!({
+            "p_geraet": geraet_name(),
+            "p_aenderungen": [{
+                "id": ulid_aehnlich(),
+                "tabelle": "kunde",
+                "datensatz": id,
+                "feld": "_anlegen",
+                "wert": { "id": id, "name": name.trim(), "kurzzeichen": kz, "geloescht": false,
+                          "erstellt_am": jetzt.to_rfc3339_opts(chrono::SecondsFormat::Millis, true) },
+                "zeit": jetzt.timestamp_micros(),
+            }]
+        });
+        let v = self.anwenden(z, &body)?;
+        let ergebnis = v[0]["ergebnis"].as_str().unwrap_or("");
+        match ergebnis {
+            "uebernommen" | "aelter" | "doppelt" => Ok(id),
+            _ => Err(format!("Kunde nicht angelegt: {}", v[0]["grund"].as_str().unwrap_or(ergebnis))),
+        }
+    }
+
+    /// Legt ein Projekt an (oder führt es zusammen, wenn es das schon gibt). Gibt die ID zurück. Der Kunde ist Pflicht
+    /// (0034); fehlt er, setzt der Server `kunde-offen`.
+    pub fn projekt_anlegen(
+        &self,
+        z: &Zugang,
+        name: &str,
+        kurzname: &str,
+        kunde_id: Option<&str>,
+    ) -> Result<String, String> {
         let id = format!("projekt-{}", kurzname.to_lowercase());
         let jetzt = chrono::Utc::now();
+        let mut wert = json!({ "name": name, "kurzname": kurzname, "aktiv": true, "geloescht": false,
+                               "erstellt_am": jetzt.to_rfc3339_opts(chrono::SecondsFormat::Millis, true) });
+        if let Some(k) = kunde_id.filter(|k| !k.trim().is_empty()) {
+            wert["kunde_id"] = json!(k);
+        }
         let body = json!({
             // Eigener Gerätename, damit der Verlauf im Plate Assistant lesbar bleibt.
             "p_geraet": geraet_name(),
@@ -1181,8 +1254,7 @@ impl Plate {
                 "tabelle": "projekt",
                 "datensatz": id,
                 "feld": "_anlegen",
-                "wert": { "name": name, "kurzname": kurzname, "aktiv": true, "geloescht": false,
-                          "erstellt_am": jetzt.to_rfc3339_opts(chrono::SecondsFormat::Millis, true) },
+                "wert": wert,
                 "zeit": jetzt.timestamp_micros(),
             }]
         });
@@ -1199,6 +1271,7 @@ impl Plate {
     pub fn projekt_aendern(&self, z: &Zugang, id: &str, felder: &serde_json::Map<String, Value>) -> Result<(), String> {
         const ERLAUBT: &[&str] = &[
             "name",
+            "kunde_id",
             "art",
             "firma",
             "regie",
@@ -1461,15 +1534,19 @@ fn text_oder_nichts(v: &Value) -> Option<String> {
     v.as_str().map(str::to_owned).filter(|t| !t.trim().is_empty())
 }
 
+/// Der Ingest zeigt nur Projekte vom Typ Film (ENTSCHEIDUNGEN 02.11.2026, E9); ohne Typ (vor 0034) gilt Film.
 fn projekte_aus(v: &Value) -> Vec<Projekt> {
     v.as_array()
         .into_iter()
         .flatten()
+        .filter(|p| p["typ"].is_null() || p["typ"] == "film")
         .map(|p| Projekt {
             id: text(&p["id"]),
             name: text(&p["name"]),
             kurzname: text(&p["kurzname"]),
             aktiv: p["aktiv"].as_bool().unwrap_or(true),
+            typ: text_oder_nichts(&p["typ"]),
+            kunde_id: text_oder_nichts(&p["kunde_id"]),
             // numeric kommt von PostgREST als Zahl oder Text
             fps: p["fps"].as_f64().or_else(|| p["fps"].as_str().and_then(|t| t.parse().ok())),
             codec: p["codec"].as_str().map(str::to_owned).filter(|t| !t.trim().is_empty()),

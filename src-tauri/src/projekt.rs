@@ -2982,6 +2982,8 @@ mod tests {
             name: "Happy End".into(),
             kurzname: "HAPPY_END".into(),
             aktiv: true,
+            typ: None,
+            kunde_id: None,
             fps: None,
             codec: None,
             aufloesung_px: None,

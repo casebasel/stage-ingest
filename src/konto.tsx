@@ -6,11 +6,16 @@ import { invoke } from "@tauri-apps/api/core";
 import type { SollClip } from "./kern";
 
 export type Zugang = { adresse: string; anonKey: string; email: string };
+export type Kunde = { id: string; name: string; kurzzeichen: string };
+
 export type Projekt = {
   id: string;
   name: string;
   kurzname: string;
   aktiv: boolean;
+  /** Katalog (0034): Typ (leer = Film) und Kunde (Pflicht; `kunde-offen` = fehlt noch). */
+  typ?: string | null;
+  kundeId?: string | null;
   /** Standard-Kameraeinstellungen (freiwillig): Abweichungen der Clips nur als Warnung. */
   fps?: number | null;
   codec?: string | null;
@@ -110,6 +115,8 @@ function useKontoHalten() {
   // Projekte und Drehorte samt festen Kurznamen werden gemerkt: ohne Netz heissen die Ordner trotzdem wie mit Netz
   // (Systemkarte „Datenfluss“, 10.10.2026; vorher kam der Name aus getipptem Text).
   const [projekte, setProjekte] = useState<Projekt[]>(() => gemerkt<Projekt[]>("vorrat.projekte", []));
+  // Kunden (0034) ebenfalls gemerkt: die Kundenauswahl beim Anlegen geht auch ohne Netz.
+  const [kunden, setKunden] = useState<Kunde[]>(() => gemerkt<Kunde[]>("vorrat.kunden", []));
   const [drehs, setDrehs] = useState<DrehKurz[]>(() => gemerkt<DrehKurz[]>("vorrat.drehs", []));
   const vollstaendig = !!(zugang.adresse.trim() && zugang.anonKey.trim() && zugang.email.trim());
   // Vorgänge aller Ingest-Rechner (Marlon, 17.10.2026: „alle Ingest-Apps synchron“): mit Verbindung und Ingest-Recht
@@ -141,6 +148,14 @@ function useKontoHalten() {
       setDrehs(dr);
       merken("vorrat.projekte", pr);
       merken("vorrat.drehs", dr);
+      // Kunden getrennt: ein Server vor 0034 kennt die Tabelle nicht, das Laden der Projekte soll daran nicht scheitern.
+      try {
+        const ku = await invoke<Kunde[]>("plate_kunden", { zugang: z });
+        setKunden(ku);
+        merken("vorrat.kunden", ku);
+      } catch {
+        // bleibt beim gemerkten Stand
+      }
       setVerbindung("verbunden");
       setMeldung(null);
     } catch (e) {
@@ -175,10 +190,19 @@ function useKontoHalten() {
     }
   }
 
-  async function projektAnlegen(name: string, kurzname: string): Promise<Projekt> {
-    const id = await invoke<string>("plate_projekt_anlegen", { zugang, name, kurzname });
+  async function projektAnlegen(name: string, kurzname: string, kundeId: string): Promise<Projekt> {
+    const id = await invoke<string>("plate_projekt_anlegen", { zugang, name, kurzname, kundeId });
     await laden();
-    return { id, name, kurzname, aktiv: true };
+    return { id, name, kurzname, aktiv: true, kundeId };
+  }
+
+  /** Kunde anlegen (0034); gibt es das Kurzzeichen schon, wird der vorhandene genommen (kein zweites Anlegen). */
+  async function kundeAnlegen(name: string, kurzzeichen: string): Promise<string> {
+    const id = `kunde-${kurzzeichen.trim().toLowerCase()}`;
+    if (kunden.some((k) => k.id === id)) return id;
+    const neu = await invoke<string>("plate_kunde_anlegen", { zugang, name, kurzzeichen });
+    await laden();
+    return neu;
   }
 
   /** Projekt-Einstellungen speichern; nur geänderte Felder (Namen wie in der Datenbank). */
@@ -202,6 +226,8 @@ function useKontoHalten() {
     setDrehs([]);
     merken("vorrat.projekte", []);
     merken("vorrat.drehs", []);
+    setKunden([]);
+    merken("vorrat.kunden", []);
     setVerbindung("aus");
     setMeldung(null);
   }
@@ -226,8 +252,10 @@ function useKontoHalten() {
     setAbgleich,
     darfSchreiben,
     projekte,
+    kunden,
     drehs,
     laden: () => laden(),
+    kundeAnlegen,
     anmelden,
     abmelden,
     projektAnlegen,

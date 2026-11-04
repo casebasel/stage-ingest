@@ -712,7 +712,7 @@ export const kurz = (p: string) =>
     .toUpperCase()
     .replace(/[^A-Z0-9]+/g, "_")
     .replace(/^_+/, "")
-    .slice(0, 24)
+    .slice(0, 32)
     .replace(/_+$/, "") || "OHNE_PROJEKT";
 
 /** Mit Projekt aus dem Plate Assistant: kein Drehort von Hand. Zeigt, wohin die Clips der Karte gehören (über die

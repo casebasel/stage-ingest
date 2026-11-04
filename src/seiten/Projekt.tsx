@@ -6,7 +6,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import { invoke } from "@tauri-apps/api/core";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { ChevronDown, ChevronRight, Image as Bild, MapPinPlus, Play, Plus, RefreshCw, Settings, Trash2, X } from "lucide-react";
-import { NeuerDrehort, NeuesProjekt, ProjektEinstellungen } from "../ProjektEinstellungen";
+import { NeuerDrehort, NeuesProjekt, ProjektEinstellungen, KUNDE_OFFEN } from "../ProjektEinstellungen";
 import { useKonto, type Projekt as ProjektT, type Zugang } from "../konto";
 import { useLauf } from "../lauf";
 import { gemerkt, merken, useEinstellungen } from "../einstellungen";
@@ -879,6 +879,14 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
       {u?.hinweis && (
         <p className="hinweiszeile">
           <Status ton="warn">{u.hinweis}</Status>
+        </p>
+      )}
+      {aktuell && (aktuell.kundeId === KUNDE_OFFEN || (verbunden && aktuell.kundeId === "")) && !einstellen && (
+        <p className="hinweiszeile">
+          <Status ton="warn">Kunde fehlt: Dieses Projekt hat noch keinen Auftraggeber (Pflicht seit dem Katalog).</Status>{" "}
+          <button className="verweis" onClick={() => nurEins("einstellen")}>
+            In den Projekt-Einstellungen wählen
+          </button>
         </p>
       )}
       {nachgetragen && (
