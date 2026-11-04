@@ -224,6 +224,9 @@ Tag ersetzt jeden Wert, nicht nur Hell und Dunkel: Fenster `oklch(0.880 0.004 25
 
 **The Zahlen-in-Mono Rule.** Jede Zahl, die man vergleicht oder abliest (Bytes, Prozent, Dauer, Seriennummer, Prüfsumme, Pfad), steht in Geist Mono mit Tabellenziffern. Dezimalkomma, Schweizer Format.
 
+
+**Windows (seit 0.1.76):** Geist Variable ist nicht gehintet und zeigt in WebView2 Treppenkanten. Unter Windows (`html[data-os="windows"]`, gesetzt in `src/main.tsx`) gilt darum die Systemschrift: `--schrift` = Segoe UI Variable Text / Segoe UI, `--mono` = Cascadia Mono / Consolas, Tracking neutral (`--tracking-eng: 0`, `--tracking-urteil: -0.005em`). Grössen, Gewichte und Farben bleiben gleich; macOS bleibt bei Geist.
+
 ## Layout
 
 Fenster-App mit festem Gerüst über `100dvh`: Kopfleiste 44 px (Marke, vier Seitenreiter mit Zeichen, Verbindungsstand und Darstellungsknopf rechts), optional ein Aktualisierungsbanner, darunter der Inhalt, der intern scrollt; das Fenster selbst scrollt nie.

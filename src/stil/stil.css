@@ -41,6 +41,19 @@
 
   --schrift: "Geist Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --mono: "Geist Mono Variable", ui-monospace, "SF Mono", Consolas, monospace;
+  /* Geist ist für macOS gezeichnet (Tracking leicht eng); Windows bekommt unten eigene Werte. */
+  --tracking-eng: -0.01em;
+  --tracking-urteil: -0.015em;
+}
+
+/* Windows (WebView2): Geist Variable ist nicht gehintet und zeigt dort Treppenkanten (Marlon, 04.11.2026). Die
+   Systemschrift bringt ClearType-Hinting mit: Segoe UI Variable (Windows 11), sonst Segoe UI; Zahlen und Pfade in
+   Cascadia Mono oder Consolas. Segoe läuft etwas weiter als Geist, darum kein enges Tracking. Gesetzt in main.tsx. */
+:root[data-os="windows"] {
+  --schrift: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --mono: "Cascadia Mono", Consolas, "Segoe UI Variable Text", monospace;
+  --tracking-eng: 0;
+  --tracking-urteil: -0.005em;
   --rund: 6px;
   --rund-klein: 4px;
   --ease: cubic-bezier(0.25, 1, 0.5, 1);
@@ -514,7 +527,7 @@ input[type="checkbox"][role="switch"]:checked::before {
 .marke-name {
   font-size: 14px;
   font-weight: 650;
-  letter-spacing: -0.01em;
+  letter-spacing: var(--tracking-eng);
 }
 .marke-version {
   color: var(--text-3);
@@ -934,7 +947,7 @@ input[type="checkbox"][role="switch"]:checked::before {
 .karte-name {
   font-size: 18px;
   font-weight: 650;
-  letter-spacing: -0.01em;
+  letter-spacing: var(--tracking-eng);
 }
 .karte-info {
   display: flex;
@@ -1038,7 +1051,7 @@ input[type="checkbox"][role="switch"]:checked::before {
   font-size: 26px;
   font-weight: 700;
   line-height: 1.15;
-  letter-spacing: -0.015em;
+  letter-spacing: var(--tracking-urteil);
   text-wrap: balance;
 }
 .urteil p {
@@ -1108,7 +1121,7 @@ input[type="checkbox"][role="switch"]:checked::before {
 .lauf-kopf h1 {
   font-size: 20px;
   font-weight: 650;
-  letter-spacing: -0.01em;
+  letter-spacing: var(--tracking-eng);
 }
 .schritte {
   display: flex;

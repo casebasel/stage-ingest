@@ -213,6 +213,10 @@ Migration 0034 des Plate Assistant (live 04.11.2026, Systemkarte ENTSCHEIDUNGEN 
 - **Kurzname-Vorschlag** (Karte 14b1009, gleich wie das iPhone ab Build 42): Kurzzeichen + `_` + Vorschlag aus dem Namen (`TKB_IMAGEFILM`), bei `kunde-offen` nur der Name; gekürzt auf höchstens 32 Zeichen ohne `_` am Ende; zieht nach, solange niemand den Kurznamen getippt hat. Kein `NEU_`, kein Umbenennen; die Produktionsnummer kommt später nur als Feld (Karte 85fa280). Grenze 32 auch in der Vorschlagsregel (`struktur.rs`), in der Oberfläche und im Stage-Befehl `ingest.karte` (Stage prüft 32 seit 804d098).
 - **Kunde fehlt:** Steht ein Projekt auf `kunde-offen`, zeigt die Projektseite einen Hinweis mit Sprung in die Projekt-Einstellungen; dort ist der Kunde wählbar (`projekt.kunde_id` je Feld, Recht des persönlichen Kontos).
 
+## 7f. Schrift unter Windows (0.1.76)
+
+Marlon (04.11.2026): „die Schrift ist bisschen treppeneffekt-artig, unter macOS ist es ok.“ Geist Variable ist nicht gehintet; WebView2 glättet sie schlechter als macOS. Unter Windows setzt `main.tsx` vor dem ersten Bild `data-os="windows"`, und `stil.css` nimmt dort die Systemschrift mit ClearType-Hinting: Segoe UI Variable Text (Windows 11), sonst Segoe UI; für Zahlen, Pfade und Clipnamen Cascadia Mono, sonst Consolas. Tracking neutral, weil Segoe weiter läuft als Geist. Alles andere (Grössen, Gewichte, Farben, Tag und Nacht) bleibt gleich; macOS bleibt bei Geist.
+
 ## 8. HDRI
 
 - Ein HDRI hängt an einer **Plate** oder an einem **Drehort**. Ein Take nimmt das HDRI seiner Plate, sonst das zeitlich nächste seines Drehorts.

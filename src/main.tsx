@@ -13,6 +13,9 @@ if (!("__TAURI_INTERNALS__" in window)) {
 
 // Vor dem ersten Bild setzen, damit nichts aufblitzt.
 document.documentElement.dataset.thema = thema(gemerkteWahl());
+// Windows rendert die unhinted Geist in WebView2 mit Treppeneffekt (Marlon, 04.11.2026); dort die Systemschrift mit
+// ClearType-Hinting (stil.css, `[data-os="windows"]`). macOS bleibt bei Geist.
+if (navigator.userAgent.includes("Windows")) document.documentElement.dataset.os = "windows";
 
 createRoot(document.getElementById("app")!).render(
   <StrictMode>
