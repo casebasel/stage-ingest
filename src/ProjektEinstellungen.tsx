@@ -300,7 +300,8 @@ export function NeuesProjekt({ fertig }: { fertig: (p?: Projekt) => void }) {
                 const n = e.target.value;
                 setKundeName(n);
                 setStand(null);
-                if (!kzVonHand) setKurzzeichen(kurzzeichenVorschlag(await konto.kurznameVorschlag(n)));
+                // Umschrift ohne die Längengrenze des Kurznamens (Karte febe13a), sonst fehlten Wörter hinten.
+                if (!kzVonHand) setKurzzeichen(kurzzeichenVorschlag(await konto.kurznameVorschlag(n, 200)));
               }}
             />
           </Feld>
