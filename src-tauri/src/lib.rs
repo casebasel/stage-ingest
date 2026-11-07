@@ -151,7 +151,8 @@ fn projekt_zeilen(auftrag: &KartenAuftrag, umfeld: Option<&serde_json::Value>) -
     }
     if let Some(u) = umfeld {
         if let Some(o) = u["ortsname"]["text"].as_str().map(str::trim).filter(|t| !t.is_empty()) {
-            z.push(("Ort".to_owned(), o.to_owned()));
+            let q = wetter::quelle(&u["ortsname"]).map(|(n, url)| format!(" · Quelle: {n}, {url}")).unwrap_or_default();
+            z.push(("Ort".to_owned(), format!("{o}{q}")));
         }
         let datum = auftrag.dreh.as_ref().map(|d| d.datum.as_str());
         if let Some(t) = wetter::tages_text(&u["wetter"], datum) {

@@ -307,6 +307,8 @@ const IM_KATALOG = new Set([
   "take.sonne.hoeheGrad",
   "take.sonne.seiteGrad",
   "dreh.ortsname.text",
+  "dreh.ortsname.quelle.name",
+  "dreh.ortsname.quelle.url",
   "dreh.wetter.anzeige",
   "dreh.wetter.text",
   "dreh.wetter.quelle.name",
@@ -603,21 +605,32 @@ function technikVon(t: TakeMitWerten, technik: Record<string, Technik>): Technik
   return (t.datei ? technik[t.datei] : undefined) ?? t.technikDb ?? undefined;
 }
 
-/** Pflichtangabe von Apple für Wetterdaten, unter jeder Tabelle mit der Spalte „Wetter“. Name und Link kommen aus
- *  `dreh.wetter.quelle {name, url}` (Vertrag 0035, gleicher Link wie im iPhone); fest nur, wenn die Quelle fehlt. */
+/** Quellenangaben von Apple unter jeder Tabelle mit den Spalten „Ort“ (Apple Maps) oder „Wetter“ (Apple Weather).
+ *  Name und Link kommen aus `dreh.ortsname.quelle` bzw. `dreh.wetter.quelle {name, url}` (Vertrag 0035, gleicher Link
+ *  wie im iPhone); fest nur, wenn die Quelle fehlt. */
 export const APPLE_WEATHER_URL = "https://weatherkit.apple.com/legal-attribution.html";
+export const APPLE_MAPS_URL = "https://gspe21-ssl.ls.apple.com/html/attribution.html";
 export function WetterQuelle({ spalten, takes }: { spalten: Spalte[]; takes: TakeMitWerten[] }) {
-  if (!spalten.some((s) => s.id === "wetter")) return null;
-  const mit = takes.find((t) => t.werte?.["dreh.wetter.quelle.url"] || t.werte?.["dreh.wetter.quelle.name"]);
-  const name = String(mit?.werte?.["dreh.wetter.quelle.name"] || "Apple Weather");
-  const url = String(mit?.werte?.["dreh.wetter.quelle.url"] || APPLE_WEATHER_URL);
+  const ort = spalten.some((s) => s.id === "ort") && takes.some((t) => t.werte?.["dreh.ortsname.text"]);
+  const wetter = spalten.some((s) => s.id === "wetter") && takes.some((t) => t.werte?.["dreh.wetter.anzeige"]);
+  if (!ort && !wetter) return null;
+  const quelle = (praefix: string, name: string, url: string) => {
+    const mit = takes.find((t) => t.werte?.[`${praefix}.quelle.url`] || t.werte?.[`${praefix}.quelle.name`]);
+    const n = String(mit?.werte?.[`${praefix}.quelle.name`] || name);
+    const u = String(mit?.werte?.[`${praefix}.quelle.url`] || url);
+    return (
+      <button className="verweis" onClick={() => openUrl(u).catch(() => {})} title={u}>
+        {n}
+      </button>
+    );
+  };
   return (
     <p className="leise wetter-quelle">
-      Wetter:{" "}
-      <button className="verweis" onClick={() => openUrl(url).catch(() => {})} title={url}>
-        {name}
-      </button>{" "}
-      über den Plate Assistant, Stunde zur Startzeit des Takes.
+      {ort && <>Ort: {quelle("dreh.ortsname", "Apple Maps", APPLE_MAPS_URL)}</>}
+      {ort && wetter && " · "}
+      {wetter && <>Wetter: {quelle("dreh.wetter", "Apple Weather", APPLE_WEATHER_URL)}, Stunde zur Startzeit des Takes</>}
+      {" "}
+      über den Plate Assistant.
     </p>
   );
 }

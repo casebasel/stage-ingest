@@ -8,6 +8,8 @@ use std::collections::BTreeMap;
 
 /// Pflichtangabe von Apple für WeatherKit-Daten; gilt nur, wenn `quelle.url` fehlt (Build 42 schreibt den Link, den WeatherKit nennt, sonst denselben festen).
 pub const APPLE_WEATHER_URL: &str = "https://weatherkit.apple.com/legal-attribution.html";
+/// Quellenangabe für Apple-Maps-Daten (Ortsname per Reverse-Geocoding); Rückfall, wenn `ortsname.quelle.url` fehlt.
+pub const APPLE_MAPS_URL: &str = "https://gspe21-ssl.ls.apple.com/html/attribution.html";
 
 fn zahl(v: &Value) -> Option<f64> {
     v.as_f64().or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()))
@@ -62,12 +64,16 @@ pub fn tages_text(wetter: &Value, datum: Option<&str>) -> Option<String> {
 /// Quelle mit Link; bei Apple Weather immer die Pflichtseite von Apple.
 pub fn quelle(v: &Value) -> Option<(String, String)> {
     let name = v["quelle"]["name"].as_str().map(str::trim).filter(|n| !n.is_empty())?.to_owned();
-    let url = v["quelle"]["url"]
-        .as_str()
-        .map(str::trim)
-        .filter(|u| !u.is_empty())
-        .map(str::to_owned)
-        .unwrap_or_else(|| if name.contains("Apple Weather") { APPLE_WEATHER_URL.to_owned() } else { String::new() });
+    let url =
+        v["quelle"]["url"].as_str().map(str::trim).filter(|u| !u.is_empty()).map(str::to_owned).unwrap_or_else(|| {
+            if name.contains("Apple Weather") {
+                APPLE_WEATHER_URL.to_owned()
+            } else if name.contains("Apple Maps") {
+                APPLE_MAPS_URL.to_owned()
+            } else {
+                String::new()
+            }
+        });
     Some((name, url))
 }
 
@@ -82,8 +88,9 @@ pub fn werte_fuer_take(dreh: &Value, start: Option<&str>, werte: &mut BTreeMap<S
                 werte.insert(format!("dreh.ortsname.detail.{k}"), Value::String(w.to_owned()));
             }
         }
-        if let Some((n, _)) = quelle(o) {
-            werte.insert("dreh.ortsname.quelle".into(), Value::String(n));
+        if let Some((n, u)) = quelle(o) {
+            werte.insert("dreh.ortsname.quelle.name".into(), Value::String(n));
+            werte.insert("dreh.ortsname.quelle.url".into(), Value::String(u));
         }
     }
     let w = &dreh["wetter"];
@@ -154,6 +161,7 @@ mod tests {
         werte_fuer_take(&dreh(), Some("2026-10-16T12:20:00Z"), &mut w);
         assert_eq!(w["dreh.ortsname.text"], "Basel, Kleinbasel");
         assert_eq!(w["dreh.ortsname.detail.land"], "CH");
+        assert_eq!(w["dreh.ortsname.quelle.url"], APPLE_MAPS_URL);
         assert_eq!(w["dreh.wetter.anzeige"], "Regen, 12 °C, Wind 20 km/h, 0,3 mm");
         assert_eq!(w["dreh.wetter.stunde.wolkenProzent"], 95);
         assert_eq!(w["dreh.wetter.text"], "bewölkt, 10–14 °C");
