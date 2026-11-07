@@ -605,7 +605,7 @@ function technikVon(t: TakeMitWerten, technik: Record<string, Technik>): Technik
 
 /** Pflichtangabe von Apple für Wetterdaten, unter jeder Tabelle mit der Spalte „Wetter“. Name und Link kommen aus
  *  `dreh.wetter.quelle {name, url}` (Vertrag 0035, gleicher Link wie im iPhone); fest nur, wenn die Quelle fehlt. */
-export const APPLE_WEATHER_URL = "https://developer.apple.com/weatherkit/data-source-attribution/";
+export const APPLE_WEATHER_URL = "https://weatherkit.apple.com/legal-attribution.html";
 export function WetterQuelle({ spalten, takes }: { spalten: Spalte[]; takes: TakeMitWerten[] }) {
   if (!spalten.some((s) => s.id === "wetter")) return null;
   const mit = takes.find((t) => t.werte?.["dreh.wetter.quelle.url"] || t.werte?.["dreh.wetter.quelle.name"]);

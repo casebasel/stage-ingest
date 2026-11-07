@@ -6,8 +6,8 @@
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-/// Pflichtangabe von Apple für WeatherKit-Daten; gilt nur, wenn `quelle.url` fehlt (das iPhone schreibt denselben Link).
-pub const APPLE_WEATHER_URL: &str = "https://developer.apple.com/weatherkit/data-source-attribution/";
+/// Pflichtangabe von Apple für WeatherKit-Daten; gilt nur, wenn `quelle.url` fehlt (Build 42 schreibt den Link, den WeatherKit nennt, sonst denselben festen).
+pub const APPLE_WEATHER_URL: &str = "https://weatherkit.apple.com/legal-attribution.html";
 
 fn zahl(v: &Value) -> Option<f64> {
     v.as_f64().or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()))
