@@ -18,6 +18,7 @@ mod take_aus_clip;
 mod technik;
 mod vorgang;
 mod vorschaubilder;
+mod wetter;
 mod zuordnung;
 
 use std::path::{Path, PathBuf};
@@ -139,13 +140,24 @@ struct ProjektAngaben {
     dop: Option<String>,
 }
 
-/// Gefüllte Projektangaben in fester Reihenfolge: Projekt, Kurzname, Drehort, Produktionsfirma, Regie, DoP.
-fn projekt_zeilen(auftrag: &KartenAuftrag) -> Vec<(String, String)> {
+/// Gefüllte Projektangaben in fester Reihenfolge: Projekt, Kurzname, Drehort, Ort, Wetter (0035, mit Quelle „Apple
+/// Weather“ und Link, wie Apple es verlangt), Produktionsfirma, Regie, DoP.
+fn projekt_zeilen(auftrag: &KartenAuftrag, umfeld: Option<&serde_json::Value>) -> Vec<(String, String)> {
     let mut z = Vec::new();
     if let Some(d) = &auftrag.dreh {
         z.push(("Projekt".to_owned(), d.projekt.clone()));
         z.push(("Kurzname".to_owned(), d.kurzname.clone().unwrap_or_else(|| struktur::kurzname(&d.projekt))));
         z.push(("Drehort".to_owned(), format!("{} · {}", d.name, d.datum)));
+    }
+    if let Some(u) = umfeld {
+        if let Some(o) = u["ortsname"]["text"].as_str().map(str::trim).filter(|t| !t.is_empty()) {
+            z.push(("Ort".to_owned(), o.to_owned()));
+        }
+        let datum = auftrag.dreh.as_ref().map(|d| d.datum.as_str());
+        if let Some(t) = wetter::tages_text(&u["wetter"], datum) {
+            let q = wetter::quelle(&u["wetter"]).map(|(n, url)| format!(" · Quelle: {n}, {url}")).unwrap_or_default();
+            z.push(("Wetter".to_owned(), format!("{t}{q}")));
+        }
     }
     if let Some(a) = &auftrag.projekt_angaben {
         for (n, w) in [("Produktionsfirma", &a.firma), ("Regie", &a.regie), ("DoP", &a.dop)] {
@@ -1381,10 +1393,15 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
         freigabe.hinweise.push(format!("Farbe weicht vom Projekt ab (Gamma/Look): {}", farbe.join("; ")));
     }
     let version = app.package_info().version.to_string();
+    // Ort und Wetter des Drehorts (0035) für den Bericht; ohne Netz oder Drehort bleibt es weg.
+    let umfeld = match (&auftrag.plate_zugang, &auftrag.plate_dreh) {
+        (Some(z), Some(id)) => app.state::<Arc<plate::Plate>>().dreh_umfeld(z, id).ok(),
+        _ => None,
+    };
     let angaben = ingest_bericht::Angaben {
         version: &version,
         mit_md5: auftrag.mit_md5,
-        projekt: projekt_zeilen(auftrag),
+        projekt: projekt_zeilen(auftrag, umfeld.as_ref()),
         clips: clips_bericht,
     };
     let berichte: Vec<Result<PathBuf, String>> = (0..urteile.len())
@@ -1521,7 +1538,7 @@ fn einlesen(app: &AppHandle, auftrag: &KartenAuftrag, abbruch: &AtomicBool) -> R
             freigegeben: freigabe.sicher,
             unabhaengige_kopien: freigabe.unabhaengige_kopien,
             grund: freigabe.grund.clone(),
-            projekt: projekt_zeilen(auftrag).into_iter().collect(),
+            projekt: projekt_zeilen(auftrag, None).into_iter().collect(),
             karte_id: datenbank.as_ref().and_then(|d| d.as_ref().ok()).cloned(),
             einsortiert: None,
             geloescht: vec![],

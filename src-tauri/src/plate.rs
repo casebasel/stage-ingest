@@ -246,6 +246,10 @@ pub struct Projekt {
     pub typ: Option<String>,
     #[serde(default)]
     pub kunde_id: Option<String>,
+    /// Datenzentrale (0036): geplant · aktiv · pausiert · archiv_vorbereitung · archiviert. Der Ingest setzt nur
+    /// `pausiert` → `aktiv` (Karte für pausiertes Projekt, nach Rückfrage).
+    #[serde(default)]
+    pub speicher_status: Option<String>,
     /// Standard-Kameraeinstellungen (Migration 0016, alle freiwillig); fehlen vor 0016.
     #[serde(default)]
     pub fps: Option<f64>,
@@ -504,10 +508,12 @@ impl Plate {
         let mit_kopien = mit.replace("dop&", "dop,kopien&");
         // Mit Farbe (ab 0027).
         let mit_farbe = mit.replace("dop&", "dop,kopien,aufnahme_gamma,look&");
-        // Mit Katalog (ab 0034): Typ und Kunde.
+        // Mit Katalog (ab 0034): Typ und Kunde; mit Speicher-Status (ab 0036).
         let mit_katalog = mit.replace("dop&", "dop,kopien,aufnahme_gamma,look,typ,kunde_id&");
+        let mit_status = mit.replace("dop&", "dop,kopien,aufnahme_gamma,look,typ,kunde_id,speicher_status&");
         match self
-            .lesen(z, &mit_katalog)
+            .lesen(z, &mit_status)
+            .or_else(|_| self.lesen(z, &mit_katalog))
             .or_else(|_| self.lesen(z, &mit_farbe))
             .or_else(|_| self.lesen(z, &mit_kopien))
             .or_else(|_| self.lesen(z, mit))
@@ -1047,6 +1053,12 @@ impl Plate {
 
     /// Alle Drehorte eines Projekts mit Plates, Takes, Fotos und HDRI. Drehorte von vor Migration 0009 haben nur
     /// den Projektnamen als Text: sie zählen nur bei exakter Gleichheit (und nur ohne `projekt_id`).
+    /// Ortsname und Wetter eines Drehorts (0035) für den Bericht; `{}` bei älterem Server.
+    pub fn dreh_umfeld(&self, z: &Zugang, dreh_id: &str) -> Result<Value, String> {
+        let v = self.lesen(z, &format!("dreh?id=eq.{}&select=ortsname,wetter", url_teil(dreh_id)))?;
+        Ok(v.as_array().and_then(|a| a.first()).cloned().unwrap_or_else(|| json!({})))
+    }
+
     pub fn projekt_drehs(&self, z: &Zugang, projekt: &Projekt) -> Result<Value, String> {
         self.drehs_mit_plan(z, &projekt.id, Some(&projekt.name))
     }
@@ -1055,19 +1067,26 @@ impl Plate {
     pub fn drehs_mit_plan(&self, z: &Zugang, projekt_id: &str, name: Option<&str>) -> Result<Value, String> {
         // Mit Kurzname, Fotos und HDRI-Zeit (ab 0017), Plates und Takes mit allen Feldern (Spalten der Take-Tabellen);
         // bei einem älteren Server die schmale Auswahl.
+        // Mit Ortsname und Wetter (ab 0035), sonst ohne.
+        let voll_umfeld = "select=id,name,kurzname,datum,geloescht,ortsname,wetter,\
+                    hdri(id,plate_id,zustand,erstellt_am,geloescht),plate(*,foto(*),take(*))";
         let voll = "select=id,name,kurzname,datum,geloescht,hdri(id,plate_id,zustand,erstellt_am,geloescht),\
                     plate(*,foto(*),take(*))";
         let schmal = "select=id,name,datum,geloescht,hdri(id,plate_id,zustand,geloescht),\
                       plate(id,nummer,name,szene,buchstabe,geloescht,foto(id,geloescht),\
                       take(id,nummer,art,clip,clip_name,bewertung,geloescht))";
-        let mut auswahl = voll;
-        let neu = match self.lesen(z, &format!("dreh?projekt_id=eq.{}&{voll}", url_teil(projekt_id))) {
-            Ok(v) => v,
-            Err(_) => {
-                auswahl = schmal;
-                self.lesen(z, &format!("dreh?projekt_id=eq.{}&{schmal}", url_teil(projekt_id)))?
-            }
-        };
+        let mut auswahl = voll_umfeld;
+        let neu =
+            match self.lesen(z, &format!("dreh?projekt_id=eq.{}&{voll_umfeld}", url_teil(projekt_id))).or_else(|_| {
+                auswahl = voll;
+                self.lesen(z, &format!("dreh?projekt_id=eq.{}&{voll}", url_teil(projekt_id)))
+            }) {
+                Ok(v) => v,
+                Err(_) => {
+                    auswahl = schmal;
+                    self.lesen(z, &format!("dreh?projekt_id=eq.{}&{schmal}", url_teil(projekt_id)))?
+                }
+            };
         let alt = match name {
             Some(n) => self
                 .lesen(z, &format!("dreh?projekt_id=is.null&produktion=eq.{}&{auswahl}", url_teil(n)))
@@ -1302,6 +1321,7 @@ impl Plate {
         const ERLAUBT: &[&str] = &[
             "name",
             "kunde_id",
+            "speicher_status",
             "art",
             "firma",
             "regie",
@@ -1577,6 +1597,7 @@ fn projekte_aus(v: &Value) -> Vec<Projekt> {
             aktiv: p["aktiv"].as_bool().unwrap_or(true),
             typ: text_oder_nichts(&p["typ"]),
             kunde_id: text_oder_nichts(&p["kunde_id"]),
+            speicher_status: text_oder_nichts(&p["speicher_status"]),
             // numeric kommt von PostgREST als Zahl oder Text
             fps: p["fps"].as_f64().or_else(|| p["fps"].as_str().and_then(|t| t.parse().ok())),
             codec: p["codec"].as_str().map(str::to_owned).filter(|t| !t.trim().is_empty()),

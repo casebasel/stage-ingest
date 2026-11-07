@@ -16,6 +16,8 @@ export type Projekt = {
   /** Katalog (0034): Typ (leer = Film) und Kunde (Pflicht; `kunde-offen` = fehlt noch). */
   typ?: string | null;
   kundeId?: string | null;
+  /** Datenzentrale (0036): geplant · aktiv · pausiert · archiv_vorbereitung · archiviert. */
+  speicherStatus?: string | null;
   /** Standard-Kameraeinstellungen (freiwillig): Abweichungen der Clips nur als Warnung. */
   fps?: number | null;
   codec?: string | null;

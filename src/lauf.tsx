@@ -2,7 +2,7 @@
 // und der Kopf überall zeigt, was gerade läuft.
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { message } from "@tauri-apps/plugin-dialog";
+import { ask, message } from "@tauri-apps/plugin-dialog";
 import {
   abbrechen as kernAbbrechen,
   aufFortschritt,
@@ -368,6 +368,24 @@ function useLaufHalten() {
       }
       // Merkdatei jeder Ablage anlegen, falls sie fehlt (feste ID und Name, auf Mac und Windows gleich); nie auf die
       // Karte (Rust prüft es gegen die Quelle und die erkannten Karten).
+      // Speicher-Status der Datenzentrale (0036, Karte 07.11.2026): pausiert → nach Rückfrage wieder aktiv; archiviert →
+      // Karte trotzdem ablegen, der Status bleibt, die Datenzentrale fragt nach dem Reaktivieren (Zurückkopieren).
+      if (paProjekt?.speicherStatus === "pausiert" || paProjekt?.speicherStatus === "archiviert") {
+        const archiviert = paProjekt.speicherStatus === "archiviert";
+        const ja = await ask(
+          archiviert
+            ? `Das Projekt „${paProjekt.name}“ ist archiviert.\n\nDie Karte wird trotzdem in die Ablage kopiert; der Status bleibt „archiviert“. Die Datenzentrale fragt danach, ob das Projekt reaktiviert werden soll.`
+            : `Das Projekt „${paProjekt.name}“ ist pausiert.\n\nMit dem Einlesen wird es wieder aktiv (Speicher-Status „aktiv“).`,
+          {
+            title: archiviert ? "Archiviertes Projekt" : "Pausiertes Projekt",
+            kind: "warning",
+            okLabel: archiviert ? "Trotzdem einlesen" : "Einlesen und reaktivieren",
+            cancelLabel: "Abbrechen",
+          },
+        );
+        if (!ja) return;
+        if (!archiviert) await konto.projektAendern(paProjekt.id, { speicher_status: "aktiv" }).catch(() => {});
+      }
       for (const z of e.ziele) await invoke("ablage_sicherstellen", { pfad: z, quelle: quelle.pfad }).catch(() => {});
       const r = await karteEinlesen({
         quelle: quelle.pfad,

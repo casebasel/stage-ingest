@@ -15,7 +15,7 @@ import { kurz } from "./Einlesen";
 import { PfadMenue, type PfadMenueStand } from "./PfadMenue";
 import { ExportDialog, type ExportClip } from "./Export";
 import { Abspieler, type AbspielEintrag } from "./Abspieler";
-import { ClipMitBild, vorschauLaden, SpaltenKopf, SpaltenMenue, SpaltenZellen, useTakeSpalten, type Spalte, type TakeMitWerten } from "./TakeSpalten";
+import { ClipMitBild, vorschauLaden, SpaltenKopf, SpaltenMenue, SpaltenZellen, useTakeSpalten, type Spalte, type TakeMitWerten, WetterQuelle } from "./TakeSpalten";
 
 // Ein Löschen nach dem anderen: Am 16.10.2026 liefen zwei gleichzeitig auf derselben Kopie, und die ASC-MHL-Historie
 // nannte danach einen gelöschten Clip noch. Die App lehnt ein zweites ab, solange eines läuft; hier wartet es in der Reihe.
@@ -897,6 +897,17 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
           <Status ton="warn">{u.hinweis}</Status>
         </p>
       )}
+      {aktuell && (aktuell.speicherStatus === "pausiert" || aktuell.speicherStatus === "archiviert" || aktuell.speicherStatus === "archiv_vorbereitung") && (
+        <p className="hinweiszeile">
+          <Status ton="warn">
+            {aktuell.speicherStatus === "pausiert"
+              ? "Projekt pausiert (Datenzentrale): eine neue Karte macht es beim Einlesen wieder aktiv."
+              : aktuell.speicherStatus === "archiviert"
+                ? "Projekt archiviert (Datenzentrale): Karten werden abgelegt, der Status bleibt; reaktivieren über die Datenzentrale."
+                : "Projekt wird archiviert (Datenzentrale): Archiv in Vorbereitung."}
+          </Status>
+        </p>
+      )}
       {aktuell && (aktuell.kundeId === KUNDE_OFFEN || (verbunden && aktuell.kundeId === "")) && !einstellen && (
         <p className="hinweiszeile">
           <Status ton="warn">Kunde fehlt: Dieses Projekt hat noch keinen Auftraggeber (Pflicht seit dem Katalog).</Status>{" "}
@@ -1079,6 +1090,7 @@ function AlleTakes({
         <SpaltenMenue alle={sp.alle} an={sp.an} setAn={sp.setAn} offen={sp.menueOffen} setOffen={sp.setMenueOffen} festeIds={FEST} ohneArtCmd={sp.ohneArtCmd} />
       </div>
       {sichtbar.length ? (
+        <>
         <table className="tabelle tabelle-waehlbar">
           <thead>
             <tr>
@@ -1120,6 +1132,8 @@ function AlleTakes({
             ))}
           </tbody>
         </table>
+        <WetterQuelle spalten={spalten} />
+        </>
       ) : (
         <p className="leer-zeile">
           {zeilen.length ? "Kein Take passt zum Filter." : "Für dieses Projekt sind im Plate Assistant noch keine Takes erfasst."}
@@ -1502,6 +1516,7 @@ function PlateDetail({ dreh, p, drehWaehlen }: { dreh: DrehStand; p: PlateStand;
         )}
       </div>
       {p.takes.length ? (
+        <>
         <table className="tabelle tabelle-waehlbar">
           <thead>
             <tr>
@@ -1534,6 +1549,8 @@ function PlateDetail({ dreh, p, drehWaehlen }: { dreh: DrehStand; p: PlateStand;
             ))}
           </tbody>
         </table>
+          <WetterQuelle spalten={spalten} />
+        </>
       ) : (
         <p className="leer-zeile">Noch keine Takes.</p>
       )}

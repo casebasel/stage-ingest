@@ -2281,6 +2281,12 @@ input[type="checkbox"][role="switch"]:checked::before {
   background: var(--linie);
 }
 
+/* Pflichtangabe Apple Weather unter Tabellen mit der Spalte „Wetter“ (TakeSpalten.tsx). */
+.wetter-quelle {
+  margin: 6px 12px 0;
+  font-size: 12px;
+}
+
 /* Doppelklick auf eine Zelle kopiert ihren Wert (zwischenablage.ts): kurze Bestätigung unten in der Mitte. */
 .kopiert-hinweis {
   position: fixed;

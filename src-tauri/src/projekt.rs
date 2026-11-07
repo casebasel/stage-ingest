@@ -1596,6 +1596,8 @@ pub fn zusammenfuehren(
                 let mut werte = std::collections::BTreeMap::new();
                 flach("take", t, &mut werte);
                 flach("plate", p, &mut werte);
+                // Ort und Wetter des Drehorts (0035): Stunde zum Take, sonst der Tag.
+                crate::wetter::werte_fuer_take(d, t["start_zeit"].as_str(), &mut werte);
                 let dateien = pfade_take
                     .get(&id)
                     .or_else(|| (!clip.is_empty()).then(|| pfade_clip.get(&clip)).flatten())
@@ -2978,6 +2980,7 @@ mod tests {
             },
         };
         let p = Projekt {
+            speicher_status: None,
             id: "projekt-happy_end".into(),
             name: "Happy End".into(),
             kurzname: "HAPPY_END".into(),

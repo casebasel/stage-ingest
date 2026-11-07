@@ -221,6 +221,13 @@ Marlon (04.11.2026): „die Schrift ist bisschen treppeneffekt-artig, unter macO
 
 Marlon (07.11.2026): „Es wäre super, wenn die Ingest-App den Dienst starten kann, auf dem Ada-Rechner, und dass der dann nach Inaktivität nach 30 Minuten wieder sich schliesst.“ Gewählt: Wächter-Aufgabe auf Ada (Systemkarte e115464, bewusste Ausnahme vom Autostart-Verbot). Die geplante Aufgabe **HDRI-Wecker** ruft alle 2 Minuten `python -m hdri_dienst wecken` (Sekundenbruchteile, kein GPU): startet die Aufgabe HDRI-Dienst nur, wenn hochgeladene Aufnahmen ohne fertigen Job oder Jobs im Zustand `wartet` da sind, der Dienst nicht läuft und weder nDisplay/Unreal noch eine Einmessung laufen; schreibt nur dann nach `wecker.log`. Der Dienst beendet sich nach 30 Minuten ohne Arbeit selbst (`--leerlauf`, 0 = nie). In der App: Knopf **„HDRI rechnen“** an hochgeladenen, nicht gerechneten Aufnahmen setzt den Job auf `wartet` (`hdri_job_anstossen`, legt ihn mit `projekt_id` an, wenn er fehlt); eine neu hochgeladene Aufnahme weckt den Dienst auch ohne Knopf. Dazu trägt der Dienst seit 068cb9b `projekt_id` in jeden Job ein (Datenzentrale findet Jobs je Projekt); die sechs alten Jobs wurden am 07.11.2026 nachgetragen.
 
+## 7h. Ort, Wetter und Speicher-Status (0.1.78)
+
+Migrationen 0035 und 0036 des Plate Assistant (live 07.11.2026). Marlon (07.11.2026): „Ja, alles.“
+
+- **Ort und Wetter je Drehort** (`dreh.ortsname`, `dreh.wetter`, Form Systemkarte 04.11.2026): Spalten „Ort“ (`ortsname.text`) und „Wetter“ in den Take-Tabellen. Das Wetter ist die Stunde zur Startzeit des Takes (`src-tauri/src/wetter.rs`, nächster Eintrag in `wetter.tage[].stunden[]`, höchstens 90 Minuten entfernt), sonst der Tag: „Regen, 12 °C, Wind 20 km/h, 0,3 mm“. Pflichtangabe von Apple: unter jeder Tabelle mit der Spalte „Wetter“ steht „Apple Weather“ mit Link auf die Quellenangaben; im PDF-Bericht stehen „Ort“ und „Wetter“ (Tag) mit „Quelle: Apple Weather, <Link>“ in den Projektangaben.
+- **Speicher-Status** (`projekt.speicher_status`, Datenzentrale): Beim Einlesen in ein pausiertes Projekt fragt die App und setzt den Status mit dem Einlesen auf `aktiv` (der einzige Wert, den der Ingest schreibt). Bei einem archivierten Projekt wird die Karte nach Rückfrage trotzdem abgelegt, der Status bleibt; die Datenzentrale fragt nach dem Reaktivieren (Zurückkopieren). Die Projektseite zeigt pausiert, archiviert und „Archiv in Vorbereitung“ als Hinweis.
+
 ## 8. HDRI
 
 - Ein HDRI hängt an einer **Plate** oder an einem **Drehort**. Ein Take nimmt das HDRI seiner Plate, sonst das zeitlich nächste seines Drehorts.

@@ -4,6 +4,7 @@
 // damit Konsole und Ingest dasselbe sagen. Technische Werte werden erst gelesen, wenn eine solche Spalte sichtbar ist.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { Columns3 } from "lucide-react";
 import { gemerkt, merken, useEinstellungen } from "../einstellungen";
 import { useKonto, type Zugang } from "../konto";
@@ -271,6 +272,16 @@ const KATALOG: Spalte[] = [
       return lat != null && lon != null && lat !== "" && lon !== "" ? `${lat}, ${lon}` : undefined;
     },
   },
+  // Ort und Wetter je Drehort (Plate Assistant 0035, Marlon 03.11.2026: „Ja, beides“); Wetter als Stunde zum Take,
+  // sonst der Tag; Quelle Apple Weather mit Pflichtangabe (siehe `WetterQuelle`).
+  paSpalte("ort", "Ort", "dreh.ortsname.text"),
+  {
+    id: "wetter",
+    titel: "Wetter",
+    gruppe: "Plate Assistant",
+    quelle: "Apple Weather über den Plate Assistant (dreh.wetter, Stunde zur Startzeit des Takes, sonst der Tag)",
+    wert: (t) => pa(t, "dreh.wetter.anzeige"),
+  },
   paSpalte("notiz", "Notiz", "plate.notiz"),
   paSpalte("vfxNotiz", "VFX-Notiz", "plate.vfx_notiz"),
 ];
@@ -295,6 +306,11 @@ const IM_KATALOG = new Set([
   "take.sonne.azimutGrad",
   "take.sonne.hoeheGrad",
   "take.sonne.seiteGrad",
+  "dreh.ortsname.text",
+  "dreh.wetter.anzeige",
+  "dreh.wetter.text",
+  "dreh.wetter.quelle.name",
+  "dreh.wetter.quelle.url",
   "take.lage.richtung.genauigkeitGrad",
   "take.lage.richtung.magnetfeldUnruhig",
   "plate.richtung.genauigkeitGrad",
@@ -585,6 +601,21 @@ export function SpaltenKopf({ spalten }: { spalten: Spalte[] }) {
 /** Werte der Clipdatei: gelesen, wenn sie hier erreichbar ist, sonst aus der gemeinsamen Datenbank (`clip.technik`). */
 function technikVon(t: TakeMitWerten, technik: Record<string, Technik>): Technik | undefined {
   return (t.datei ? technik[t.datei] : undefined) ?? t.technikDb ?? undefined;
+}
+
+/** Pflichtangabe von Apple für Wetterdaten, unter jeder Tabelle mit der Spalte „Wetter“. */
+export const APPLE_WEATHER_URL = "https://weatherkit.apple.com/legal-attribution.html";
+export function WetterQuelle({ spalten }: { spalten: Spalte[] }) {
+  if (!spalten.some((s) => s.id === "wetter")) return null;
+  return (
+    <p className="leise wetter-quelle">
+      Wetter:{" "}
+      <button className="verweis" onClick={() => openUrl(APPLE_WEATHER_URL).catch(() => {})} title={APPLE_WEATHER_URL}>
+        Apple Weather
+      </button>{" "}
+      über den Plate Assistant, Stunde zur Startzeit des Takes.
+    </p>
+  );
 }
 
 export function SpaltenZellen({ spalten, t, technik }: { spalten: Spalte[]; t: TakeMitWerten; technik: Record<string, Technik> }) {
