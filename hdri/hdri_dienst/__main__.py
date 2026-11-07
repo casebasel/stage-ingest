@@ -167,7 +167,7 @@ def ki_anwenden(hid: str, ziel: Path, cfg: dict, arbeit: Path, log) -> dict:
     return b
 
 
-def laufen(datei: Path, wurzel: Path, takt_s: int, halb: bool) -> int:
+def laufen(datei: Path, wurzel: Path, takt_s: int, halb: bool, leerlauf_min: int = 30) -> int:
     """Dauerbetrieb: neue, vollständig hochgeladene Aufnahmen holen und rechnen; pausiert, solange nDisplay läuft.
 
     Ergebnisse nach `<wurzel>/ergebnisse/<hdri_id>/` (EXR, Vorschau, bericht.json). Den Job in `hdri_job` setzt
@@ -255,7 +255,25 @@ def laufen(datei: Path, wurzel: Path, takt_s: int, halb: bool) -> int:
                 if neu:
                     job(hid, {"ergebnis": ergebnis_angaben(hid, neu)})
 
-    log(f"HDRI-Dienst läuft (Takt {takt_s} s, Ergebnisse in {wurzel / 'ergebnisse'})")
+    def ki_offen() -> bool:
+        if not ki_cfg:
+            return False
+        for bericht in (wurzel / "ergebnisse").glob("*/bericht.json"):
+            try:
+                b = json.loads(bericht.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if b.get("exr_gemessen") and b.get("ki_offen", "ki" not in b and "exr_ki" not in b):
+                return True
+        return False
+
+    # Der Dienst läuft auf Abruf (Marlon, 31.10. und 07.11.2026): ohne Arbeit beendet er sich nach `leerlauf_min`
+    # Minuten selbst, damit auf Ada nichts im Hintergrund weiterläuft; gestartet wird er von Hand oder per Weckruf.
+    zuletzt_arbeit = time.time()
+    log(
+        f"HDRI-Dienst läuft (Takt {takt_s} s, Ergebnisse in {wurzel / 'ergebnisse'}"
+        + (f", beendet sich nach {leerlauf_min} min ohne Arbeit)" if leerlauf_min else ")")
+    )
     while True:
         try:
             p = stage_aktiv()
@@ -263,7 +281,10 @@ def laufen(datei: Path, wurzel: Path, takt_s: int, halb: bool) -> int:
                 log(f"pausiert: {p} läuft")
                 time.sleep(takt_s)
                 continue
-            for a in server.offene_aufnahmen():
+            offene = server.offene_aufnahmen()
+            if offene or ki_offen():
+                zuletzt_arbeit = time.time()
+            for a in offene:
                 hid = a["id"]
                 # Projekt des Drehorts: kommt beim Anlegen des Jobs mit (`hdri_job.projekt_id`).
                 pid = server.projekt_von_dreh(a.get("dreh_id"))
@@ -315,6 +336,9 @@ def laufen(datei: Path, wurzel: Path, takt_s: int, halb: bool) -> int:
                         (ziel / "bericht.json").write_text(json.dumps({"fehler": str(e)}), encoding="utf-8")
             ausstehende_hochladen()
             ausstehende_ki()
+            if leerlauf_min and time.time() - zuletzt_arbeit >= leerlauf_min * 60:
+                log(f"Beendet: {leerlauf_min} min ohne Arbeit (Start von Hand oder per Weckruf)")
+                return 0
         except StageAktiv as e:
             log(f"KI pausiert: {e}")
         except ServerFehler as e:
@@ -350,6 +374,7 @@ def main(argv: list[str] | None = None) -> int:
     lf.add_argument("--wurzel", type=Path, default=Path(r"D:\hdri-dienst"))
     lf.add_argument("--takt", type=int, default=60)
     lf.add_argument("--halb", action="store_true")
+    lf.add_argument("--leerlauf", type=int, default=30, help="Minuten ohne Arbeit, dann beendet sich der Dienst (0 = nie)")
     pn = sub.add_parser("projekt-nachtragen", help="hdri_job.projekt_id bei alten Jobs aus dem Drehort nachtragen")
     pn.add_argument("--datei", type=Path, default=Path(r"D:\hdri-dienst\zugang.env"))
     pn.add_argument("--schreiben", action="store_true", help="wirklich schreiben; ohne: nur anzeigen")
@@ -390,7 +415,7 @@ def main(argv: list[str] | None = None) -> int:
         ki_anwenden(args.hdri_id, args.wurzel / "ergebnisse" / args.hdri_id, cfg, args.wurzel / "arbeit", print)
         return 0
     if args.befehl == "laufen":
-        return laufen(args.datei, args.wurzel, args.takt, args.halb)
+        return laufen(args.datei, args.wurzel, args.takt, args.halb, args.leerlauf)
     if args.befehl == "rechnen":
         return rechnen(args.hdri_id, args.datei, args.arbeit, args.hoehe, args.halb)
     if args.befehl == "zugang":
