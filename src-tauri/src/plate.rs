@@ -1168,6 +1168,36 @@ impl Plate {
         Ok(v.as_array().into_iter().flatten().filter_map(|c| c["name"].as_str().map(str::to_owned)).collect())
     }
 
+    /// „HDRI rechnen“ (Marlon, 07.11.2026): setzt den Job der Aufnahme auf `wartet` (legt ihn an, wenn er fehlt, mit
+    /// `projekt_id`). Der Wecker auf Ada startet daraufhin den HDRI-Dienst (Systemkarte e115464).
+    pub fn hdri_job_anstossen(&self, z: &Zugang, hdri_id: &str, projekt_id: Option<&str>) -> Result<(), String> {
+        let job = format!("job-{hdri_id}");
+        let da = self.lesen(z, &format!("hdri_job?id=eq.{}&select=id,geloescht", url_teil(&job)))?;
+        let vorhanden = da.as_array().is_some_and(|a| !a.is_empty());
+        let jetzt = chrono::Utc::now();
+        let zeit = jetzt.timestamp_micros();
+        let aenderung = |feld: &str, wert: Value, t: i64| json!({ "id": ulid_aehnlich(), "tabelle": "hdri_job", "datensatz": job, "feld": feld, "wert": wert, "zeit": t });
+        let mut liste = Vec::new();
+        if !vorhanden {
+            let mut wert = json!({ "hdri_id": hdri_id, "zustand": "wartet", "geloescht": false,
+                                   "erstellt_am": jetzt.to_rfc3339_opts(chrono::SecondsFormat::Millis, true) });
+            if let Some(p) = projekt_id.filter(|p| !p.is_empty()) {
+                wert["projekt_id"] = json!(p);
+            }
+            liste.push(aenderung("_anlegen", wert, zeit));
+        } else {
+            liste.push(aenderung("zustand", json!("wartet"), zeit));
+            liste.push(aenderung("fehler", Value::Null, zeit + 1));
+        }
+        let v = self.anwenden(z, &json!({ "p_geraet": geraet_name(), "p_aenderungen": liste }))?;
+        if let Some(a) = v.as_array().and_then(|a| {
+            a.iter().find(|e| !matches!(e["ergebnis"].as_str(), Some("uebernommen" | "aelter" | "doppelt")))
+        }) {
+            return Err(format!("Job nicht angestossen: {}", a["grund"].as_str().unwrap_or("")));
+        }
+        Ok(())
+    }
+
     /// HDRI-Jobs zu diesen Aufnahmen (Tabelle `hdri_job`, ab 0019): Zustand und Ergebnis (mit Pfad der Vorschau).
     /// Gesucht über die HDRI-ID, nicht über das Projekt: der Dienst kennt das Projekt nicht immer.
     pub fn hdri_jobs(&self, z: &Zugang, hdri_ids: &[String]) -> Result<Value, String> {

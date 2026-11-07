@@ -2138,6 +2138,17 @@ async fn plate_projekt_anlegen(
 }
 
 #[tauri::command]
+async fn hdri_job_anstossen(
+    plate: State<'_, Arc<plate::Plate>>,
+    zugang: plate::Zugang,
+    hdri_id: String,
+    projekt_id: Option<String>,
+) -> Result<(), String> {
+    let p = Arc::clone(&plate);
+    im_hintergrund(move || p.hdri_job_anstossen(&zugang, &hdri_id, projekt_id.as_deref())).await
+}
+
+#[tauri::command]
 async fn plate_kunden(plate: State<'_, Arc<plate::Plate>>, zugang: plate::Zugang) -> Result<Vec<plate::Kunde>, String> {
     let p = Arc::clone(&plate);
     im_hintergrund(move || p.kunden(&zugang)).await
@@ -3316,6 +3327,7 @@ pub fn run() {
             studio_soll,
             plate_projekt_anlegen,
             plate_kunden,
+            hdri_job_anstossen,
             plate_kunde_anlegen,
             plate_projekt_aendern,
             kurzname_vorschlag,

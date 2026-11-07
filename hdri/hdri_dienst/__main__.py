@@ -348,6 +348,47 @@ def laufen(datei: Path, wurzel: Path, takt_s: int, halb: bool, leerlauf_min: int
         time.sleep(takt_s)
 
 
+def wecken(datei: Path, wurzel: Path) -> int:
+    """Weckruf (Marlon, 07.11.2026; Systemkarte e115464): alle 2 min von der geplanten Aufgabe „HDRI-Wecker“ aufgerufen.
+    Startet die Aufgabe „HDRI-Dienst“, wenn Arbeit wartet (hochgeladene Aufnahmen ohne fertigen Job oder Jobs im
+    Zustand `wartet`), der Dienst nicht schon läuft und weder nDisplay/Unreal noch eine Einmessung laufen. Sonst tut er
+    nichts und schreibt nichts; der Dienst beendet sich nach 30 min ohne Arbeit selbst."""
+    import subprocess
+    from datetime import datetime
+
+    from .server import Server, ServerFehler
+    from .waechter import messung_aktiv, python_befehlszeilen, stage_aktiv
+
+    def notieren(text: str) -> None:
+        with (wurzel / "wecker.log").open("a", encoding="utf-8") as f:
+            f.write(f"{datetime.now():%Y-%m-%d %H:%M:%S} {text}\n")
+
+    try:
+        server = Server.aus_datei(datei)
+        offene = server.offene_aufnahmen()
+        wartend = server.lesen("hdri_job?zustand=eq.wartet&geloescht=eq.false&select=hdri_id")
+    except ServerFehler as e:
+        notieren(f"Server nicht erreichbar: {e}")
+        return 2
+    if not offene and not wartend:
+        return 0
+    zeilen = python_befehlszeilen()
+    if any("hdri_dienst laufen" in z.replace('"', "") for z in zeilen):
+        return 0  # läuft schon
+    p = stage_aktiv()
+    if p:
+        return 0  # Ada arbeitet für die Stage; der nächste Weckruf kommt in 2 min
+    if messung_aktiv(zeilen):
+        return 0
+    if sys.platform == "win32":
+        aus = subprocess.run(["schtasks", "/Run", "/TN", "HDRI-Dienst"], capture_output=True, text=True, timeout=30)
+        ok = aus.returncode == 0
+    else:
+        ok = False
+    notieren(f"{'geweckt' if ok else 'Start fehlgeschlagen'}: {len(offene)} Aufnahmen offen, {len(wartend)} Jobs wartend")
+    return 0 if ok else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     # Konsole unter Windows (SSH, Dienst) zeigt sonst Umlaute falsch.
     for strom in (sys.stdout, sys.stderr):
@@ -375,6 +416,9 @@ def main(argv: list[str] | None = None) -> int:
     lf.add_argument("--takt", type=int, default=60)
     lf.add_argument("--halb", action="store_true")
     lf.add_argument("--leerlauf", type=int, default=30, help="Minuten ohne Arbeit, dann beendet sich der Dienst (0 = nie)")
+    wk = sub.add_parser("wecken", help="Weckruf: Dienst starten, wenn Arbeit wartet (geplante Aufgabe HDRI-Wecker, alle 2 min)")
+    wk.add_argument("--datei", type=Path, default=Path(r"D:\hdri-dienst\zugang.env"))
+    wk.add_argument("--wurzel", type=Path, default=Path(r"D:\hdri-dienst"))
     pn = sub.add_parser("projekt-nachtragen", help="hdri_job.projekt_id bei alten Jobs aus dem Drehort nachtragen")
     pn.add_argument("--datei", type=Path, default=Path(r"D:\hdri-dienst\zugang.env"))
     pn.add_argument("--schreiben", action="store_true", help="wirklich schreiben; ohne: nur anzeigen")
@@ -383,6 +427,8 @@ def main(argv: list[str] | None = None) -> int:
     kb.add_argument("--datei", type=Path, default=Path(r"D:\hdri-dienst\zugang.env"))
     kb.add_argument("--wurzel", type=Path, default=Path(r"D:\hdri-dienst"))
     args = p.parse_args(argv)
+    if args.befehl == "wecken":
+        return wecken(args.datei, args.wurzel)
     if args.befehl == "projekt-nachtragen":
         # Einmaliger Nachtrag (07.11.2026): Jobs vor 7eaf700 wurden ohne projekt_id angelegt. Je Job eine Feldänderung
         # über aenderungen_anwenden, damit Feldzeit und Verlauf stimmen und die Geräte es abholen.

@@ -154,6 +154,8 @@ type ArtAendern = {
   einstellungArt: (dreh: DrehStand, p: PlateStand, art: string) => Promise<void>;
   /** Einen vom Ingest angelegten Studio-Take (herkunft „ingest“) wieder weich löschen. */
   studioLoeschen: (t: TakeStand) => Promise<void>;
+  /** „HDRI rechnen“: Job auf `wartet`, der Wecker auf Ada startet den Dienst (Marlon, 07.11.2026). */
+  hdriRechnen: (h: HdriStand) => Promise<void>;
 };
 const ArtKontext = createContext<ArtAendern | null>(null);
 
@@ -743,11 +745,25 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
       setArtLaeuft(false);
     }
   }
+  async function hdriRechnen(h: HdriStand) {
+    if (!projekt) return;
+    setArtLaeuft(true);
+    try {
+      await invoke("hdri_job_anstossen", { zugang: konto.zugang, hdriId: h.id, projektId: projekt.id });
+      setNachgetragen({ ton: "ok", text: "HDRI angestossen: der Wecker auf Ada startet den Dienst innert 2 Minuten, sofern die Stage nicht läuft" });
+      await laden(projekt);
+    } catch (x) {
+      setNachgetragen({ ton: "fehler", text: `HDRI rechnen: ${String(x)}` });
+    } finally {
+      setArtLaeuft(false);
+    }
+  }
   const artAendern: ArtAendern = {
     ort: artOrt,
     darf: verbunden && !!projekt?.id && !lauf.laeuft,
     laeuft: artLaeuft,
     studioLoeschen,
+    hdriRechnen,
     takeArt,
     einstellungArt,
   };
@@ -1528,6 +1544,9 @@ function PlateDetail({ dreh, p, drehWaehlen }: { dreh: DrehStand; p: PlateStand;
 
 function HdriListe({ hdri }: { hdri: HdriStand[] }) {
   const [gross, setGross] = useState<HdriStand | null>(null);
+  const art = useContext(ArtKontext);
+  // Rechnen lassen: hochgeladen, aber noch nicht gerechnet oder freigegeben (auch nach Fehler oder Pause).
+  const rechenbar = (h: HdriStand) => h.zustand === "uploaded" && !["laeuft", "processed", "linked"].includes(h.job ?? "");
   return (
     <ul className="hdri-liste">
       {hdri.map((h) => {
@@ -1548,6 +1567,20 @@ function HdriListe({ hdri }: { hdri: HdriStand[] }) {
               <Status ton={s.ton}>{s.text}</Status>
               {h.vorschauQuelle === "iphone" && <span className="leise">Bild: Vorschau vom iPhone, nicht das gerechnete HDRI</span>}
               {h.erstelltAm && <span className="leise zahl">{new Date(h.erstelltAm).toLocaleString("de-CH")}</span>}
+            {art?.darf && rechenbar(h) && (
+              <button
+                className="knopf knopf-klein hdri-rechnen"
+                disabled={art.laeuft || h.job === "wartet"}
+                onClick={() => art.hdriRechnen(h)}
+                title={
+                  h.job === "wartet"
+                    ? "Wartet auf den Dienst: der Wecker auf Ada startet ihn innert 2 Minuten, wenn die Stage nicht läuft"
+                    : "Job auf „wartet“ setzen; der HDRI-Dienst auf Ada rechnet das Panorama (Stage darf nicht laufen)"
+                }
+              >
+                {h.job === "wartet" ? "Wartet auf den Dienst" : "HDRI rechnen"}
+              </button>
+            )}
             </div>
           </li>
         );

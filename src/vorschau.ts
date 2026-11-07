@@ -293,6 +293,10 @@ const antworten: Record<string, (a: Record<string, unknown>) => unknown> = {
     { id: "kunde-intern", name: "Intern", kurzzeichen: "INTERN" },
   ],
   plate_kunde_anlegen: (a) => `kunde-${String(a.kurzzeichen).toLowerCase()}`,
+  hdri_job_anstossen: async () => {
+    await warte(300);
+    return null;
+  },
   plate_drehs: () => [
     { id: "d1", name: "Rheinufer", datum: "2026-10-28", projektId: projekt.id, produktion: "", kurzname: "RHEINUFER" },
     { id: "d2", name: "Münsterplatz", datum: "2026-10-28", projektId: projekt.id, produktion: "" },
