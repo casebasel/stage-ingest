@@ -185,12 +185,12 @@ def laufen(datei: Path, wurzel: Path, takt_s: int, halb: bool) -> int:
     server = Server.aus_datei(datei)
     jobs_da = True
 
-    def job(hdri_id: str, felder: dict, anlegen: bool = False) -> None:
+    def job(hdri_id: str, felder: dict, anlegen: bool = False, projekt_id: str | None = None) -> None:
         nonlocal jobs_da
         if not jobs_da:
             return
         try:
-            server.job_setzen(hdri_id, felder, anlegen=anlegen)
+            server.job_setzen(hdri_id, felder, anlegen=anlegen, projekt_id=projekt_id)
         except ServerFehler as e:
             if "hdri_job" in str(e) or "unbekannt" in str(e).lower() or "PGRST" in str(e):
                 jobs_da = False
@@ -265,6 +265,8 @@ def laufen(datei: Path, wurzel: Path, takt_s: int, halb: bool) -> int:
                 continue
             for a in server.offene_aufnahmen():
                 hid = a["id"]
+                # Projekt des Drehorts: kommt beim Anlegen des Jobs mit (`hdri_job.projekt_id`).
+                pid = server.projekt_von_dreh(a.get("dreh_id"))
                 ziel = wurzel / "ergebnisse" / hid
                 if (ziel / "bericht.json").exists():
                     # Schon gerechnet (z. B. bevor es hdri_job gab): den Job nachtragen, damit die App es sieht.
@@ -272,7 +274,7 @@ def laufen(datei: Path, wurzel: Path, takt_s: int, halb: bool) -> int:
                     if b.get("exr_gemessen") and jobs_da:
                         job(hid, {"zustand": "processed", "stufe": "fertig", "fortschritt": 1.0, "rechner": "Ada",
                                   "fertig_am": b.get("fertig"), "ergebnis": ergebnis_angaben(hid, b)},
-                            anlegen=True)
+                            anlegen=True, projekt_id=pid)
                         if jobs_da:
                             log(f"{hid}: Job nachgetragen (processed)")
                     continue
@@ -280,11 +282,13 @@ def laufen(datei: Path, wurzel: Path, takt_s: int, halb: bool) -> int:
                     log(f"{hid}: Format {a.get('format')}, nicht messbar, übersprungen")
                     ziel.mkdir(parents=True, exist_ok=True)
                     (ziel / "bericht.json").write_text(json.dumps({"verworfen": "kein DNG"}), encoding="utf-8")
-                    job(hid, {"zustand": "verworfen", "fehler": "Nur DNG (Bayer-RAW) ist linear und messbar"}, anlegen=True)
+                    job(hid, {"zustand": "verworfen", "fehler": "Nur DNG (Bayer-RAW) ist linear und messbar"}, anlegen=True,
+                        projekt_id=pid)
                     continue
                 log(f"{hid}: beginnt")
                 beginn = datetime.now().astimezone().isoformat()
-                job(hid, {"zustand": "laeuft", "stufe": "laden", "rechner": "Ada", "begonnen_am": beginn, "fehler": None}, anlegen=True)
+                job(hid, {"zustand": "laeuft", "stufe": "laden", "rechner": "Ada", "begonnen_am": beginn, "fehler": None}, anlegen=True,
+                    projekt_id=pid)
                 try:
                     pruefen()
                     ordner = server.aufnahme_holen(hid, wurzel / "arbeit")

@@ -115,6 +115,23 @@ class Server:
     def lesen(self, abfrage: str):
         return self._anfrage("GET", f"/rest/v1/{abfrage}")
 
+    def projekt_von_dreh(self, dreh_id: str | None) -> str | None:
+        """`dreh.projekt_id` zum Drehort einer Aufnahme (lesbar für jedes angemeldete Konto); je Drehort einmal geholt.
+        Damit trägt jeder Job `projekt_id`, und die Datenzentrale findet die Jobs eines Projekts direkt
+        (Systemkarte, 07.11.2026); vorher blieb das Feld leer."""
+        if not dreh_id:
+            return None
+        cache = getattr(self, "_projekt_je_dreh", None)
+        if cache is None:
+            cache = self._projekt_je_dreh = {}
+        if dreh_id not in cache:
+            try:
+                zeilen = self.lesen(f"dreh?id=eq.{urllib.parse.quote(dreh_id)}&select=projekt_id")
+                cache[dreh_id] = (zeilen[0].get("projekt_id") if zeilen else None) or None
+            except ServerFehler:
+                return None  # nicht merken, nächstes Mal wieder versuchen
+        return cache[dreh_id]
+
     def offene_aufnahmen(self) -> list[dict]:
         """Aufnahmen mit vollständig hochgeladenen Rohdaten, deren Job noch nicht fertig, verworfen oder freigegeben ist."""
         aufnahmen = self.lesen("hdri?zustand=eq.uploaded&geloescht=eq.false&select=id,dreh_id,plate_id,format&order=erstellt_am.asc")
