@@ -350,11 +350,36 @@ def main(argv: list[str] | None = None) -> int:
     lf.add_argument("--wurzel", type=Path, default=Path(r"D:\hdri-dienst"))
     lf.add_argument("--takt", type=int, default=60)
     lf.add_argument("--halb", action="store_true")
+    pn = sub.add_parser("projekt-nachtragen", help="hdri_job.projekt_id bei alten Jobs aus dem Drehort nachtragen")
+    pn.add_argument("--datei", type=Path, default=Path(r"D:\hdri-dienst\zugang.env"))
+    pn.add_argument("--schreiben", action="store_true", help="wirklich schreiben; ohne: nur anzeigen")
     kb = sub.add_parser("ki", help="KI-Stufe Lichter (DiffHDR) auf ein schon gerechnetes HDRI anwenden")
     kb.add_argument("hdri_id")
     kb.add_argument("--datei", type=Path, default=Path(r"D:\hdri-dienst\zugang.env"))
     kb.add_argument("--wurzel", type=Path, default=Path(r"D:\hdri-dienst"))
     args = p.parse_args(argv)
+    if args.befehl == "projekt-nachtragen":
+        # Einmaliger Nachtrag (07.11.2026): Jobs vor 7eaf700 wurden ohne projekt_id angelegt. Je Job eine Feldänderung
+        # über aenderungen_anwenden, damit Feldzeit und Verlauf stimmen und die Geräte es abholen.
+        from .server import Server
+
+        server = Server.aus_datei(args.datei)
+        jobs = server.jobs_ohne_projekt()
+        if not jobs:
+            print("Alle Jobs tragen ein Projekt.")
+            return 0
+        for j in jobs:
+            print(f"{j['id']}: projekt_id → {j['projekt_id'] or '(Drehort ohne Projekt, bleibt leer)'}")
+        if not args.schreiben:
+            print(f"{len(jobs)} Jobs ohne Projekt; nichts geschrieben (--schreiben zum Nachtragen).")
+            return 0
+        n = 0
+        for j in jobs:
+            if j["projekt_id"]:
+                server.job_setzen(j["hdri_id"], {"projekt_id": j["projekt_id"]})
+                n += 1
+        print(f"{n} Jobs nachgetragen.")
+        return 0
     if args.befehl == "ki":
         from . import ki
 

@@ -24,7 +24,7 @@ DARF_SCHREIBEN = {"hdri_job"}
 #: Felder von `hdri_job`, die der Dienst setzt (0019).
 JOB_FELDER = {
     "_anlegen", "zustand", "stufe", "fortschritt", "rechner", "begonnen_am", "fertig_am", "fehler", "ergebnis",
-    "ausrichtung_grad", "nord_grad",
+    "ausrichtung_grad", "nord_grad", "projekt_id",
 }
 
 
@@ -131,6 +131,15 @@ class Server:
             except ServerFehler:
                 return None  # nicht merken, nächstes Mal wieder versuchen
         return cache[dreh_id]
+
+    def jobs_ohne_projekt(self) -> list[dict]:
+        """Jobs ohne `projekt_id` samt dem Projekt ihres Drehorts (Nachtrag; Plate Assistant, 07.11.2026)."""
+        jobs = self.lesen("hdri_job?projekt_id=is.null&geloescht=eq.false&select=id,hdri_id")
+        if not jobs:
+            return []
+        ids = ",".join(urllib.parse.quote(j["hdri_id"]) for j in jobs)
+        drehs = {h["id"]: h.get("dreh_id") for h in self.lesen(f"hdri?id=in.({ids})&select=id,dreh_id")}
+        return [{**j, "projekt_id": self.projekt_von_dreh(drehs.get(j["hdri_id"]))} for j in jobs]
 
     def offene_aufnahmen(self) -> list[dict]:
         """Aufnahmen mit vollständig hochgeladenen Rohdaten, deren Job noch nicht fertig, verworfen oder freigegeben ist."""
