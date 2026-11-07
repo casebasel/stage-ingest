@@ -217,6 +217,10 @@ Migration 0034 des Plate Assistant (live 04.11.2026, Systemkarte ENTSCHEIDUNGEN 
 
 Marlon (04.11.2026): „die Schrift ist bisschen treppeneffekt-artig, unter macOS ist es ok.“ Geist Variable ist nicht gehintet; WebView2 glättet sie schlechter als macOS. Unter Windows setzt `main.tsx` vor dem ersten Bild `data-os="windows"`, und `stil.css` nimmt dort die Systemschrift mit ClearType-Hinting: Segoe UI Variable Text (Windows 11), sonst Segoe UI; für Zahlen, Pfade und Clipnamen Cascadia Mono, sonst Consolas. Tracking neutral, weil Segoe weiter läuft als Geist. Alles andere (Grössen, Gewichte, Farben, Tag und Nacht) bleibt gleich; macOS bleibt bei Geist.
 
+## 7g. HDRI-Dienst auf Abruf: Wecker und Selbststopp (0.1.77)
+
+Marlon (07.11.2026): „Es wäre super, wenn die Ingest-App den Dienst starten kann, auf dem Ada-Rechner, und dass der dann nach Inaktivität nach 30 Minuten wieder sich schliesst.“ Gewählt: Wächter-Aufgabe auf Ada (Systemkarte e115464, bewusste Ausnahme vom Autostart-Verbot). Die geplante Aufgabe **HDRI-Wecker** ruft alle 2 Minuten `python -m hdri_dienst wecken` (Sekundenbruchteile, kein GPU): startet die Aufgabe HDRI-Dienst nur, wenn hochgeladene Aufnahmen ohne fertigen Job oder Jobs im Zustand `wartet` da sind, der Dienst nicht läuft und weder nDisplay/Unreal noch eine Einmessung laufen; schreibt nur dann nach `wecker.log`. Der Dienst beendet sich nach 30 Minuten ohne Arbeit selbst (`--leerlauf`, 0 = nie). In der App: Knopf **„HDRI rechnen“** an hochgeladenen, nicht gerechneten Aufnahmen setzt den Job auf `wartet` (`hdri_job_anstossen`, legt ihn mit `projekt_id` an, wenn er fehlt); eine neu hochgeladene Aufnahme weckt den Dienst auch ohne Knopf. Dazu trägt der Dienst seit 068cb9b `projekt_id` in jeden Job ein (Datenzentrale findet Jobs je Projekt); die sechs alten Jobs wurden am 07.11.2026 nachgetragen.
+
 ## 8. HDRI
 
 - Ein HDRI hängt an einer **Plate** oder an einem **Drehort**. Ein Take nimmt das HDRI seiner Plate, sonst das zeitlich nächste seines Drehorts.
