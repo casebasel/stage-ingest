@@ -1132,7 +1132,7 @@ function AlleTakes({
             ))}
           </tbody>
         </table>
-        <WetterQuelle spalten={spalten} />
+        <WetterQuelle spalten={spalten} takes={sichtbar.map((z) => z.take)} />
         </>
       ) : (
         <p className="leer-zeile">
@@ -1549,7 +1549,7 @@ function PlateDetail({ dreh, p, drehWaehlen }: { dreh: DrehStand; p: PlateStand;
             ))}
           </tbody>
         </table>
-          <WetterQuelle spalten={spalten} />
+          <WetterQuelle spalten={spalten} takes={p.takes} />
         </>
       ) : (
         <p className="leer-zeile">Noch keine Takes.</p>
