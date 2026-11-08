@@ -2,11 +2,12 @@
 // Takes, Karten). Beantwortet auch vor dem Formatieren: Ist von diesem Projekt alles da? Was ist zu klären?
 // Das Projekt selbst wird oben links gewählt (gilt für alle Seiten). Bearbeiten von Plates und Takes kommt später
 // (Systemkarte, Entscheidung „Projektmanager“ vom 08.10.2026); heute nur lesen, Projekte und Drehorte anlegen.
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { ChevronDown, ChevronRight, Image as Bild, MapPinPlus, Play, Plus, RefreshCw, Settings, Trash2, X } from "lucide-react";
 import { NeuerDrehort, NeuesProjekt, ProjektEinstellungen, KUNDE_OFFEN } from "../ProjektEinstellungen";
+import { projektkante } from "../projektfarbe";
 import { useKonto, type Projekt as ProjektT, type Zugang } from "../konto";
 import { useLauf } from "../lauf";
 import { gemerkt, merken, useEinstellungen } from "../einstellungen";
@@ -819,6 +820,11 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
   return (
     <div className="projekt">
       <div className="werkzeugleiste">
+        {projekt && (
+          <span className="projektchip projektkante" style={projektkante(projekt.id)} title={`Projekt ${projekt.name}`}>
+            <strong>{projekt.name}</strong> <span className="zahl leise">{projekt.kurzname}</span>
+          </span>
+        )}
         {verbunden && (
           <button className="knopf" aria-pressed={anlegen} onClick={() => nurEins("anlegen")}>
             <Plus size={14} strokeWidth={2} aria-hidden /> Neues Projekt
@@ -887,41 +893,39 @@ export function Projekt({ zurEinrichtung }: { zurEinrichtung: () => void }) {
           </button>
         </p>
       )}
-      {fehler && (
-        <p className="hinweiszeile">
-          <Status ton="fehler">{fehler}</Status>
-        </p>
-      )}
-      {u?.hinweis && (
-        <p className="hinweiszeile">
-          <Status ton="warn">{u.hinweis}</Status>
-        </p>
-      )}
-      {aktuell && (aktuell.speicherStatus === "pausiert" || aktuell.speicherStatus === "archiviert" || aktuell.speicherStatus === "archiv_vorbereitung") && (
-        <p className="hinweiszeile">
-          <Status ton="warn">
-            {aktuell.speicherStatus === "pausiert"
-              ? "Projekt pausiert (Datenzentrale): eine neue Karte macht es beim Einlesen wieder aktiv."
-              : aktuell.speicherStatus === "archiviert"
-                ? "Projekt archiviert (Datenzentrale): Karten werden abgelegt, der Status bleibt; reaktivieren über die Datenzentrale."
-                : "Projekt wird archiviert (Datenzentrale): Archiv in Vorbereitung."}
-          </Status>
-        </p>
-      )}
-      {aktuell && (aktuell.kundeId === KUNDE_OFFEN || (verbunden && aktuell.kundeId === "")) && !einstellen && (
-        <p className="hinweiszeile">
-          <Status ton="warn">Kunde fehlt: Dieses Projekt hat noch keinen Auftraggeber (Pflicht seit dem Katalog).</Status>{" "}
-          <button className="verweis" onClick={() => nurEins("einstellen")}>
-            In den Projekt-Einstellungen wählen
-          </button>
-        </p>
-      )}
-      {nachgetragen && (
-        <p className="hinweiszeile">
-          <Status ton={nachgetragen.ton}>{nachgetragen.text}</Status>
-        </p>
-      )}
-
+      <Hinweise
+        hinweise={[
+          ...(aktuell && (aktuell.speicherStatus === "pausiert" || aktuell.speicherStatus === "archiviert" || aktuell.speicherStatus === "archiv_vorbereitung")
+            ? [
+                {
+                  ton: "warn" as Ton,
+                  inhalt:
+                    aktuell.speicherStatus === "pausiert"
+                      ? "Projekt pausiert (Datenzentrale): eine neue Karte macht es beim Einlesen wieder aktiv."
+                      : aktuell.speicherStatus === "archiviert"
+                        ? "Projekt archiviert (Datenzentrale): Karten werden abgelegt, der Status bleibt; reaktivieren über die Datenzentrale."
+                        : "Projekt wird archiviert (Datenzentrale): Archiv in Vorbereitung.",
+                },
+              ]
+            : []),
+          ...(aktuell && (aktuell.kundeId === KUNDE_OFFEN || (verbunden && aktuell.kundeId === "")) && !einstellen
+            ? [
+                {
+                  ton: "warn" as Ton,
+                  inhalt: "Kunde fehlt: Dieses Projekt hat noch keinen Auftraggeber (Pflicht seit dem Katalog).",
+                  aktion: (
+                    <button className="verweis" onClick={() => nurEins("einstellen")}>
+                      In den Projekt-Einstellungen wählen
+                    </button>
+                  ),
+                },
+              ]
+            : []),
+          ...(fehler ? [{ ton: "fehler" as Ton, inhalt: fehler }] : []),
+          ...(u?.hinweis ? [{ ton: "warn" as Ton, inhalt: u.hinweis }] : []),
+          ...(nachgetragen ? [{ ton: nachgetragen.ton, inhalt: nachgetragen.text }] : []),
+        ]}
+      />
       {drehortNeu && aktuell ? (
         <div className="projekt-formular">
           <NeuerDrehort
@@ -2596,6 +2600,30 @@ function Gliederung({
           );
         })}
       </ul>
+    </>
+  );
+}
+
+/** Ein-Hinweis-Regel (DESIGN-GEMEINSAM): ein Bereich zeigt höchstens einen Hinweis, der wichtigste zuerst (Reihenfolge
+ *  vom Aufrufer: Datenverlust > Speicher-Status > Kunde fehlt > Datenbank > letztes Ergebnis); weitere aufklappbar. */
+function Hinweise({ hinweise }: { hinweise: { ton: Ton; inhalt: ReactNode; aktion?: ReactNode }[] }) {
+  const [alle, setAlle] = useState(false);
+  if (hinweise.length === 0) return null;
+  const sichtbar = alle ? hinweise : hinweise.slice(0, 1);
+  const weitere = hinweise.length - 1;
+  return (
+    <>
+      {sichtbar.map((h, i) => (
+        <p className="hinweiszeile" key={i}>
+          <Status ton={h.ton}>{h.inhalt}</Status>
+          {h.aktion && <> {h.aktion}</>}
+          {i === 0 && weitere > 0 && (
+            <button className="verweis leise" onClick={() => setAlle(!alle)} aria-expanded={alle}>
+              {alle ? "weniger" : `${weitere} weitere${weitere === 1 ? "r Hinweis" : " Hinweise"}`}
+            </button>
+          )}
+        </p>
+      ))}
     </>
   );
 }

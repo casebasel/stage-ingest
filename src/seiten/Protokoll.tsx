@@ -53,6 +53,7 @@ import {
 import { gemerkt, merken, useEinstellungen } from "../einstellungen";
 import { invoke } from "@tauri-apps/api/core";
 import { useKonto, type AbgleichStand } from "../konto";
+import { projektkante } from "../projektfarbe";
 import { useLauf } from "../lauf";
 import { Pfad, Status, datumZeit, type Ton } from "../teile";
 import { abweichungText } from "./Einlesen";
@@ -319,7 +320,14 @@ function KarteDetail({ k, kopieErgaenzen }: { k: ProtokollKarte; kopieErgaenzen:
             ? `${db.clips.length} Clips · `
             : `${d ? vorhanden.length : k.dateien} Dateien · ${bytesText(d ? vorhanden.reduce((s, z) => s + z.groesse, 0) : k.bytes)} · `}
           zuletzt eingelesen {datumZeit(k.beginn)}
-          {k.projekt && ` · ${k.projekt}`}
+          {k.projekt && (
+            <>
+              {" · "}
+              <span className="projektkante" style={projektkante(konto.projekte.find((p) => p.kurzname === k.projekt)?.id)}>
+                {k.projekt}
+              </span>
+            </>
+          )}
           {k.drehOrdner && ` / ${k.drehOrdner}`}
         </span>
         {!k.sicher && gute && (

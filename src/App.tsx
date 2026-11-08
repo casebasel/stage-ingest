@@ -11,6 +11,7 @@ import { KontoGeben, useKonto, type AbgleichStand } from "./konto";
 import { LaufGeben, useLauf } from "./lauf";
 import { Status, zahl } from "./teile";
 import { zellenKopierenEinrichten } from "./zwischenablage";
+import { projektkante } from "./projektfarbe";
 import { Einlesen } from "./seiten/Einlesen";
 import { Protokoll } from "./seiten/Protokoll";
 import { Projekt } from "./seiten/Projekt";
@@ -197,7 +198,7 @@ function ProjektWahl() {
     );
   const aktuell = lauf.paProjekt?.id ?? "";
   return (
-    <label className="kopf-projekt" title={gesperrt}>
+    <label className="kopf-projekt" title={gesperrt} style={projektkante(aktuell)}>
       <span className="unsichtbar">Projekt</span>
       <select
         value={aktuell}

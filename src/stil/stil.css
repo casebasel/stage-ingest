@@ -538,6 +538,25 @@ input[type="checkbox"][role="switch"]:checked::before {
   display: flex;
   align-items: center;
 }
+/* Projektfarbe (DESIGN-GEMEINSAM, Le Corbusier): 3-px-Kante vorne, immer mit dem Namen, nie als Zustand. */
+.projektkante {
+  border-left: 3px solid var(--projektfarbe, transparent);
+  padding-left: 6px;
+}
+.hinweiszeile .verweis.leise {
+  margin-left: 10px;
+}
+.projektchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  margin-right: 4px;
+  white-space: nowrap;
+}
+.kopf-projekt select {
+  border-left: 3px solid var(--projektfarbe, var(--linie-stark));
+}
 .kopf-projekt select,
 .kopf-projekt input {
   height: 28px;
@@ -619,7 +638,7 @@ input[type="checkbox"][role="switch"]:checked::before {
   flex: 1;
 }
 .aktualisierung-pflicht {
-  background: var(--warn-grund);
+  border-color: var(--rot);
 }
 
 .kopf {
@@ -1986,7 +2005,7 @@ input[type="checkbox"][role="switch"]:checked::before {
   padding: 10px 12px;
   border: 1px solid var(--warn);
   border-radius: var(--rund-klein);
-  background: var(--warn-grund);
+  background: var(--panel-2);
 }
 
 /* Einlesen: automatische Zuordnung der Clips zu den Drehorten */
