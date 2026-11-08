@@ -22,6 +22,10 @@ Gebaut ist der Kern (siehe KONZEPT Kapitel 14). Offen, in dieser Reihenfolge:
      Byte 416/420/432 = 25000); eindeutig erst mit einem Clip, bei dem Sensor- und Projekt-fps verschieden sind
 4. Erst danach: Stage Ingest am Dreh einsetzen, die ersten Tage parallel zum bisherigen Werkzeug.
 
+## Projektfarben und sofortige Rückmeldung (Systemkarte DESIGN-GEMEINSAM 02d9952, Marlon 08.11.2026)
+
+Gemeinsam für alle Apps, im Ingest beim nächsten Anfassen der Projektwahl: **Projektfarbe** je Projekt, 12 Farben aus der Palette des Speicher-Wächters, Wahl FNV-1a 32 Bit über `projekt.id` mod 12, als 3-px-Kante an Zeile oder Pfad, immer mit dem Namen daneben, nie als Zustandsfarbe (Signalregeln bleiben). Dazu **sofortige Rückmeldung** nach jedem Klick (Zustand sichtbar, bevor der Server antwortet). Testwerte (Farbe je ID) beim Speicher-Wächter; Palette aus der Karte übernehmen, nicht erfinden. Nicht gebaut.
+
 ## Objektivwechsel und Kamerabewegung (Marlon, 28.10.2026; Systemkarte ENTSCHEIDUNGEN 28.10.2026)
 
 Ingest-Teil gebaut in 0.1.72 (KONZEPT 7b: Info 2 lesen, `lds`/`manuell`, Brennweiten-Abgleich und Kamera-bewegt unter „Zu klären“). Offen: Nachfrage nach „Cut“ in Plate Assistant und Stage.
