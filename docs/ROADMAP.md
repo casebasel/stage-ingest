@@ -24,6 +24,8 @@ Gebaut ist der Kern (siehe KONZEPT Kapitel 14). Offen, in dieser Reihenfolge:
 
 ## Projektfarben und sofortige Rückmeldung (Systemkarte DESIGN-GEMEINSAM 02d9952, Marlon 08.11.2026)
 
+**Gebaut in 0.1.79** (`src/projektfarbe.ts`, Kante an Projektwahl, Projektchip und Protokoll; Ein-Hinweis-Regel auf der Projektseite; Update-Banner und Rückfrage ohne Hinweisfläche). Ursprüngliche Notiz:
+
 Gemeinsam für alle Apps, im Ingest beim nächsten Anfassen der Projektwahl: **Projektfarbe** je Projekt, 12 Farben von Le Corbusier (Codes, Hex und Testwerte in der Systemkarte DESIGN-GEMEINSAM 2ad6f87, z. B. `projekt-exlibris` → `0xC2968CAF`, Index 11), Wahl FNV-1a 32 Bit über `projekt.id` mod 12, als 3-px-Kante an Zeile oder Pfad, immer mit dem Namen daneben, nie als Zustandsfarbe (Signalregeln bleiben). Dazu **sofortige Rückmeldung** nach jedem Klick (Zustand sichtbar, bevor der Server antwortet). Palette und Testwerte aus der Karte übernehmen, nicht erfinden. Nicht gebaut.
 
 ## Objektivwechsel und Kamerabewegung (Marlon, 28.10.2026; Systemkarte ENTSCHEIDUNGEN 28.10.2026)
