@@ -197,7 +197,7 @@ Konto); offen: `qr` in `clip.zuordnung` nach Migration 0029 (bis dahin `info1`);
 Resolve); HDRI aufs NAS und Pfadregel: abgestimmt (Systemkarte 7f256b7, „Pfade und HDRI“). Pfade relativ zum Drehordner
 (`<ordner_datum>_<Kurzname>`, über `dreh_id`) bzw. ohne Drehort zum Projektordner, Ablage `nas` | `platte:<Kennung>`;
 `karte.ordner_datum`/`karte.ablage` und `qr` kommen mit 0029 (baut der Plate Assistant auf Marlons Wort; erst nach
-Bestätigung von aussen schreiben). HDRI: EXR, `_ki.exr`, Vorschau und `roh/` mit ASC MHL nach `06_HDRI/<hdri_id>/`,
+Bestätigung von aussen schreiben). HDRI: EXR, `_ki.exr`, Vorschau und `roh/` mit ASC MHL nach `09_HDRI/<hdri_id>/` (vorher `06_HDRI`; 06 ist durch `06_EXPORT` belegt, Karte 10.11.2026),
 Rohdaten im Bucket erst löschen bei `projekt.kopien` geprüften Kopien, `linked` und Bericht ok; `ergebnis.jpg` und
 `vorschau.jpg` im Bucket nie löschen, `vorschau_speicher` unverändert, `gesichert: {ablage, pfad, kopien, am}` erst nach
 erfüllter Löschbedingung. Auf Ada nur ohne nDisplay (lokale Prüfung).
