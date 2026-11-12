@@ -1981,7 +1981,7 @@ fn nachtraege(
 /// Hängt die Studio-Einstellungen der Stage (`einstellung` mit `studio_take`) als Plates der Art „studio“ unter ihren
 /// Drehort; gibt es den Drehort hier nicht, unter einen eigenen Eintrag „Studio (Stage)“. So erscheinen sie im Baum, in
 /// den Take-Tabellen und beim Abgleich mit den eingelesenen Karten (über den Clipnamen).
-fn studio_einhaengen(drehs: &mut Value, studio: &Value) {
+pub(crate) fn studio_einhaengen(drehs: &mut Value, studio: &Value) {
     if !drehs.is_array() {
         *drehs = Value::Array(vec![]);
     }

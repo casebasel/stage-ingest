@@ -760,7 +760,7 @@ function Zuordnung({ trotzdem, setTrotzdem }: { trotzdem: boolean; setTrotzdem: 
       {ohne && !trotzdem && (
         <div className="zuordnung-frage" role="alert">
           <p>
-            <b>Kein Clip passt zu einem Take.</b> Hat das iPhone schon synchronisiert? Sonst kommt die Karte in den Ordner
+            <b>Kein Clip passt zu einem Take.</b> Hat das iPhone schon synchronisiert, bzw. im Studio die Stage die Takes mit Clipnamen gespeichert? Sonst kommt die Karte in den Ordner
             <span className="zahl"> {v.aufnahmetag ?? "heute"}_OHNE_DREHORT</span> und alle Clips stehen unter „Zu klären“.
           </p>
           <div className="zuordnung-knoepfe">

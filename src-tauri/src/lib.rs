@@ -2927,7 +2927,12 @@ async fn einlesen_vorschau(
     let p = Arc::clone(&plate);
     im_hintergrund(move || {
         let karte = ingest_kern::laufwerke::clips_auf_karte(&quelle);
-        let drehs = p.projekt_drehs(&zugang, &projekt)?;
+        let mut drehs = p.projekt_drehs(&zugang, &projekt)?;
+        // Auch die Studio-Takes der Stage (`studio_take` mit Clipnamen von CAP), sonst passt im Studio kein Clip zu
+        // einem Take und die Karte landet in OHNE_DREHORT (Marlon, 12.11.2026, Amira-Karte A006R56E).
+        if let Ok(studio) = p.studio(&zugang, &projekt.id) {
+            projekt::studio_einhaengen(&mut drehs, &studio);
+        }
         Ok(zuordnung::vorschau(&drehs, &karte.namen, karte.erste, chrono::Utc::now()))
     })
     .await
