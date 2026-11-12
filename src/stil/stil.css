@@ -543,6 +543,11 @@ input[type="checkbox"][role="switch"]:checked::before {
   border-left: 3px solid var(--projektfarbe, transparent);
   padding-left: 6px;
 }
+/* Unbekannt ist nicht fehlt: gestrichelt, ohne warn. */
+.zelle-unbekannt {
+  border-bottom: 1px dashed var(--linie-stark);
+  padding: 0 4px;
+}
 .hinweiszeile .verweis.leise {
   margin-left: 10px;
 }

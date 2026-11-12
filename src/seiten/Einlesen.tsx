@@ -268,11 +268,11 @@ function zaehlung(geraete: (ZielGeraet | undefined | null)[]) {
     if (vorher !== undefined)
       return g.kennung.sicher
         ? { ton: "warn", text: `Gleiches Laufwerk wie Ziel ${vorher + 1}` }
-        : { ton: "warn", text: "Laufwerk unbekannt: zählt mit anderen unbekannten als eine" };
+        : { ton: "leise", text: "Laufwerk unbekannt: zählt mit anderen unbekannten als eine" };
     erste.set(schluessel, i);
     return g.kennung.sicher
       ? { ton: "ok", text: "Unabhängige Kopie" }
-      : { ton: "warn", text: "Laufwerk unbekannt: zählt höchstens einmal" };
+      : { ton: "leise", text: "Laufwerk unbekannt: zählt höchstens einmal" };
   });
   return { zeilen, unabhaengig: erste.size };
 }
@@ -614,7 +614,11 @@ function Auftrag({ pflicht, zurEinrichtung, laufwerke }: { pflicht: boolean; zur
           <h2 id="t-dreh">Drehort</h2>
           {(lauf.paDreh || lauf.automatisch) && <Status ton="ok">Takes aus dem Plate Assistant</Status>}
           {lauf.soll && !lauf.soll.fehler && <Status ton="ok">{lauf.soll.liste.length} Takes von der Stage</Status>}
-          {lauf.soll?.fehler && <Status ton="warn">Soll-Liste nicht geladen</Status>}
+          {lauf.soll?.fehler && (
+            <Status ton="leise" title={lauf.soll.fehler}>
+              Soll-Liste unbekannt (Stage nicht erreichbar)
+            </Status>
+          )}
           {kamera && (
             <span className="leise" title="Abweichende Clips erscheinen nur als Hinweis; die Freigabe hängt nie daran.">
               Kamera laut Projekt: <span className="zahl">{kamera}</span>

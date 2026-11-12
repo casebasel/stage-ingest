@@ -641,13 +641,23 @@ export function SpaltenZellen({ spalten, t, technik }: { spalten: Spalte[]; t: T
     <>
       {spalten.map((s) => {
         const w = s.wert(t, x);
+        // Unbekannt ist nicht fehlt (DESIGN-GEMEINSAM): Werte aus der Clipdatei sind ohne erreichbare Datei und ohne
+        // `clip.technik` unbekannt, nicht leer; gestrichelt mit Hinweis.
+        const unbekannt = w === undefined && !!s.technik && !t.datei && x === undefined;
         return (
           <td
             key={s.id}
             className={s.rechts ? "rechts zahl" : s.technik || s.mono ? "zahl ohne-umbruch" : undefined}
             data-kopie={s.kopie?.(t, x)}
           >
-            {w ?? <span className="leise">–</span>}
+            {w ??
+              (unbekannt ? (
+                <span className="leise zelle-unbekannt" title="Clipdatei hier nicht erreichbar: Wert unbekannt">
+                  –
+                </span>
+              ) : (
+                <span className="leise">–</span>
+              ))}
           </td>
         );
       })}
