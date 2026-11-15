@@ -57,8 +57,11 @@
 }
 
 /* Radien, Übergang und Tastenschatten gelten überall (seit 0.1.76 lagen sie versehentlich nur im Windows-Block;
-   Vergleichsboard 15.11.2026). */
+   Vergleichsboard 15.11.2026). Namen und Werte wie im Design System „Filmstudio Stage“ (tokens.json). */
 :root {
+  --auf-rot: oklch(0.990 0 0);
+  --deckkraft-aus: 0.45;
+  --rund-band: 8px;
   --rund: 6px;
   --rund-klein: 4px;
   --ease: cubic-bezier(0.25, 1, 0.5, 1);
@@ -84,7 +87,7 @@
   --akzent: oklch(0.500 0.160 255);
   --akzent-hover: oklch(0.450 0.160 255);
   --akzent-text: oklch(0.450 0.160 255);
-  --auf-akzent: oklch(1 0 0);
+  --auf-akzent: oklch(0.990 0 0);
   --auswahl: oklch(0.870 0.055 252);
   --auswahl-leise: oklch(0.925 0.030 252);
 
@@ -248,7 +251,7 @@ code {
   background: var(--linie);
 }
 .knopf:disabled {
-  opacity: 0.45;
+  opacity: var(--deckkraft-aus);
   box-shadow: none;
 }
 .knopf[aria-pressed="true"] {
@@ -271,7 +274,7 @@ code {
 .knopf-gefahr {
   background: var(--rot-flaeche);
   border-color: var(--rot-flaeche);
-  color: oklch(0.99 0 0);
+  color: var(--auf-rot);
   font-weight: 600;
 }
 .knopf-gefahr:hover:not(:disabled) {
@@ -1048,7 +1051,7 @@ input[type="checkbox"][role="switch"]:checked::before {
   gap: 18px;
   padding: 20px 22px;
   border: 1px solid var(--linie);
-  border-radius: 8px;
+  border-radius: var(--rund-band);
 }
 .urteil-ok {
   background: var(--ok-grund);

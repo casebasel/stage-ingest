@@ -317,3 +317,5 @@ Erkannte Karte wird angeboten, nie selbst gewählt: 6 px, Rand Akzent, Grund `au
 - **Don't** Schatten ausser dem Knopf-Kontaktschatten; keine schwebenden Karten, keine Verläufe.
 - **Don't** Versal-Überschriften oder Kicker über Blocktiteln; Gruppenbezeichnungen stehen in Satzschreibung.
 - **Don't** Unicode-Zeichen als Symbole (✓, ✗, →); Symbole kommen aus Lucide.
+
+**Design System „Filmstudio Stage“ (Marlon, 15.11.2026):** https://claude.ai/artifact/DLVnnCHU46neKXpxK6adYK gilt für alle Stage-Apps; vor UI-Arbeit dessen `project/README.md` und `project/tokens.json` lesen (Artifact-Tool, `read` mit `path`). Gemeinsame Regeln entstehen nur in `stage-system/DESIGN-GEMEINSAM.md`; hier stehen nur die Abweichungen des Ingest (Urteilsband, Windows-Schrift). Tokens in `src/stil/stil.css` sind wertgleich mit `tokens.json` (geprüft 15.11.2026, 47 Farben).

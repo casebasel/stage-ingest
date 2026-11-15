@@ -12,6 +12,8 @@ Sprache: Deutsch. Stil: direkt, klare Empfehlungen, keine Floskeln.
 | `src/` | Oberfläche, Seiten Einlesen · Projekt · Prüfen · Einrichtung (`src/seiten/`). Gestaltung: Kategorie-Standard wie Silverstack / ShotPut Pro / DaVinci Resolve (`PRODUCT.md`, `DESIGN.md`), Farben **Nacht** und **Tag** in `src/stil/stil.css` (Kontraste nach `PRODUCT.md`); Schalter oben rechts und in der Einrichtung, Standard folgt dem System. Vorschau im Browser mit Beispieldaten: `src/vorschau.ts` |
 | `docs/` | Konzept, HDRI-Briefing, Lesesicht Plate Assistant, Quellen aus der Stage, Recherche Kopieren/MHL |
 
+**Design:** Das Design System „Filmstudio Stage“ (https://claude.ai/artifact/DLVnnCHU46neKXpxK6adYK, `project/README.md` und `project/tokens.json`, mit dem Artifact-Tool lesen) gilt für alle Stage-Apps; vor jeder UI-Arbeit lesen. Gemeinsame Regeln nur über `stage-system/DESIGN-GEMEINSAM.md`, nie im Artefakt ändern; Abweichungen des Ingest in `DESIGN.md`.
+
 ## 🔴 Öffentliches Repo
 
 Keine Schlüssel, Token, Passwörter, Studio-IPs, Hostnamen oder internen Pfade in Code, Doku oder Commits. Alles Ortsabhängige kommt aus einer lokalen Einstellung pro Rechner (nicht eingecheckt). Vor jedem Push danach suchen.
