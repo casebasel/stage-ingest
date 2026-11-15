@@ -20,7 +20,7 @@
   --text: oklch(0.940 0.003 255);
   --text-2: oklch(0.820 0.006 255);
   --text-3: oklch(0.745 0.008 255);
-  --text-aus: oklch(0.510 0.008 255);
+  --text-aus: oklch(0.560 0.008 255);
 
   /* Hauptaktion und Auswahl: nachts Bernstein, tags Blau (gemeinsames Design, Marlon 07.10.2026) */
   --akzent: oklch(0.720 0.140 65);
@@ -54,6 +54,11 @@
   --mono: "Cascadia Mono", Consolas, "Segoe UI Variable Text", monospace;
   --tracking-eng: 0;
   --tracking-urteil: -0.005em;
+}
+
+/* Radien, Übergang und Tastenschatten gelten überall (seit 0.1.76 lagen sie versehentlich nur im Windows-Block;
+   Vergleichsboard 15.11.2026). */
+:root {
   --rund: 6px;
   --rund-klein: 4px;
   --ease: cubic-bezier(0.25, 1, 0.5, 1);
@@ -69,12 +74,12 @@
   --feld: oklch(1 0 0);
   --hover: oklch(0.915 0.006 255);
   --linie: oklch(0.820 0.006 255);
-  --linie-stark: oklch(0.600 0.010 255);
+  --linie-stark: oklch(0.570 0.010 255);
 
   --text: oklch(0.190 0.010 255);
   --text-2: oklch(0.320 0.010 255);
   --text-3: oklch(0.420 0.010 255);
-  --text-aus: oklch(0.620 0.008 255);
+  --text-aus: oklch(0.560 0.008 255);
 
   --akzent: oklch(0.500 0.160 255);
   --akzent-hover: oklch(0.450 0.160 255);
